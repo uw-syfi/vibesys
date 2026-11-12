@@ -1054,6 +1054,10 @@ for six. With `idle_release_seconds`, an `apptainer` placement reuses its alloca
   when none can be claimed. A new one is named `vibesys-apptainer-pool-<container>`, asks for the
   whole node as a benchmark sample does, and has `allocation_limit_seconds` (or the run's limit and
   10 minutes, if longer). The job's log says when an allocation waits in the queue, as before.
+  Once the new one runs, another container of the placement may find it in the listing and claim it
+  before the container that asked for it does. It is then that container's, not cancelled, and the
+  one that asked for it looks again, claiming a running one or asking for another, named
+  `vibesys-apptainer-pool-<container>+2` (`+3`, ...), so that cancelling it never ends the first.
 - No allocation asks for more than `[slurm] max_time_seconds`, which a site that caps a job's time
   (a QOS that refuses anything over 12 hours, say) sets to that cap: `allocation_limit_seconds`
   defaults to it and may not exceed it, and a run whose limit and 10 minutes do not fit under it

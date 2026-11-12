@@ -696,15 +696,34 @@ func (e *Engine) fits(spec docker.ContainerSpec) error {
 }
 
 // claim claims a reusable allocation for the box, of those that run with the time it needs left,
-// or asks for a new one, waits for it, and claims it. A new one that fails to run or to be claimed
-// is cancelled.
+// or asks for a new one, waits for it, and claims it. A new one that fails to run, or whose claim
+// fails, is cancelled. A new one that another container of the placement claimed first (it found
+// it running in the listing) is that container's: it is left to it, ended by its idle release
+// later, and the box looks again, for a running one to claim or a new one to ask for. Each new one
+// the box asks for has a name of its own (PoolPrefix, the box's name, and from the second on "+"
+// and its count), since an allocation is cancelled by its name: a cancel of the box's next one
+// never ends the one another container holds.
 func (e *Engine) claim(ctx context.Context, b *box, log io.Writer) error {
+	for n := 1; ; n++ {
+		taken, err := e.claimOnce(ctx, b, n, log)
+		if !taken {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+}
+
+// claimOnce is claim's n-th look. It reports taken when the allocation it asked for was claimed
+// by another container first, and the box has none.
+func (e *Engine) claimOnce(ctx context.Context, b *box, n int, log io.Writer) (taken bool, _ error) {
 	need := e.need(b.spec)
 	// The reusable allocations are the placement's, claimed by any of its runs.
 	scope := e.placementScope(b.labels[docker.LabelScope])
 	jobs, err := e.cfg.Cluster.Jobs(ctx, scope)
 	if err != nil {
-		return err
+		return false, err
 	}
 	jobs = slices.DeleteFunc(jobs, func(j Job) bool {
 		return !strings.HasPrefix(j.Name, PoolPrefix) || j.Comment != scope || j.Phase != Running || j.Left < max(need, StopMargin)
@@ -724,7 +743,7 @@ func (e *Engine) claim(ctx context.Context, b *box, log io.Writer) error {
 		}
 		if err != nil {
 			if ctx.Err() != nil {
-				return ctx.Err()
+				return false, ctx.Err()
 			}
 			_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s could not be claimed, so it is passed over: %v\n", j.ID, err)
 			continue
@@ -732,18 +751,21 @@ func (e *Engine) claim(ctx context.Context, b *box, log io.Writer) error {
 		e.mu.Lock()
 		b.job, b.pool, b.hold = j.ID, j.Name, hold
 		e.mu.Unlock()
-		return e.read(ctx, node)
+		return false, e.read(ctx, node)
 	}
 	allocation := e.cfg.AllocationLimit
 	if allocation <= 0 {
 		allocation = e.capped(NoLimit)
 	}
 	name := PoolPrefix + b.name
+	if n > 1 {
+		name += "+" + strconv.Itoa(n)
+	}
 	job, err := e.cfg.Cluster.Submit(ctx, Allocation{
 		Name: name, Comment: scope, Limit: max(allocation, need), Options: e.cfg.Sizing.Options(true), Idle: e.cfg.Idle,
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 	e.mu.Lock()
 	b.job, b.pool = job, name
@@ -753,18 +775,28 @@ func (e *Engine) claim(ctx context.Context, b *box, log io.Writer) error {
 	var hold io.Closer
 	if err == nil {
 		hold, err = node.Claim(ctx)
+		if errors.Is(err, ErrTaken) {
+			// Another container of the placement found it running and claimed it first: it is that
+			// container's now, and Remove of this box must not cancel it.
+			e.mu.Lock()
+			b.job, b.pool = "", ""
+			e.mu.Unlock()
+			_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s was claimed by another container first (or is ending), "+
+				"so it is left to that one and this one looks again\n", job)
+			return true, nil
+		}
 	}
 	if err != nil {
 		// No container uses it: what Remove would cancel, cancelled now.
 		cancel, stop := clock.Deadline(context.WithoutCancel(ctx), e.cfg.Timers, CallTimeout)
 		_ = e.cfg.Cluster.Cancel(cancel, name)
 		stop()
-		return err
+		return false, err
 	}
 	e.mu.Lock()
 	b.hold = hold
 	e.mu.Unlock()
-	return e.read(ctx, node)
+	return false, e.read(ctx, node)
 }
 
 // await waits for the job to run, pausing between reads of its state, up to QueueTimeout. When
