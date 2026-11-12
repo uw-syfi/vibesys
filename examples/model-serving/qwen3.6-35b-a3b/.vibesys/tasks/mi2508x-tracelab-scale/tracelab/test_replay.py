@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import replay  # noqa: E402
+import replay  # noqa: E402  # lint-waiver: LW-731552 [E402]; replay.py is a standalone script beside this test, importable only once its directory is on sys.path.
 
 
 def summary(**window: object) -> dict:
@@ -807,7 +807,7 @@ class SweepArgs(unittest.TestCase):
         names = ["run_step", "_tokenizer", "_check_trace", "write_corpus"]
         saved = {n: getattr(replay, n) for n in names}
         saved_sub = {n: getattr(replay.subprocess, n) for n in ("run", "Popen", "check_output")}
-        import socket  # noqa: E401
+        import socket
         import urllib.request
 
         saved_net = (socket.socket.connect, urllib.request.urlopen)
