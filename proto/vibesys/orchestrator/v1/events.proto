@@ -118,7 +118,7 @@ message AgentSpec {
 message StartRun {
   string repository = 1 [(buf.validate.field).string.min_len = 1];
   string task = 2 [(buf.validate.field).string.min_len = 1];
-  uint32 fanout_limit = 3;
+  uint32 fanout_limit = 3 [(buf.validate.field).uint32.gte = 1];
   reserved 4;
   reserved "deadline";
   // The lead has nothing to inherit from, so its harness is required.
@@ -227,7 +227,7 @@ message CompleteSetup {
     gt: 0
   }];
   google.protobuf.Duration max_time = 4 [(buf.validate.field).duration.gt = {seconds: 0}];
-  uint32 fanout_limit = 5;
+  uint32 fanout_limit = 5 [(buf.validate.field).uint32.gte = 1];
   AgentSpec lead = 6 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
