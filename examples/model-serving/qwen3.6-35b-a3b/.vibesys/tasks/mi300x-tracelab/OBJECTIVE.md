@@ -4,18 +4,14 @@ Build an OpenAI-compatible serving system for `Qwen/Qwen3.6-35B-A3B` on **1 AMD
 MI300X GPU**. The candidate lives in the project root, outside trusted
 `.vibesys/` inputs.
 
-The project root holds a baseline engine, `engine/`, launched from the project
-root as `python -m engine.server --host <host> --port <port>`. It runs the BF16
+The project root holds a baseline engine, `engine/`, started by the project's
+documented service command. It runs the BF16
 checkpoint with Transformers, sharded over every visible GPU, prefilling one
 request at a time and decoding running requests as one batch, with a snapshot
 prefix cache. It meets the service contract below but is
 unoptimized and is not a validated performance baseline. Making the ROCm serving
 path fast, by changing or replacing any part of it, is the task. Keep that
-launch command working: the project README gives it as the service command.
-
-Keep BF16 weights on the single allocated GPU. Optimize fused expert kernels,
-continuous batching, prefix caching and recurrent-state management without
-cross-GPU communication.
+service command working.
 
 ## Model and hardware contract
 
@@ -34,10 +30,6 @@ they do in the baseline; the candidate must own its serving path rather than
 proxy an existing server.
 Do not use extra GPUs, another machine, or a hosted model. Host-side cache
 offload is allowed within the allocation, with its costs inside measurement.
-The ROCm 6.4 build of torch 2.9.1 cannot run `torch._grouped_mm` ("grouped gemm is
-not supported on ROCM"), so on ROCm the baseline loads its own experts
-implementation built from ordinary matmuls (`engine/experts.py`); a grouped
-expert GEMM needs a kernel of your own or another library.
 
 ## Correctness and service interface
 
@@ -84,4 +76,4 @@ kernels; it is a separate frontier from the 15-minute AgentX task.
 Optimize output tokens/s (maximize), TTFT p50/p90 and TPOT p50/p90 in milliseconds
 (minimize), with 3% relative noise tolerance. A failed round, missing metric,
 wrong token count or incomplete replay fails measurement. No dry-run result is
-accepted. See [the TraceLab adapter](tracelab/README.md).
+accepted.

@@ -4,31 +4,20 @@ Build an OpenAI-compatible serving system for `Qwen/Qwen3.6-35B-A3B` on **4 AMD
 MI210 GPUs**. The candidate lives in the project root, outside trusted
 `.vibesys/` inputs.
 
-The project root holds a baseline engine, `engine/`, launched from the project
-root as `python -m engine.server --host <host> --port <port>`. It runs the BF16
+The project root holds a baseline engine, `engine/`, started by the project's
+documented service command. It runs the BF16
 checkpoint with Transformers, sharded over every visible GPU, prefilling one
 request at a time and decoding running requests as one batch, with a snapshot
 prefix cache. It meets the service contract below but is
 unoptimized and is not a validated performance baseline. Making the ROCm serving
 path fast, by changing or replacing any part of it, is the task. Keep that
-launch command working: the project README gives it as the service command.
+service command working.
 
-The server runs in a container of the image that
-[`Dockerfile.rocm`](../../../Dockerfile.rocm) builds from the candidate's commit
-(its context is the project root, filtered by the root `.dockerignore`), with
-the four MI210 GPUs, as `python -m engine.server --host 127.0.0.1 --port <port>`
-from the checkout's root; it must answer `GET /health` within 30 minutes.
-That image and its `.dockerignore` are part of the candidate, as `engine/` is;
-the seed holds the README's environment (Python 3.12, `torch==2.9.1+rocm6.4`,
-`requirements-agentx.txt`). Weights are never baked into it: the pinned
-checkpoint is read from the operator's Hugging Face cache, mounted read-only at
-`/vibesys/mounts/hf` (`HF_HOME`, with `HF_HUB_OFFLINE=1`). The image's own files
-are read-only at run time; write only under `/tmp`. The checker and the AgentX
-replay run in a separate task image, without GPUs, and reach the server over HTTP.
-
-Partition BF16 weights across the four GPUs. Explore tensor, expert or pipeline
-parallelism, or two replicas of two GPUs each. Include collective and dispatch
-costs, and preserve session affinity for replicas.
+The server is built from the candidate's commit, started by the documented
+service command on the four MI210 GPUs, and must answer `GET /health` within 30 minutes.
+Weights come only from the operator's read-only model cache, offline, and are
+never baked into the image. The checker and the AgentX replay run separately,
+without GPUs, and reach the server over HTTP.
 
 ## Model and hardware contract
 
@@ -47,11 +36,6 @@ they do in the baseline; the candidate must own its serving path rather than
 proxy an existing server.
 Do not use extra GPUs, another machine, or a hosted model. Host-side cache
 offload is allowed within the allocation, with its costs inside measurement.
-See [the project README](../../../README.md) for AMD environment setup. The
-ROCm 6.4 build of torch 2.9.1 cannot run `torch._grouped_mm` ("grouped gemm is
-not supported on ROCM"), so on ROCm the baseline loads its own experts
-implementation built from ordinary matmuls (`engine/experts.py`); a grouped
-expert GEMM needs a kernel of your own or another library.
 
 ## Correctness and service interface
 

@@ -8,17 +8,13 @@ so the allocation is 8 devices and 512 GB of aggregate HBM, never one 128 GB
 device per card. The candidate lives in the project root, outside trusted
 `.vibesys/` inputs.
 
-The project root holds a baseline engine, `engine/`, launched from the project
-root as `python -m engine.server --host <host> --port <port>`. It runs the BF16
+The project root holds a baseline engine, `engine/`, started by the project's
+documented service command. It runs the BF16
 checkpoint with Transformers, sharded over every visible GPU, prefilling one
 request at a time and decoding running requests as one batch, with a snapshot
 prefix cache. It meets the service contract below but is unoptimized and is not
 a validated performance baseline. Making the ROCm serving path fast, by changing
-or replacing any part of it, is the task. Keep that launch command working: the
-project README gives it as the service command.
-
-Partition the BF16 weights across the eight GCDs in any layout; if the server
-runs replicas, keep each session's rounds on one replica.
+or replacing any part of it, is the task. Keep that service command working.
 
 ## Model and hardware contract
 
@@ -53,11 +49,10 @@ probes, **not numerical parity or proof of checkpoint identity**. Correct hybrid
 state and routing remain requirements; a passing behavioral probe does not
 authorize altered model execution.
 
-The server runs on the node's eight GCDs, reads the pinned checkpoint from the
-operator's read-only Hugging Face cache offline, listens on `127.0.0.1`, keeps
-the full 262,144-token context, and answers `GET /health` with a 2xx status once
-it can serve requests, within 30 minutes of starting. The image it runs in and
-everything it builds from are candidate code. The checker and the replay reach
+The server runs on the node's eight GCDs, reads the pinned checkpoint only from
+the operator's read-only model cache offline (weights are never baked into the
+image), keeps the full 262,144-token context, and answers `GET /health` with a
+2xx status once it can serve requests, within 30 minutes of starting. The checker and the replay reach
 the server only over HTTP.
 
 ## TraceLab concurrency-sweep workload and objectives
@@ -69,8 +64,7 @@ sampled from the public TraceLab release, in Request Factory's
 run, so each one's first prompt is cold: the median first prompt is about 46k
 tokens, and contexts reach 261k tokens. Each later round extends its session's
 growing prefix, waits for its recorded tool time, and has a recorded output
-length. The adapter verifies the trace's SHA256. See
-[the TraceLab adapter](tracelab/README.md) for how the trace was built.
+length. The adapter verifies the trace's SHA256.
 
 The adapter measures a ladder of steps at 4, 8, 16, 32, 64, 128 and 256 concurrent
 sessions. Each step is a fixed-time window: 60 seconds of warmup, then 180
@@ -120,8 +114,7 @@ measurement fails. Results are also evaluated on held-out TraceLab traffic, draw
 Any failed request in or before a window, any output of the wrong length, a
 missing or non-finite metric, or a runner failure fails the measurement. No
 dry-run result is accepted. Promotion is decided on these five objectives, judged
-on their Pareto frontier with a per-objective relative noise tolerance (see
-`objectives.toml`). The following are reported for reference and are **not**
+on their Pareto frontier with a per-objective relative noise tolerance. The following are reported for reference and are **not**
 scored: TTFT and TPOT p90 at 4 and 16, the peak concurrency, `latency_cap_met`,
 and the throughput of every step that ran (`tok_s_at_c<N>`). Tail percentiles are
 not scored at this tier.
