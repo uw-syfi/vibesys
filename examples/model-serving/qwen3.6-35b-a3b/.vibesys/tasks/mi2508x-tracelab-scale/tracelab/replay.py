@@ -517,7 +517,9 @@ def sweep(args: argparse.Namespace, plan: argparse.Namespace, temporary: Path) -
                     f"{plan.deadline:.0f} s deadline ({elapsed:.0f} s used before c={concurrency})"
                 )
             if concurrency <= fixed_top:
-                sys.stderr.write(f"skipping concurrency {concurrency} to leave time for the fixed levels\n")
+                sys.stderr.write(
+                    f"skipping concurrency {concurrency} to leave time for the fixed levels\n"
+                )
                 skipped.add(concurrency)
                 continue
             sys.stderr.write(
