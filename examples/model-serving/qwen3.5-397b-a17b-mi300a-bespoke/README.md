@@ -18,8 +18,8 @@ contract.
   schema 0.2, a task of two images). The candidate's server runs in the image
   `Dockerfile.rocm` builds; the task image runs `benchmark/run.py` (a C16 then C96 load
   ramp, benchmark version 6) and `accuracy_checker/checker.py` (engine scan, 13 probes,
-  teacher-forced top-1 through `/v1/score` and greedy replies against the campaign's
-  reference) against it. Objectives `peak_goodput_tok_s` (max) and
+  teacher-forced top-1 through `/v1/score` and greedy replies against a transformers
+  reference that `accuracy_checker/make_reference.py` generates) against it. Objectives `peak_goodput_tok_s` (max) and
   `p95_ttft_turn2plus_ms_at_ref` (min). See its `OBJECTIVE.md`. Run it with this directory
   as the project's root and a placement that provides the four APUs and the checkpoint as
   the mount `qwen3-5-397b-a17b-mxfp4`:

@@ -14,7 +14,7 @@ Exit code 0 iff every gate passes. In order:
    recalls (a fact planted in turn 1 recalled in turn 3) and 3 arithmetic
    prompts.
 3. The numerics gate the optimization campaign accepted every change by,
-   against the campaign's reference (``reference/``, see its README):
+   against the transformers reference (``reference/``, see its README):
    - teacher-forced top-1: each of the 34 reference prompts plus its 32-token
      reference continuation goes through ``POST /v1/score``; at least
      ``TEACHER_TOP1_MIN_MATCHES`` of the ``TEACHER_TOP1_TOTAL`` positions must
@@ -326,7 +326,7 @@ def _greedy_prompts(directory: Path, messages: dict[str, list]) -> tuple[GreedyP
 
 
 def load_reference(directory: Path = REFERENCE_DIR) -> Reference:
-    """Read and validate the campaign's reference; raise ``ValueError`` naming the file."""
+    """Read and validate the reference; raise ``ValueError`` naming the file."""
     continuations_path = directory / "campaign_continuations.json"
     messages = {
         str(row.get("id")): row.get("messages")

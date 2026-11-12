@@ -111,8 +111,8 @@ The check (`accuracy_checker/checker.py`, thinking disabled) fails the candidate
 2. 13 behavioral probes: 6 held-out multi-turn sessions replayed greedily (non-empty
    replies, sane finish reasons, `usage.prompt_tokens` growing with the history), 4
    recalls of a fact planted in turn 1, and 3 arithmetic prompts.
-3. The numerics gate the optimization campaign accepted every change by, against the
-   campaign's reference build (`reference/`):
+3. The numerics gate the optimization campaign accepted every change by, with its
+   thresholds, against a transformers reference (`reference/`, see its README):
    - teacher-forced top-1: each of 34 reference prompts with its 32-token reference
      continuation goes through `/v1/score`; at least 1,074 of the 1,088 positions must
      have the reference's top-1 token as your top-1 token, and every position must be
