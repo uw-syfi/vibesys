@@ -833,8 +833,8 @@ Failures are the convention's domain errors with the kinds `deploy`, `build`, `m
 The candidate image runs an OpenAI-compatible server; vibesys-cli starts it,
 waits for its ready path and sets `VIBESYS_SERVICE_URL` in the task
 container to its base URL (scheme, host and port, no path) for the
-`[accuracy]`, `[benchmark]` and `[profile]` commands of a `version = "0.2"`
-task. The task container has no GPU; nothing the candidate installs reaches
+`[accuracy]` and `[benchmark]` commands of a `version = "0.2"` task, and for
+a command job in the task image (`submit command --image harness`). The task container has no GPU; nothing the candidate installs reaches
 it.
 
 - `endpoint()` reads `VIBESYS_SERVICE_URL`, strips a trailing slash and

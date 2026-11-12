@@ -60,7 +60,7 @@ func TestStatusListsTheLeasesAndTheOtherDaemons(t *testing.T) {
 	}
 	cc := core.CallContext{Scope: scope, Run: "run-1", Harness: "h", Agent: "agent-1"}
 	out, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: cc, Spec: core.JobSpec{
-		Commit: commit, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Argv: []string{"mark", "on", ";", "hold", "g", ";", "exit", "0"}},
+		Commit: commit, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"mark", "on", ";", "hold", "g", ";", "exit", "0"}},
 	}})
 	if err != nil {
 		t.Fatal(err)

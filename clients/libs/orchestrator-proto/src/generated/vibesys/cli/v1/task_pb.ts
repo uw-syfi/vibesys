@@ -49,8 +49,8 @@ export const TaskSchemaSchema: GenMessage<TaskSchema> = /*@__PURE__*/
  * container reaches the candidate only over HTTP, at VIBESYS_SERVICE_URL.
  *
  * It has every key of the single-image format 0.1, with the same meaning, except [evaluator] and the
- * entrypoint and args of a command, which it refuses by name; and it adds an optional [candidate] and
- * gives [profile] a command. The sections 0.1 accepts without reading them are accepted the same way here.
+ * entrypoint and args of a command, which it refuses by name; and it adds an optional [candidate]. The
+ * sections 0.1 accepts without reading them are accepted the same way here, and so is [profile].
  *
  * @generated from message vibesys.cli.v1.TaskManifestV02
  */
@@ -102,8 +102,9 @@ export type TaskManifestV02 = Message<"vibesys.cli.v1.TaskManifestV02"> & {
   benchmark?: TaskBenchmarkV02 | undefined;
 
   /**
-   * The standard profile load: run in the task container against the candidate's server, which a
-   * profile job starts under its wrapper. It is never scored.
+   * Retired: once the standard profile load of the profile job, which a command job in the task's
+   * image replaced (submit command --image harness --wrap). Accepted, held to its shape, and not read,
+   * so a manifest written for it still loads.
    *
    * @generated from field: vibesys.cli.v1.TaskCommandV02 profile = 7;
    */

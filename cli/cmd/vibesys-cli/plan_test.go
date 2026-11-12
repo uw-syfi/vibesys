@@ -27,7 +27,7 @@ func (c *cli) planOK(sub string, args ...string) result {
 // taskWithAJob gives a task its store, which only a submission makes, by running one job to its end.
 func (c *cli) taskWithAJob(task string) {
 	c.t.Helper()
-	r := c.run("submit", "command", "HEAD", "--env", "host", "--task", task, "--", "exit", "0")
+	r := c.run("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--task", task, "--", "exit", "0")
 	if r.code != exitOK {
 		c.t.Fatalf("submit: exit %d: %s", r.code, r.stderr)
 	}
@@ -252,7 +252,7 @@ func TestSubmitPlanLinksTheJobToThePlan(t *testing.T) {
 	c := newCLI(t)
 	c.taskWithAJob("kv")
 	c.planOK("create", "--title", "t")
-	r := c.run(withTask("submit", "command", "HEAD", "--env", "host", "--plan", "1", "--", "print", "x", ";", "exit", "0")...)
+	r := c.run(withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--plan", "1", "--", "print", "x", ";", "exit", "0")...)
 	if r.code != exitOK {
 		t.Fatalf("submit --plan = %+v", r)
 	}
@@ -281,7 +281,7 @@ func TestSubmitPlanLinksTheJobToThePlan(t *testing.T) {
 		t.Fatalf("view --json jobs = %+v", jobs)
 	}
 
-	r = c.run(withTask("submit", "command", "HEAD", "--env", "host", "--plan", "7", "--", "exit", "0")...)
+	r = c.run(withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--plan", "7", "--", "exit", "0")...)
 	if r.code != exitInvalidInput || !strings.Contains(r.stderr, "plan 7") || !strings.Contains(r.stderr, "--plan") {
 		t.Fatalf("submit --plan of an unknown plan = %+v", r)
 	}

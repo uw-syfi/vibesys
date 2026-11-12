@@ -250,6 +250,10 @@ func (s *Supervisor) executeCommand(spec core.JobSpec) core.Attempt {
 	}
 	defer remove()
 	x := core.Execution{Checkout: checkout, Argv: command.Argv, Service: command.Service, Timeout: command.Timeout}
+	if spec.Environment == core.EnvironmentDocker {
+		// A host command runs on this machine, which needs no saying.
+		_, _ = fmt.Fprintf(writer{s}, "[command] image: %s\n", imageLine(command))
+	}
 	if c := command.Candidate; c != nil {
 		// A job of a task of two images: its candidate's image first, built from the job's commit.
 		img, err := env.Candidate(s.ctx, c.Build, writer{s})
@@ -258,8 +262,9 @@ func (s *Supervisor) executeCommand(spec core.JobSpec) core.Attempt {
 		}
 		x.Candidate = &core.CandidateRun{Image: img.ID}
 		if c.Serve != nil {
-			// A profile: the task's load in its image, against the server under the wrapper. Both
-			// are the task's commands, which name the checkout's root.
+			// A command in the task's image, against the candidate's server under the wrapper, as the
+			// check and the benchmark run: the server's command, and the command beside it, may name
+			// the checkout's root.
 			serve := *c.Serve
 			serve.Argv = core.ResolveProjectRoot(serve.Argv, checkout.Dir)
 			x.Candidate.Serve = &serve
@@ -274,6 +279,17 @@ func (s *Supervisor) executeCommand(spec core.JobSpec) core.Attempt {
 		_, _ = fmt.Fprintf(writer{s}, "[command] artifacts: %s\n", x.Artifacts)
 	}
 	return env.Run(s.ctx, x, writer{s})
+}
+
+// imageLine says where a command job's command runs, for the head of its output.
+func imageLine(c core.CommandSettings) string {
+	switch {
+	case c.RanIn() == core.ImageCandidate:
+		return "candidate (the image built from the commit's [candidate] dockerfile)"
+	case c.Candidate != nil && c.Candidate.Serve != nil:
+		return "harness (the task's image, beside the candidate's server)"
+	}
+	return "harness (where the task's check and benchmark run)"
 }
 
 // executePlan drives a check or a measure job through its plan and says how it ended. The plan is

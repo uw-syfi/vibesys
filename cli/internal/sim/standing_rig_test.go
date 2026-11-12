@@ -250,7 +250,7 @@ func (r *standingRig) jobIn(a *app.App, into string, argv ...string) core.Job {
 	r.t.Helper()
 	out, err := a.Submit(r.ctx(), app.SubmitRequest{Context: standingCall, Spec: core.JobSpec{
 		Commit: standingCommit, Environment: core.EnvironmentDocker, Placement: clusterPlacement, Allocation: into,
-		Settings: core.CommandSettings{Argv: argv, Timeout: 5 * time.Minute},
+		Settings: core.CommandSettings{Image: core.ImageHarness, Argv: argv, Timeout: 5 * time.Minute},
 	}})
 	if err != nil {
 		r.t.Fatalf("Submit into %q: %v", into, err)

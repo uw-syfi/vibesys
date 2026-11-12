@@ -368,7 +368,7 @@ func (e *e2e) run(args ...string) result {
 
 func (e *e2e) submit(argv ...string) string {
 	e.t.Helper()
-	r := e.run(append(withTask("submit", "command", "HEAD", "--env", "host", "--"), argv...)...)
+	r := e.run(append(withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--"), argv...)...)
 	if r.code != exitOK {
 		e.t.Fatalf("submit: exit %d: %s", r.code, r.stderr)
 	}
@@ -680,13 +680,13 @@ func TestE2EAStoreHasOneDaemonAcrossRuntimeDirectories(t *testing.T) {
 	id := e.submit("print", "A", ";", "hold", "g", ";", "print", "A2", ";", "exit", "0")
 	e.awaitOutput(id, "A\n")
 
-	r := other.run(append(withTask("submit", "command", "HEAD", "--env", "host", "--"), "exit", "0")...)
+	r := other.run(append(withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--"), "exit", "0")...)
 	if r.code == exitOK || !strings.Contains(r.stderr, "in use by process") || !strings.Contains(r.stderr, e.dir.Path()) {
 		t.Fatalf("a second daemon's submit = %+v", r)
 	}
 	e.killDaemon()
 	// Whether the kernel freed the store yet only decides which refusal this is.
-	r = other.run(append(withTask("submit", "command", "HEAD", "--env", "host", "--"), "exit", "0")...)
+	r = other.run(append(withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--"), "exit", "0")...)
 	if r.code == exitOK || !strings.Contains(r.stderr, "process") {
 		t.Fatalf("a submit elsewhere with a job running here = %+v", r)
 	}
@@ -723,7 +723,7 @@ func TestE2EADeletedInstanceLockStillLeavesTheStoreOneDaemon(t *testing.T) {
 		}
 	}
 
-	r := e.run(append(withTask("submit", "command", "HEAD", "--env", "host", "--"), "exit", "0")...)
+	r := e.run(append(withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--"), "exit", "0")...)
 	if r.code == exitOK || !strings.Contains(r.stderr, fmt.Sprintf("in use by process %d", first)) {
 		t.Fatalf("a submit to the second daemon = %+v", r)
 	}

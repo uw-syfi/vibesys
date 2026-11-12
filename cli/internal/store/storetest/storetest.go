@@ -95,7 +95,7 @@ func (e *env) measure(c int, key string, samples uint32) core.Submission {
 }
 
 func (e *env) command(c int, argv ...string) core.Submission {
-	return core.Submission{Spec: core.JobSpec{Commit: commit(c), Settings: core.CommandSettings{Argv: argv}}, At: e.now()}
+	return core.Submission{Spec: core.JobSpec{Commit: commit(c), Settings: core.CommandSettings{Image: core.ImageHarness, Argv: argv}}, At: e.now()}
 }
 
 func (e *env) note(text string) *core.Note {

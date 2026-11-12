@@ -4,6 +4,7 @@ import (
 	"buf.build/go/protovalidate"
 	"fmt"
 	"maps"
+	"slices"
 	"time"
 
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -110,7 +111,7 @@ func JobSpec(s core.JobSpec) *cliv1.JobSpec {
 	case core.CommandSettings:
 		command := &cliv1.CommandSettings{
 			Argv: append([]string(nil), settings.Argv...), Service: serviceSpec(settings.Service),
-			Profile: profileRequest(settings.Profile), Candidate: commandCandidate(settings.Candidate),
+			Candidate: commandCandidate(settings.Candidate), Image: CommandImage(settings.Image), Wrap: slices.Clone(settings.Wrap),
 		}
 		if settings.Timeout != 0 {
 			command.Timeout = durationpb.New(settings.Timeout)
@@ -166,16 +167,21 @@ func ToJobSpec(field string, s *cliv1.JobSpec) (core.JobSpec, error) {
 }
 
 func toCommandSettings(field string, c *cliv1.CommandSettings) (core.CommandSettings, error) {
-	profile, err := ToProfileRequest(field+".profile", c.GetProfile())
-	if err != nil {
-		return core.CommandSettings{}, err
+	if c.GetProfile() != nil {
+		return core.CommandSettings{}, invalid("%s.profile: the profile job is retired; run the load as a command in the task's image, with the profiler wrapping the candidate's server: submit command <commit> --image harness --wrap '<profiler>' -- <load argv>", field)
 	}
 	candidate, err := ToCommandCandidate(field+".candidate", c.GetCandidate())
 	if err != nil {
 		return core.CommandSettings{}, err
 	}
-	// A profile is submitted without a command, which the daemon takes from the task.
-	if (len(c.GetArgv()) == 0 && profile == nil) || (len(c.GetArgv()) > 0 && c.GetArgv()[0] == "") {
+	image, err := ToCommandImage(field+".image", c.GetImage())
+	if err != nil {
+		return core.CommandSettings{}, err
+	}
+	if slices.Contains(c.GetWrap(), "") {
+		return core.CommandSettings{}, invalid("%s.wrap: a word of the wrapper is empty", field)
+	}
+	if len(c.GetArgv()) == 0 || c.GetArgv()[0] == "" {
 		return core.CommandSettings{}, invalid("%s.argv: a command needs a program to run", field)
 	}
 	if svc := c.GetService(); svc != nil && (len(svc.GetArgv()) == 0 || svc.GetArgv()[0] == "") {
@@ -196,7 +202,7 @@ func toCommandSettings(field string, c *cliv1.CommandSettings) (core.CommandSett
 	}
 	return core.CommandSettings{
 		Argv: append([]string(nil), c.GetArgv()...), Service: toServiceSpec(c.GetService()), Timeout: timeout,
-		Profile: profile, Candidate: candidate,
+		Candidate: candidate, Image: image, Wrap: slices.Clone(c.GetWrap()),
 	}, nil
 }
 

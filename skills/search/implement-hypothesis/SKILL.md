@@ -46,8 +46,9 @@ set; export it as the absolute path of the vibesys-cli to use`.
 4. With the verdict in hand, build the next step on it, or stop.
 
 Any run that drives load, including a short sanity or tuning run, is a `vibesys-cli submit command
-<sha> -- <argv...>` job on a committed `wip` checkpoint, with `--service` and `--probe` for a
-server. Do not run benchmarks or servers in your own shell (unit tests and the in-process
+<sha> --image harness -- <argv...>` job on a committed `wip` checkpoint (`vibesys:measure` says
+which image; on a task with `[candidate]` the harness command runs beside the candidate's server,
+and on another task `--service` and `--probe` start a server). Do not run benchmarks or servers in your own shell (unit tests and the in-process
 microbenchmarks of Work step 2 are the exception), and do not queue more jobs than your
 budget allows.
 

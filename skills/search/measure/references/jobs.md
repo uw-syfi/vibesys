@@ -55,11 +55,13 @@ adapt the task to the candidate.
 ## Commands that drive a service
 
 ```
-vibesys-cli submit command <sha> --service '<server argv>' --probe '<readiness argv>' \
+vibesys-cli submit command <sha> --image harness --service '<server argv>' --probe '<readiness argv>' \
   --timeout 10m -- <client argv>
 ```
 
-The CLI starts the service, waits for the probe, runs the client, and stops the whole process
+This is for a task without `[candidate]`, or a command in the candidate's image (`--image
+candidate`). On a task with `[candidate]`, `--image harness` already runs the command beside the
+candidate's server, as the benchmark does, and refuses `--service`. The CLI starts the service, waits for the probe, runs the client, and stops the whole process
 group on every exit. Keep the service in the foreground; disable daemonizing. Output you need
 afterwards: print it and read it with `vibesys-cli logs <job>`; a file only helps where the
 environment can write it.

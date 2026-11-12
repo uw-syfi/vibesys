@@ -36,7 +36,3 @@ command = ["python", "/task/bench.py", "benchmark"]
 # Dataset preparation, ten warmup requests per lane, the 900 s window and the drain.
 timeout_seconds = 3600
 result_protocol = 2
-
-[profile]
-command = ["python", "/task/bench.py", "profile"]
-timeout_seconds = 900

@@ -70,7 +70,7 @@ func launchOf(script ...string) lifecycle.Launch {
 		Spec: core.JobSpec{
 			Commit:      core.Commit("0123456789abcdef0123456789abcdef01234567"),
 			Environment: core.EnvironmentHost,
-			Settings:    core.CommandSettings{Argv: script, Timeout: time.Hour},
+			Settings:    core.CommandSettings{Image: core.ImageHarness, Argv: script, Timeout: time.Hour},
 		},
 	}
 }
