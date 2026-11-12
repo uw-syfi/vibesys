@@ -68,6 +68,30 @@ func contract(t *testing.T, newFS func(t *testing.T) hostfs.FS, write func(t *te
 			t.Errorf("%q, %v", got, err)
 		}
 	})
+	t.Run("a directory lists its files and directories, sorted, once each", func(t *testing.T) {
+		fsys := newFS(t)
+		dir, remove, _ := fsys.MakeScratch(ctx)
+		defer remove()
+		if err := fsys.MakeDir(ctx, dir+"/trace/sub"); err != nil {
+			t.Fatal(err)
+		}
+		if err := fsys.MakeDir(ctx, dir+"/empty"); err != nil {
+			t.Fatal(err)
+		}
+		write(t, fsys, dir+"/trace/tree.txt", []byte("t"))
+		write(t, fsys, dir+"/trace/README.txt", []byte("r"))
+		write(t, fsys, dir+"/trace/sub/deep.txt", []byte("d"))
+		got, err := fsys.ListDir(dir + "/trace")
+		if err != nil || strings.Join(got, ",") != "README.txt,sub,tree.txt" {
+			t.Errorf("ListDir = %q, %v", got, err)
+		}
+		if got, err := fsys.ListDir(dir + "/empty"); err != nil || len(got) != 0 {
+			t.Errorf("an empty directory: %q, %v", got, err)
+		}
+		if _, err := fsys.ListDir(dir + "/missing"); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("a directory that is not there: %v", err)
+		}
+	})
 	t.Run("a cancelled context makes no directory", func(t *testing.T) {
 		fsys := newFS(t)
 		done, cancel := context.WithCancel(ctx)

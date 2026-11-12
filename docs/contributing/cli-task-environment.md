@@ -95,6 +95,10 @@ result_protocol = 2
 command = ["python", "/task/bench.py", "--short"]
 timeout_seconds = 900
 
+[trace]                              # optional
+command = ["python", "/task/bench.py", "trace", "--project-root", "${PROJECT_ROOT}"]
+timeout_seconds = 1200
+
 [environment]
 needs = ["gpu", "mounts"]
 ```
@@ -103,12 +107,14 @@ The schema is `TaskManifestV02` in `proto/vibesys/cli/v1/task.proto`, the only
 definition of its keys; the CLI decodes the TOML into it and refuses an
 unknown key by name. Its keys are every key of 0.1, with the same meaning,
 except `[evaluator]` and a command's `entrypoint` and `args`, which it refuses
-by name, plus an optional `[candidate]`; and `[profile]` holds a command:
+by name, plus an optional `[candidate]` and an optional `[trace]`; and
+`[profile]` holds a command:
 
 - `version`, `backends`, `metric`;
 - `[agent]` `domain` and `interface`;
-- `[build]`, `[accuracy]` (or `[check]`), `[benchmark]` (or `[measure]`) and
-  `[profile]`, each with `command` and `timeout_seconds`; the benchmark also
+- `[build]`, `[accuracy]` (or `[check]`), `[benchmark]` (or `[measure]`),
+  `[profile]` and `[trace]`, each with `command` and `timeout_seconds` (0 or
+  absent is 30 minutes); the benchmark also
   has `result_protocol`, `[benchmark.result]` (`json_argument`, `metric`) and
   `requires_accuracy`;
 - `[candidate]` `dockerfile`, `context`, `serve`, `ready`,
@@ -124,6 +130,20 @@ server's network namespace, with `VIBESYS_SERVICE_URL=http://127.0.0.1:<port>`.
 `submit profile <commit> --wrap '<prefix>'` starts the server under the prefix,
 such as a profiler's command line, and drives it with `[profile]`; it is a
 command job, never cached or scored, and its artifacts are kept with it.
+
+`submit trace <commit>` runs `[trace]` in a job of its own kind: the checkout,
+the build and the candidate's image as for a check, then the trace command once,
+as written (no `--vs-output` is appended), with no check. It is for evidence,
+such as OpenTelemetry traces of a short load, never for a score: the command
+writes text reports into `$VIBESYS_ARTIFACTS_DIR/trace/`, and exit 0 is a
+success. The result (`TraceResult`) names the command's artifacts directory,
+`<job>/NN-trace` in the repository's state directory, and the files of its
+`trace/` directory, which `show <commit>` prints. A trace is cached as a check
+pass is, by commit, task version and environment, so a second trace of the
+commit answers from the first unless it is `--no-cache`; it holds its placement
+alone, as a measure does, since it deploys and loads the system. A task of one
+image with `[service]` starts its server before the trace and runs the trace
+against it. A task without `[trace]` refuses `submit trace`, naming the section.
 
 ### A server kept for the job (schema 0.2, `[service]`)
 

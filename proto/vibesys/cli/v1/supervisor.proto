@@ -125,7 +125,7 @@ message ScoredField {
   string field = 2 [(buf.validate.field).string.min_len = 1];
 }
 
-// FlowPlan is everything a check or a measure job needs to run. Nothing in it is decided by the
+// FlowPlan is everything a check, measure or trace job needs to run. Nothing in it is decided by the
 // supervisor: the daemon applies the cache to the task when the job starts, so the plan says how
 // many samples to take and which saved check pass to link.
 message FlowPlan {
@@ -159,6 +159,8 @@ message FlowPlan {
   // samples (and, when the check shares it, its check) against, with the reset before each sample
   // that reuses it.
   PlanService service = 16;
+  // For a trace job: the task's [trace] command, run once after the build and the candidate.
+  PlanCommand trace = 17;
 }
 
 // PlanService is a job-scoped server as a plan carries it.

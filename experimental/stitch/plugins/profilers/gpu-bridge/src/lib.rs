@@ -60,6 +60,7 @@ impl Importer for GpuBridgeImporter {
                     artifact: input.path.display().to_string(),
                     record: (index + 1).to_string(),
                 },
+                span: None,
             }));
         }
         Ok(out)

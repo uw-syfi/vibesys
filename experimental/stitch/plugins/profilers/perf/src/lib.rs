@@ -293,6 +293,7 @@ pub fn capture_perf(
         }],
         source_root: None,
         source_revision: None,
+        windows: Vec::new(),
     };
     let manifest_path = request.output_dir.join("manifest.json");
     let serialized =

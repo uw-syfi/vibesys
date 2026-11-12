@@ -59,7 +59,7 @@ function servedStandings(search: SearchState | undefined): ObjectiveStanding[] {
   const outcome = oneofIs(head, 'current', {current: true, none: true})
     ? head.value.result?.outcome
     : undefined;
-  const measure = oneofIs(outcome, 'measure', {check: true, measure: true})
+  const measure = oneofIs(outcome, 'measure', {check: true, measure: true, trace: true})
     ? outcome.value
     : undefined;
   const bounds = new Map(search.bounds.map(entry => [entry.objective, entry] as const));

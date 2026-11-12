@@ -22,4 +22,9 @@ type FS interface {
 	// MakeDir creates the directory at the absolute path, with its parents, and leaves it as it
 	// is when it exists. It is how a job's artifacts directory is made, which outlives the job.
 	MakeDir(ctx context.Context, path string) error
+
+	// ListDir returns the names of the entries directly in the directory, files and directories
+	// alike, sorted. It fails with an error that satisfies errors.Is(err, fs.ErrNotExist) for a
+	// directory that is not there.
+	ListDir(path string) ([]string, error)
 }

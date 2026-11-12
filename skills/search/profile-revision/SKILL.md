@@ -25,7 +25,11 @@ names; they usually say which profiler fits. Details are in
 1. Decide what evidence would answer the question, and the cheapest way to capture it.
 2. Build in the checkout if the task needs it. Edit no tracked file, except as step 4 allows. Scratch output, traces and
    reports go in the scratch directory your brief names, not in the checkout.
-3. Capture on the workload the benchmark uses, or one close enough to say so. A capture that
+3. Capture on the workload the benchmark uses, or one close enough to say so. If the task has a
+   `[trace]` section and the question is where a request's time goes (which hop, which call,
+   what holds it open), the first capture is the revision's trace job: `vibesys-cli submit trace
+   <rev>` (saved per commit; a second submit returns it), then read its `README.txt`,
+   `critical-path.txt` and `tree.txt` ([traces.md](../measure/references/traces.md)). A capture that
    drives load is a `vibesys-cli submit command <rev> -- <argv...>` job (`vibesys:measure`), and
    its output is read with `vibesys-cli logs <job>`. A capture script of your own can travel as
    the job's argv (`-- python3 -c "<script>"`), so it needs no commit.

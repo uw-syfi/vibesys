@@ -32,6 +32,9 @@ type Run struct {
 	Candidate *core.CandidateRun
 	// OnService says the command runs against the job-scoped server the last Serve started.
 	OnService bool
+	// List, when set, is a directory under the command's artifacts directory whose entries to
+	// list after the command ends, whatever its outcome: the trace/ directory of a trace.
+	List string
 }
 
 // Serve asks for the job-scoped server to be started and waited for until it is ready. A server
@@ -90,6 +93,13 @@ type Ran struct {
 	ReadError string
 	// ServiceLog is the last lines the candidate's server wrote, when it ended the run.
 	ServiceLog string
+	// Artifacts is the command's artifacts directory, relative to the repository's root when it is
+	// inside it, and empty for a job that keeps no artifacts.
+	Artifacts string
+	// Listed are the names of the entries of the directory the request asked to list, sorted, and
+	// empty when it is not there. ListError says why one that was there could not be listed.
+	Listed    []string
+	ListError string
 }
 
 // NotRan answers Run when the command never started, such as an environment that is not there.
@@ -152,8 +162,12 @@ type NotAttempted struct {
 }
 
 // Rejected says every command ran but the job has no acceptable result: the benchmark's output was
-// missing or invalid. Reason says why.
-type Rejected struct{ Reason string }
+// missing or invalid, or a trace left nothing that can be read. Stage is the step whose output was
+// refused, and Reason says why.
+type Rejected struct {
+	Stage  Stage
+	Reason string
+}
 
 // Stopped says a step ended unlike a pass: a failing exit code, a time limit, a cancel.
 type Stopped struct {
@@ -190,7 +204,7 @@ func Ending(v Verdict) (Stage, string) {
 	case NotAttempted:
 		return v.Stage, v.Reason
 	case Rejected:
-		return StageBenchmark, v.Reason
+		return v.Stage, v.Reason
 	case Stopped:
 		return v.Stage, v.Reason
 	case Lost:
@@ -212,6 +226,7 @@ const (
 	phaseServe     phase = "serve"
 	phaseProbe     phase = "probe-service"
 	phaseReset     phase = "reset"
+	phaseTrace     phase = "trace"
 	phaseAfter     phase = "observe-after"
 	phaseDone      phase = "done"
 )
@@ -225,6 +240,7 @@ type State struct {
 	scratch string
 
 	checkTook time.Duration
+	trace     traced
 	candidate core.CandidateImage
 	machine   core.MachineFacts
 	haveFacts bool
@@ -241,6 +257,13 @@ type State struct {
 	then      phase
 	pending   core.SampleService
 	services  []core.SampleService
+}
+
+// traced is what a trace job's command left.
+type traced struct {
+	took      time.Duration
+	artifacts string
+	files     []string
 }
 
 // Start returns the machine for a plan and its first request. It fails for a plan that is not
@@ -324,6 +347,14 @@ func Step(s State, e Event) (State, Request) {
 			return s.afterCheck()
 		}
 		if v, ok := s.unrun(StageCheck, e); ok {
+			return s.end(v), nil
+		}
+	case phaseTrace:
+		if r, ok := e.(Ran); ok {
+			s.used = s.used || s.serving
+			return s.traceRan(r)
+		}
+		if v, ok := s.unrun(StageTrace, e); ok {
 			return s.end(v), nil
 		}
 	case phaseBefore:
@@ -426,8 +457,11 @@ func (s State) serve(then phase, again bool) (State, Request) {
 func (s State) lifetime(then phase) time.Duration {
 	sv := s.plan.Service
 	d := sv.StartupTimeout
-	if then == phaseCheck {
+	switch then {
+	case phaseCheck:
 		d += s.plan.Check.Timeout
+	case phaseTrace:
+		d += s.plan.Trace.Timeout
 	}
 	if left := int64(s.plan.Samples) - int64(len(s.samples)); left > 0 {
 		d += time.Duration(left) * (s.plan.Benchmark.Timeout + sv.Reset.Timeout)
@@ -437,19 +471,63 @@ func (s State) lifetime(then phase) time.Duration {
 
 // afterServe goes on with what the server was started for.
 func (s State) afterServe() (State, Request) {
-	if s.then == phaseCheck {
+	switch s.then {
+	case phaseCheck:
 		s.phase = phaseCheck
 		return s, s.run(StageCheck, s.plan.Check, "")
+	case phaseTrace:
+		return s.runTrace()
 	}
 	return s.runSample()
 }
 
 func (s State) afterCheck() (State, Request) {
-	if s.plan.Kind == core.JobCheck {
+	switch s.plan.Kind {
+	case core.JobCheck:
 		s.phase = phaseAfter
 		return s, Observe{}
+	case core.JobTrace:
+		if s.plan.serves() {
+			return s.serve(phaseTrace, false)
+		}
+		return s.runTrace()
 	}
 	s.phase = phaseBefore
+	return s, Observe{}
+}
+
+// runTrace asks for the one run of a trace job's command, and for the entries of the trace/
+// directory it leaves in its artifacts directory.
+func (s State) runTrace() (State, Request) {
+	s.phase = phaseTrace
+	r := s.run(StageTrace, s.plan.Trace, "")
+	r.List = core.TraceFilesDir
+	return s, r
+}
+
+// traceRan reads what the trace command left: a trace that did not exit 0 ends the job in the
+// trace stage, and one that did is a pass once the machine is observed, provided its artifacts
+// directory is known and its trace/ directory could be read.
+func (s State) traceRan(r Ran) (State, Request) {
+	if v, ended := s.commandEnded(StageTrace, r); ended {
+		return s.end(v), nil
+	}
+	switch {
+	case r.Artifacts == "":
+		return s.end(Rejected{Stage: StageTrace, Reason: "the trace exited 0, and this job keeps no artifacts directory for its reports"}), nil
+	case r.ListError != "":
+		return s.end(Rejected{Stage: StageTrace, Reason: fmt.Sprintf("the trace exited 0, and its %s/ directory could not be read: %s", core.TraceFilesDir, r.ListError)}), nil
+	case len(r.Listed) > core.MaxTraceFiles:
+		return s.end(Rejected{Stage: StageTrace, Reason: fmt.Sprintf("the trace exited 0, and left %d entries in its %s/ directory, more than %d", len(r.Listed), core.TraceFilesDir, core.MaxTraceFiles)}), nil
+	}
+	took := r.Ended.Sub(r.Started)
+	if took < 0 {
+		took = 0
+	}
+	files := slices.Clone(r.Listed)
+	slices.Sort(files)
+	s.trace = traced{took: took, artifacts: r.Artifacts, files: files}
+	s.phase = phaseAfter
 	return s, Observe{}
 }
 
@@ -529,10 +607,10 @@ func (s State) sampled(r Ran) (State, Request) {
 		if errors.As(err, &reported) {
 			why = fmt.Sprintf("sample %d: %v", n+1, reported)
 		}
-		return s.end(Rejected{Reason: why}), nil
+		return s.end(Rejected{Stage: StageBenchmark, Reason: why}), nil
 	}
 	if missing := s.missingObjective(got); missing != "" {
-		return s.end(Rejected{Reason: fmt.Sprintf("sample %d: the benchmark reported no value of the objective %q, and a multi-objective task judges every sample on every objective", n+1, missing)}), nil
+		return s.end(Rejected{Stage: StageBenchmark, Reason: fmt.Sprintf("sample %d: the benchmark reported no value of the objective %q, and a multi-objective task judges every sample on every objective", n+1, missing)}), nil
 	}
 	s.samples = append(slices.Clip(s.samples), got.Value)
 	if s.plan.serves() {
@@ -655,6 +733,9 @@ func withLog(reason, log string) string {
 
 func (s State) passed(o Observed) State {
 	f := Findings{CheckTook: s.checkTook, Machine: s.machine, Load: o.Load, CandidateImage: s.candidate.ID}
+	if s.plan.Kind == core.JobTrace {
+		f.TraceTook, f.TraceArtifacts, f.TraceFiles = s.trace.took, s.trace.artifacts, slices.Clone(s.trace.files)
+	}
 	if s.plan.Kind == core.JobMeasure {
 		f.Samples = slices.Clone(s.samples)
 		f.Observations = s.others
@@ -692,6 +773,8 @@ func (s State) stage() Stage {
 		return StageService
 	case phaseReset:
 		return StageReset
+	case phaseTrace:
+		return StageTrace
 	}
 	return StageObserve
 }

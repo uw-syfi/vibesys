@@ -18,6 +18,9 @@
     "LegacyDocker",
     "OperatorConfig.docker"
   ],
+  "proto/vibesys/cli/v1/result.proto": [
+    "TraceResult.artifacts_dir"
+  ],
   "proto/vibesys/cli/v1/service.proto": [
     "DaemonEnsureResponse.runtime_directory",
     "DaemonEnsureResponse.socket",

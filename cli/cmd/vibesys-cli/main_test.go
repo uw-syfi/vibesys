@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +25,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/production"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
 	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
@@ -197,6 +200,12 @@ func TestInvalidArgumentsAreRefusedBeforeTheDaemon(t *testing.T) {
 		{"check with a command", withTask("submit", "check", "HEAD", "--", "true"), "own commands"},
 		{"check with samples", withTask("submit", "check", "HEAD", "--samples", "3"), "--samples"},
 		{"check with recheck", withTask("submit", "check", "HEAD", "--recheck"), "--recheck"},
+		{"trace with no commit", withTask("submit", "trace"), "one commit"},
+		{"trace with a command", withTask("submit", "trace", "HEAD", "--", "true"), "own commands"},
+		{"trace with samples", withTask("submit", "trace", "HEAD", "--samples", "3"), "--samples"},
+		{"trace with recheck", withTask("submit", "trace", "HEAD", "--recheck"), "--recheck"},
+		{"trace with no plan", withTask("submit", "trace", "HEAD", "--no-plan"), "--no-plan"},
+		{"trace with plan 0", withTask("submit", "trace", "HEAD", "--plan", "0"), "--plan"},
 		{"measure with no commit", withTask("submit", "measure"), "one commit"},
 		{"measure with too many samples", withTask("submit", "measure", "HEAD", "--samples", "99999999999"), "--samples"},
 		{"measure with a bad env", withTask("submit", "measure", "HEAD", "--env", "vm"), "--env"},
@@ -509,6 +518,99 @@ func TestSubmitCheckAndMeasureRunTheTasksOwnCommands(t *testing.T) {
 	}
 	if n := countRuns(c.world.Env, "emit"); n != 6 {
 		t.Errorf("the benchmark ran %d times, want 3 and then 3 more for --no-cache", n)
+	}
+}
+
+// tracedTask is the files of a task of schema 0.2 named kv whose [trace] runs trace, written in the
+// fake environment's scripts.
+func tracedTask(trace ...string) task.Tree {
+	tree := tasktest.Scripted("kv", []string{"print", "checked", ";", "exit", "0"}, []string{"emit", `{"ops": 7.5}`})
+	name := task.TasksDir + "/kv/" + task.ManifestName
+	f := tree[name]
+	quoted := make([]string, len(trace))
+	for i, a := range trace {
+		quoted[i] = strconv.Quote(a)
+	}
+	text := strings.Replace(string(f.Data), `version = "0.1"`, `version = "0.2"`, 1)
+	f.Data = []byte(text + "\n[trace]\ncommand = [" + strings.Join(quoted, ", ") + "]\n")
+	tree[name] = f
+	return tree
+}
+
+// A trace runs the task's [trace] and no check, is listed by its kind, is reused by the next trace
+// of the commit and run again with --no-cache, and show prints where its reports are and the files
+// it left there.
+func TestSubmitTraceRunsTheTasksTraceAndShowPrintsItsReports(t *testing.T) {
+	c := newCLI(t)
+	c.world.Tasks.Put("/repo", full, tracedTask("print", "tracing", ";", "exit", "0"))
+	c.world.Artifacts = func(repository, task string, job core.JobID) string {
+		return path.Join(repository, ".state/artifacts", task, string(job))
+	}
+	for _, name := range []string{"tree.txt", "README.txt", "report.txt"} {
+		c.world.Files.Put("/repo/.state/artifacts/kv/j1/01-trace/trace/"+name, []byte("x"))
+	}
+
+	r := c.run(withTask("submit", "trace", "HEAD", "--wait")...)
+	if r.code != exitOK || !strings.Contains(r.stdout, "\tsucceeded") || !strings.Contains(r.stdout, "\ttrace") {
+		t.Fatalf("submit trace = %+v", r)
+	}
+	if n := countRuns(c.world.Env, "print"); n != 1 {
+		t.Fatalf("%d commands ran, want the trace alone and no check", n)
+	}
+	r = c.run(withTask("submit", "trace", "HEAD")...)
+	if r.code != exitOK || !strings.Contains(r.stdout, "(reused a saved result)") || !strings.HasPrefix(r.stdout, "j1\t") {
+		t.Fatalf("second submit trace = %+v", r)
+	}
+	r = c.run(withTask("jobs", "--kind", "trace")...)
+	if r.code != exitOK || strings.Count(r.stdout, "\ttrace") != 1 {
+		t.Fatalf("jobs --kind trace = %+v", r)
+	}
+	r = c.run(withTask("show", "HEAD")...)
+	mustExit(t, r, exitOK, "show HEAD")
+	for _, want := range []string{"j1\ttrace\tsucceeded", "artifacts: /repo/.state/artifacts/kv/j1/01-trace", "trace/: README.txt report.txt tree.txt"} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("show = %q, want %q in it", r.stdout, want)
+		}
+	}
+	var resp cliv1.ShowResponse
+	j := c.run(withTask("show", "HEAD", "--json")...)
+	if err := protojson.Unmarshal([]byte(j.stdout), &resp); err != nil || len(resp.GetResults()) != 1 ||
+		resp.GetResults()[0].GetTrace().GetArtifactsDir() != ".state/artifacts/kv/j1/01-trace" || len(resp.GetResults()[0].GetTrace().GetFiles()) != 3 {
+		t.Fatalf("show --json = %+v (%v)", j, err)
+	}
+	r = c.run(withTask("submit", "trace", "HEAD", "--no-cache", "--wait")...)
+	if r.code != exitOK || strings.Contains(r.stdout, "reused") || !strings.HasPrefix(r.stdout, "j2\t") {
+		t.Fatalf("no-cache submit trace = %+v", r)
+	}
+	if n := countRuns(c.world.Env, "print"); n != 2 {
+		t.Errorf("the trace ran %d times, want twice", n)
+	}
+}
+
+// A trace that fails exits as a failed job and records the trace stage; a task with no [trace] is
+// refused before anything is queued, naming the section.
+func TestSubmitTraceFailsInItsStageAndIsRefusedForATaskWithoutOne(t *testing.T) {
+	c := newCLI(t)
+	c.world.Tasks.Put("/repo", full, tracedTask("exit", "4"))
+	r := c.run(withTask("submit", "trace", "HEAD", "--wait")...)
+	if r.code != exitFailed {
+		t.Fatalf("a failing trace = %+v", r)
+	}
+	var list cliv1.ListJobsResponse
+	j := c.run(withTask("jobs", "--kind", "trace", "--json")...)
+	if err := protojson.Unmarshal([]byte(j.stdout), &list); err != nil || len(list.GetJobs()) != 1 ||
+		list.GetJobs()[0].GetFailedStage() != cliv1.JobStage_JOB_STAGE_TRACE || list.GetJobs()[0].GetExitCode() != 4 {
+		t.Fatalf("jobs --json = %+v (%v)", j, err)
+	}
+
+	other := newCLI(t)
+	other.world.Tasks.Put("/repo", full, tasktest.Scripted("kv", []string{"exit", "0"}, []string{"emit", `{"ops": 7.5}`}))
+	r = other.run(withTask("submit", "trace", "HEAD")...)
+	if r.code != exitInvalidInput || !strings.Contains(r.stderr, "[trace]") {
+		t.Fatalf("a trace of a task without one = %+v", r)
+	}
+	if r := other.run(withTask("jobs")...); r.code != exitOK || strings.TrimSpace(r.stdout) != "" {
+		t.Fatalf("jobs = %+v", r)
 	}
 }
 

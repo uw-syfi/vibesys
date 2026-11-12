@@ -29,6 +29,7 @@ fn activity(id: &str, kind: ActivityKind, parent_span_id: Option<&str>) -> Activ
         source_file: None,
         source_line: None,
         origin: origin(id),
+        span: None,
     }
 }
 
@@ -127,8 +128,11 @@ fn all_observation_ids_and_intervals_are_checked() {
     ]);
     assert!(duplicate.is_err());
     let mut invalid = activity("invalid", ActivityKind::Span, None);
-    invalid.interval.end_ns = invalid.interval.start_ns;
+    invalid.interval.end_ns = invalid.interval.start_ns - 1;
     assert!(Graph::build([Observation::Activity(invalid)]).is_err());
+    let mut instant = activity("instant", ActivityKind::Span, None);
+    instant.interval.end_ns = instant.interval.start_ns;
+    assert!(Graph::build([Observation::Activity(instant)]).is_ok());
 }
 
 #[test]

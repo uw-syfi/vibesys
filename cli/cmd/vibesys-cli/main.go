@@ -109,12 +109,15 @@ commands:
   submit ... --alloc <id>|any                    run the job in a standing allocation of the run
   submit profile <commit> [--wrap prefix]        queue the task's [profile] load against the
                                                  candidate's server started under the prefix
+  submit trace <commit> [--no-cache] [--plan n] [flags]
+                                                 queue the task's [trace] (no check); a saved trace
+                                                 of the commit is reused, and show prints its reports
   wait <job>... [--any] [--timeout 30m]          block until the jobs are final
   cancel <job> [--reason text]                   stop a job
   note <job> <text>                              add a note to a job
-  jobs [--commit rev] [--state s] [--note-contains text]
+  jobs [--commit rev] [--state s] [--kind k] [--note-contains text]
   logs <job> [--follow]                          print a job's output
-  show <commit>                                  results saved for a commit
+  show <commit>                                  results saved for a commit, traces with their reports
   compare <commit> [--against rev]               better, worse, within_noise, tradeoff or inconclusive
   promote <commit>                               move the result branch, or say why not
   result                                         the head and a fresh final number

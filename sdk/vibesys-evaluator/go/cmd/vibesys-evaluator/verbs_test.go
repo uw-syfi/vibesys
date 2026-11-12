@@ -76,6 +76,16 @@ func TestASampleStartsAndHasPhases(t *testing.T) {
 	}
 }
 
+func TestEveryModeStartsASample(t *testing.T) {
+	for _, mode := range []string{"check", "benchmark", "profile", "trace"} {
+		dir := t.TempDir()
+		code, out := call(t, "sample", "start", `{"mode":`+jsonQuote(mode)+`,"seed_flag":"7","scratch_dir":`+jsonQuote(dir)+`}`)
+		if code != 0 || out["seed"] != "7" {
+			t.Errorf("%s: %d %v", mode, code, out)
+		}
+	}
+}
+
 func TestTrialsCombine(t *testing.T) {
 	code, out := call(t, "sample", "combine", `{"series":[{"name":"ops","aggregation":"AGGREGATION_MEDIAN","values":[3,1,2]},{"name":"p99","aggregation":"AGGREGATION_MAX","values":[7,9]}]}`)
 	values := out["values"].([]any)

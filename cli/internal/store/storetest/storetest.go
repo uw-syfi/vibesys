@@ -171,8 +171,12 @@ func resultAt(job core.Job, at time.Time, samples ...float64) core.Result {
 		RecordedAt:  at,
 		Outcome:     core.CheckOutcome{Duration: time.Second},
 	}
-	if job.Spec.Settings.Kind() == core.JobMeasure {
+	switch job.Spec.Settings.Kind() {
+	case core.JobMeasure:
 		r.Outcome = core.MeasureOutcome{Metric: core.Metric{Name: "ops", Direction: core.Maximize}, Samples: samples, CheckJob: "j-check"}
+	case core.JobTrace:
+		r.Outcome = core.TraceOutcome{ArtifactsDir: "state/artifacts/kv-store/" + string(job.ID) + "/02-trace", Files: []string{"README.txt", "report.txt"}, Duration: time.Second}
+	case core.JobCheck, core.JobCommand:
 	}
 	return r
 }

@@ -60,7 +60,7 @@ func anyFlowOutcome(w *world, res core.Result) lifecycle.Outcome {
 	case 5, 6:
 		v = lifecycle.Passed{Result: res}
 	default:
-		v = lifecycle.Stopped{Exec: anyExec(w), Stage: []core.JobStage{"", core.StageBuild, core.StageCheck, core.StageMeasure}[w.r.IntN(4)]}
+		v = lifecycle.Stopped{Exec: anyExec(w), Stage: []core.JobStage{"", core.StageBuild, core.StageCheck, core.StageMeasure, core.StageTrace}[w.r.IntN(5)]}
 	}
 	return withCancel(w, lifecycle.Outcome{End: lifecycle.FlowEnded{Verdict: v}})
 }
@@ -158,6 +158,9 @@ func planJob(kind core.JobKind) (core.Job, core.Result) {
 	case core.JobCheck:
 		spec.Settings = core.CheckSettings{}
 		outcome = core.CheckOutcome{Duration: time.Second}
+	case core.JobTrace:
+		spec.Settings = core.TraceSettings{}
+		outcome = core.TraceOutcome{ArtifactsDir: "state/artifacts/t/j1/01-trace", Files: []string{"report.txt"}, Duration: time.Second}
 	default:
 		spec.Settings = core.MeasureSettings{Samples: 2}
 		outcome = core.MeasureOutcome{Metric: core.Metric{Name: "ops", Direction: core.Maximize}, Samples: []float64{1, 2}, CheckJob: "j0"}
@@ -177,7 +180,7 @@ func planJob(kind core.JobKind) (core.Job, core.Result) {
 func TestAPlanJobSavesAResultExactlyWhenItPassed(t *testing.T) {
 	w := newWorld(t, 3, 1)
 	for range 4000 {
-		kind := []core.JobKind{core.JobCheck, core.JobMeasure}[w.r.IntN(2)]
+		kind := []core.JobKind{core.JobCheck, core.JobMeasure, core.JobTrace}[w.r.IntN(3)]
 		job, res := planJob(kind)
 		o := anyFlowOutcome(w, res)
 		var verdict lifecycle.Verdict

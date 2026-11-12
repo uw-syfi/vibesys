@@ -1,0 +1,67 @@
+STITCH WATERFALLS
+Per root endpoint, the eligible trace closest to the root's p50 latency and the one closest to its p95 (preferring traces without a root error). One line per span, indented by depth, in call order; client spans are listed with their server span beneath them.
+
+════════════════════════════════════════════════════════════════════════════════════════════════════
+ROOT frontend: GET /hotels   requests 12  errors 1
+latency mean 13.17 ms  p50 12.35 ms  p95 20.28 ms  p99 20.83 ms  max 20.97 ms
+
+p50 representative  trace 0000000000000000000000000000a00a  12.10 ms (root p50 12.35 ms)
+ start ms     dur ms  |timeline                                        |  span
+     0.00      12.10  |████████████████████████████████████████████████|  frontend: GET /hotels (server)
+     0.60       6.05  |  ████████████████████████                      |    frontend: search.Search/Nearby (client)
+     0.85       5.56  |   ██████████████████████                       |      search: search.Search/Nearby (server)
+     1.21       2.42  |    ██████████                                  |        search: geo.Geo/Nearby (client)
+     1.33       2.18  |     ████████                                   |          geo: geo.Geo/Nearby (server)
+     1.57       1.45  |      █████                                     |            geo: mongodb find (client)
+     3.02       3.02  |           █████████████                        |        search: rate.Rate/GetRates (client)
+     3.14       2.78  |            ███████████                         |          rate: rate.Rate/GetRates (server)
+     3.39       0.73  |             ███                                |            rate: memcached get (client)
+     4.23       1.45  |                ██████                          |            rate: mongodb find (client)
+     7.02       4.23  |                           █████████████████    |    frontend: profile.Profile/GetProfiles (client)
+     7.26       3.75  |                            ███████████████     |      profile: profile.Profile/GetProfiles (server)
+     7.50       1.94  |                             ████████           |        profile: memcached get (client)
+     7.74       2.30  |                              █████████         |        profile: memcached get (client)
+     7.98       2.66  |                               ███████████      |        profile: memcached get (client)
+    11.37       0.60  |                                             ██ |    frontend: render
+
+p95 representative  trace 0000000000000000000000000000a000  19.71 ms (root p95 20.28 ms)
+ start ms     dur ms  |timeline                                        |  span
+     0.00      19.71  |████████████████████████████████████████████████|  frontend: GET /hotels (server)
+     0.99       9.86  |  ████████████████████████                      |    frontend: search.Search/Nearby (client)
+     1.38       9.07  |   ██████████████████████                       |      search: search.Search/Nearby (server)
+     1.97       3.94  |    ██████████                                  |        search: geo.Geo/Nearby (client)
+     2.17       3.55  |     ████████                                   |          geo: geo.Geo/Nearby (server)
+     2.56       2.37  |      █████                                     |            geo: mongodb find (client)
+     4.93       4.93  |           █████████████                        |        search: rate.Rate/GetRates (client)
+     5.13       4.53  |            ███████████                         |          rate: rate.Rate/GetRates (server)
+     5.52       1.18  |             ███                                |            rate: memcached get (client)
+     6.90       2.37  |                ██████                          |            rate: mongodb find (client)
+    11.43       6.90  |                           █████████████████    |    frontend: profile.Profile/GetProfiles (client)
+    11.83       6.11  |                            ███████████████     |      profile: profile.Profile/GetProfiles (server)
+    12.22       3.15  |                             ████████           |        profile: memcached get (client)
+    12.62       3.75  |                              █████████         |        profile: memcached get (client)
+    13.01       4.34  |                               ███████████      |        profile: memcached get (client)
+    18.53       0.99  |                                             ██ |    frontend: render
+
+════════════════════════════════════════════════════════════════════════════════════════════════════
+ROOT frontend: HTTP GET /recommendations   requests 5  errors 0
+latency mean 5.78 ms  p50 5.70 ms  p95 7.15 ms  p99 7.28 ms  max 7.31 ms
+
+p50 representative  trace 0000000000000000000000000000b000  5.70 ms (root p50 5.70 ms)
+ start ms     dur ms  |timeline                                        |  span
+     0.00       5.70  |████████████████████████████████████████████████|  frontend: HTTP GET /recommendations (server)
+     0.43       2.85  |   ████████████████████████                     |    frontend: recommendation.Recommendation/GetRecommendations (client)
+     0.64       2.42  |     ████████████████████                       |      recommendation: recommendation.Recommendation/GetRecommendations (server)
+     3.56       1.99  |                             █████████████████  |    frontend: profile.Profile/GetProfiles (client)
+     3.70       1.71  |                               ██████████████   |      profile: profile.Profile/GetProfiles (server)
+     3.85       1.14  |                                █████████       |        profile: memcached get (client)
+
+p95 representative  trace 0000000000000000000000000000b001  7.31 ms (root p95 7.15 ms)
+ start ms     dur ms  |timeline                                        |  span
+     0.00       7.31  |████████████████████████████████████████████████|  frontend: HTTP GET /recommendations (server)
+     0.55       3.65  |   ████████████████████████                     |    frontend: recommendation.Recommendation/GetRecommendations (client)
+     0.82       3.11  |     ████████████████████                       |      recommendation: recommendation.Recommendation/GetRecommendations (server)
+     4.57       2.56  |                             █████████████████  |    frontend: profile.Profile/GetProfiles (client)
+     4.75       2.19  |                               ██████████████   |      profile: profile.Profile/GetProfiles (server)
+     4.93       1.46  |                                █████████       |        profile: memcached get (client)
+

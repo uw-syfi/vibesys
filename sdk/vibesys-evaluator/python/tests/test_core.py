@@ -64,8 +64,8 @@ def test_the_missing_binary_message_points_at_the_env_var(
     assert "not bundled" in str(caught.value)
 
 
-@pytest.mark.parametrize("name", ["loadgen", "otelcapture"])
-def test_loadgen_and_otelcapture_are_found_like_the_core(
+@pytest.mark.parametrize("name", ["loadgen", "otelcapture", "stitch"])
+def test_loadgen_otelcapture_and_stitch_are_found_like_the_core(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str
 ) -> None:
     monkeypatch.setenv("PATH", str(tmp_path))
@@ -81,6 +81,16 @@ def test_loadgen_and_otelcapture_are_found_like_the_core(
     (bundled / name).write_text("")
     monkeypatch.setattr(core, "_BUNDLED_DIR", bundled)
     assert core.find_binary(name) == str(bundled / name)
+
+
+def test_a_missing_stitch_says_how_to_build_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("PATH", str(tmp_path))
+    with pytest.raises(core.CoreNotFoundError, match=r"\$VIBESYS_EVALUATOR_STITCH") as caught:
+        core.find_binary("stitch")
+    assert "experimental/stitch" in str(caught.value)
+    assert "go install" not in str(caught.value)
 
 
 def test_no_binary_is_a_typed_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

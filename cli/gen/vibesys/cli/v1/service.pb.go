@@ -3582,7 +3582,7 @@ func (x *ShowRequest) GetCommit() string {
 
 type ShowResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Every result saved for the commit, checks and measurements, oldest first.
+	// Every result saved for the commit, checks, measurements and traces, oldest first.
 	Results []*Result `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty"`
 	// The commit's measurements pooled as compare pools them: one per environment, task version,
 	// metric and objectives, holding the samples of every measure job of that kind, oldest first.

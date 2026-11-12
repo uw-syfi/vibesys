@@ -70,6 +70,7 @@ impl Importer for Dial9BridgeImporter {
                     artifact: input.path.display().to_string(),
                     record: (index + 1).to_string(),
                 },
+                span: None,
             }));
         }
         Ok(out)
@@ -132,6 +133,7 @@ impl Importer for Dial9NativeImporter {
                         artifact: input.path.display().to_string(),
                         record: out.len().to_string(),
                     },
+                    span: None,
                 }));
                 Ok(())
             })

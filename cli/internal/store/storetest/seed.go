@@ -87,6 +87,17 @@ func SeedCheckIn(t testing.TB, s store.Store, commit core.Commit, at time.Time, 
 		func(core.Job) core.Outcome { return core.CheckOutcome{Duration: time.Second} })
 }
 
+// SeedTrace saves a trace of a commit that succeeded, in the host environment under task version
+// "v1", recorded at the instant, with the artifacts directory and the files it left, and returns
+// the result as the store holds it.
+func SeedTrace(t testing.TB, s store.Store, commit core.Commit, at time.Time, artifacts string, files ...string) core.Result {
+	t.Helper()
+	return seed(t, s, commit, core.TraceSettings{}, at, HostEnvironment(), "v1",
+		func(core.Job) core.Outcome {
+			return core.TraceOutcome{ArtifactsDir: artifacts, Files: files, Duration: time.Minute}
+		})
+}
+
 func seed(t testing.TB, s store.Store, commit core.Commit, settings core.Settings, at time.Time, environment core.Fingerprint, taskVersion string, outcome func(core.Job) core.Outcome) core.Result {
 	t.Helper()
 	ctx := context.Background()

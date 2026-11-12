@@ -50,6 +50,9 @@ func (s shape) plan() flow.Plan {
 			Serve: []string{"${PROJECT_ROOT}/serve.sh", "--port", "${PORT}"}, Ready: "/health", StartupTimeout: 2 * time.Minute,
 		}
 	}
+	if s.kind == core.JobTrace {
+		p.Trace = task.Command{Argv: []string{"python", "/task/bench.py", "trace", "--project-root", "${PROJECT_ROOT}"}, Timeout: time.Minute}
+	}
 	if s.kind == core.JobMeasure {
 		p.Samples = s.samples
 		p.Benchmark = task.Command{Argv: []string{"${PROJECT_ROOT}/bench.sh", "--fast"}, Timeout: time.Minute}
@@ -68,6 +71,7 @@ func shapes() []shape {
 	out := []shape{
 		{kind: core.JobCheck}, {kind: core.JobCheck, build: true},
 		{kind: core.JobCheck, candidate: true},
+		{kind: core.JobTrace}, {kind: core.JobTrace, build: true}, {kind: core.JobTrace, candidate: true},
 		{kind: core.JobMeasure, protocol2: true, samples: 1, candidate: true},
 		{kind: core.JobMeasure, protocol2: true, linked: true, samples: 3, candidate: true},
 	}
@@ -169,6 +173,23 @@ func (w *world) answer(n int, r flow.Request) flow.Event {
 		case cannotRun:
 			return flow.NotRan{Failure: core.Failure{Kind: core.FailureUnavailable, Message: "no environment"}}
 		}
+		if r.List != "" {
+			// A trace: its artifacts directory, and what it left in the directory it lists. Its
+			// file faults are a job that keeps no artifacts, a listing that fails, and too many
+			// entries.
+			ran.Artifacts, ran.Listed = traceArtifacts, []string{"tree.txt", "README.txt", "report.txt"}
+			switch f {
+			case noFile:
+				ran.Artifacts, ran.Listed = "", nil
+			case unreadable:
+				ran.Listed, ran.ListError = nil, "permission denied"
+			case badFile:
+				ran.Listed = make([]string, core.MaxTraceFiles+1)
+				for i := range ran.Listed {
+					ran.Listed[i] = fmt.Sprintf("f%d.txt", i)
+				}
+			}
+		}
 		if r.Read != "" {
 			ran.Found = f != noFile
 			ran.Output = w.output(len(w.values), f)
@@ -221,6 +242,9 @@ func expected(p flow.Plan) []flow.Stage {
 	if p.RunsCheck() {
 		out = append(out, flow.StageCheck)
 	}
+	if p.Kind == core.JobTrace {
+		out = append(out, flow.StageTrace)
+	}
 	if p.Kind == core.JobMeasure {
 		out = append(out, flow.StageObserve)
 		for i := uint32(0); i < p.Samples; i++ {
@@ -232,8 +256,11 @@ func expected(p flow.Plan) []flow.Stage {
 
 func running(p flow.Plan) core.Job {
 	var settings core.Settings = core.CheckSettings{}
-	if p.Kind == core.JobMeasure {
+	switch p.Kind {
+	case core.JobMeasure:
 		settings = core.MeasureSettings{Samples: p.Samples}
+	case core.JobTrace:
+		settings = core.TraceSettings{}
 	}
 	env := p.Environment
 	return core.Job{
@@ -293,6 +320,13 @@ func checkRun(t *testing.T, label string, p flow.Plan, w *world, v flow.Verdict)
 			}
 		} else if len(f.Samples) != 0 || len(f.Observations) != 0 {
 			fail("a check job has samples")
+		}
+		if p.Kind == core.JobTrace {
+			if f.TraceArtifacts != traceArtifacts || strings.Join(f.TraceFiles, " ") != "README.txt report.txt tree.txt" || f.TraceTook != 3*time.Second {
+				fail("a trace found %q, %q in %v", f.TraceArtifacts, f.TraceFiles, f.TraceTook)
+			}
+		} else if f.TraceArtifacts != "" || f.TraceFiles != nil || f.TraceTook != 0 {
+			fail("a %s job found a trace", p.Kind)
 		}
 		if f.Machine.HostID != "host-a" || f.Load.SampledAt.IsZero() {
 			fail("a pass records the machine: %+v %+v", f.Machine, f.Load)
@@ -385,6 +419,9 @@ func TestAFaultAtEveryStepEndsTheJobThereAndSavesNothing(t *testing.T) {
 	}
 }
 
+// traceArtifacts is the artifacts directory a world's shell reports for a trace.
+const traceArtifacts = "state/artifacts/t/j-run/02-trace"
+
 // applies says whether a fault can happen at a stage: only a command exits, only a benchmark
 // writes a file, only a checkout is refused. A cancel and a wrong answer can come at any step.
 var candidateImage = core.CandidateImage{ID: "sha256:" + strings.Repeat("c", 64), Tag: "vibesys-candidate:t-cccc"}
@@ -454,11 +491,11 @@ func TestAServerThatFailsStopsTheJobWithItsLog(t *testing.T) {
 func applies(f fault, s flow.Stage) bool {
 	switch f {
 	case cannotRun:
-		return s == flow.StageBuild || s == flow.StageCandidate || s == flow.StageCheck || s == flow.StageBenchmark
+		return s == flow.StageBuild || s == flow.StageCandidate || s == flow.StageCheck || s == flow.StageBenchmark || s == flow.StageTrace
 	case exitsNonZero, timesOut, cancelledRun, unknownEnding:
-		return s == flow.StageBuild || s == flow.StageCheck || s == flow.StageBenchmark
+		return s == flow.StageBuild || s == flow.StageCheck || s == flow.StageBenchmark || s == flow.StageTrace
 	case noFile, badFile, unreadable:
-		return s == flow.StageBenchmark
+		return s == flow.StageBenchmark || s == flow.StageTrace
 	case noCheckout:
 		return s == flow.StageCheckout
 	}
@@ -583,6 +620,7 @@ func TestAnInvalidPlanNeverStarts(t *testing.T) {
 		"no task":                         func(p *flow.Plan) { p.Task = "" },
 		"no key":                          func(p *flow.Plan) { p.Key = "" },
 		"another kind":                    func(p *flow.Plan) { p.Kind = core.JobCommand },
+		"a trace with no trace command":   func(p *flow.Plan) { p.Kind, p.Samples = core.JobTrace, 0 },
 		"objectives read from one field": func(p *flow.Plan) {
 			p.Objectives = core.Objectives{Metrics: []core.Metric{p.Metric, {Name: "p99", Direction: core.Minimize}}}
 		},
@@ -617,6 +655,11 @@ func TestAnInvalidPlanNeverStarts(t *testing.T) {
 	check.Samples = 1
 	if check.Validate() == nil {
 		t.Error("a check job with samples was accepted")
+	}
+	trace := shape{kind: core.JobTrace}.plan()
+	trace.CheckPass = "j-pass"
+	if trace.Validate() == nil {
+		t.Error("a trace job that links a pass was accepted")
 	}
 }
 
@@ -669,7 +712,9 @@ func randomEvent(r *rand.Rand) flow.Event {
 	return flow.Ran{
 		Exec:   core.ExecOutcome{Kind: kinds[r.IntN(len(kinds))], ExitCode: r.IntN(2)},
 		Output: []byte(out[r.IntN(len(out))]), Found: r.IntN(4) != 0,
-		Started: epoch, Ended: epoch.Add(time.Duration(r.IntN(5)-1) * time.Second),
+		Artifacts: []string{"", traceArtifacts}[r.IntN(2)], Listed: [][]string{nil, {"report.txt"}}[r.IntN(2)],
+		ListError: []string{"", "", "denied"}[r.IntN(3)],
+		Started:   epoch, Ended: epoch.Add(time.Duration(r.IntN(5)-1) * time.Second),
 	}
 }
 
@@ -823,5 +868,84 @@ func TestAFailedSampleSaysWhatItsErrorRecordSays(t *testing.T) {
 				t.Errorf("reason %q claims a report the stream did not make", stopped.Reason)
 			}
 		})
+	}
+}
+
+// A trace job runs no check: after the build and the candidate it runs the task's [trace] once,
+// as written with the checkout's root put in and no result flag added, asks for the entries of the
+// trace/ directory of its artifacts, and saves a trace outcome that names them. One that does not
+// exit 0 fails in the trace stage, which is the job's failed stage.
+func TestATraceRunsItsCommandOnceWithNoCheckAndRecordsWhatItLeft(t *testing.T) {
+	p := shape{kind: core.JobTrace, build: true}.plan()
+	w := &world{p: p, at: -1}
+	v, err := flow.Drive(context.Background(), p, w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var traces []flow.Run
+	for _, r := range w.asked {
+		if run, ok := r.(flow.Run); ok {
+			if run.Stage == flow.StageCheck {
+				t.Fatal("a trace job ran the check")
+			}
+			if run.Stage == flow.StageTrace {
+				traces = append(traces, run)
+			}
+		}
+	}
+	if len(traces) != 1 {
+		t.Fatalf("the trace ran %d times", len(traces))
+	}
+	if got := strings.Join(traces[0].Argv, " "); got != "python /task/bench.py trace --project-root /work/checkout" || traces[0].List != "trace" || traces[0].Read != "" || traces[0].Timeout != time.Minute {
+		t.Errorf("the trace runs %q, lists %q, reads %q, within %v", got, traces[0].List, traces[0].Read, traces[0].Timeout)
+	}
+	res := p.Record("j-run", commit, passedOf(t, v), epoch)
+	tr, ok := res.Outcome.(core.TraceOutcome)
+	if !ok || tr.ArtifactsDir != traceArtifacts || strings.Join(tr.Files, ",") != "README.txt,report.txt,tree.txt" || tr.Duration != 3*time.Second {
+		t.Errorf("the trace saves %+v", res.Outcome)
+	}
+
+	failing := &world{p: p, at: 2, fault: exitsNonZero}
+	v, _ = flow.Drive(context.Background(), p, failing)
+	stopped, ok := v.(flow.Stopped)
+	if !ok || stopped.Stage != flow.StageTrace || stopped.Stage.JobStage() != core.StageTrace {
+		t.Fatalf("a trace that exited 3 ended %+v", v)
+	}
+	rejected := &world{p: p, at: 2, fault: unreadable}
+	v, _ = flow.Drive(context.Background(), p, rejected)
+	if r, ok := v.(flow.Rejected); !ok || r.Stage != flow.StageTrace || !strings.Contains(r.Reason, "permission denied") {
+		t.Fatalf("a trace whose directory could not be read ended %+v", v)
+	}
+}
+
+// A trace of a task with a job-scoped server starts the server, runs the trace against it, and
+// gives the server a lifetime that covers its startup and the trace.
+func TestATraceOfATaskWithAServerRunsAgainstIt(t *testing.T) {
+	p := shape{kind: core.JobTrace}.plan()
+	p.Service = &task.Service{
+		Serve: []string{"${PROJECT_ROOT}/_server.py", "--port", "${PORT}"}, Ready: "/health", StartupTimeout: time.Minute,
+		Reset: task.Command{Argv: []string{"reset"}, Timeout: time.Minute},
+	}
+	state, req, err := flow.Start(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, req = flow.Step(state, flow.CheckedOut{Dir: "/work/checkout", Scratch: "/work/scratch"})
+	serve, ok := req.(flow.Serve)
+	if !ok || serve.Lifetime != 2*time.Minute {
+		t.Fatalf("after the checkout: %+v", req)
+	}
+	state, req = flow.Step(state, flow.Serving{})
+	run, ok := req.(flow.Run)
+	if !ok || run.Stage != flow.StageTrace || !run.OnService {
+		t.Fatalf("after the server: %+v", req)
+	}
+	state, req = flow.Step(state, flow.Ran{Exec: core.ExecOutcome{Kind: core.ExecExited}, Started: epoch, Ended: epoch.Add(time.Second), Artifacts: traceArtifacts})
+	if _, ok := req.(flow.Observe); !ok {
+		t.Fatalf("after the trace: %+v", req)
+	}
+	state, _ = flow.Step(state, flow.Observed{})
+	if f := passedOf(t, state.Verdict()); f.TraceArtifacts != traceArtifacts || len(f.TraceFiles) != 0 {
+		t.Errorf("findings %+v", f)
 	}
 }

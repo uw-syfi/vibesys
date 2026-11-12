@@ -52,7 +52,7 @@ func NewJobKey(in KeyInputs) (JobKey, error) {
 
 func validateKeyInputs(in KeyInputs) error {
 	switch in.Kind {
-	case JobCheck, JobMeasure:
+	case JobCheck, JobMeasure, JobTrace:
 	case JobCommand:
 		return failf(FailureInvalidInput, "kind: command jobs are never cached, so they have no key")
 	default:

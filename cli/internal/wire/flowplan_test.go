@@ -46,7 +46,12 @@ func anyFlowPlan(r *rand.Rand) flow.Plan {
 			StartupTimeout: time.Duration(1+r.IntN(3600)) * time.Second, Reset: anyCommand(r), ShareWithCheck: r.IntN(2) == 0,
 		}
 	}
-	if r.IntN(2) == 0 {
+	switch r.IntN(3) {
+	case 0:
+		return p
+	case 1:
+		p.Kind = core.JobTrace
+		p.Trace = anyCommand(r)
 		return p
 	}
 	p.Kind = core.JobMeasure
@@ -83,6 +88,8 @@ func launchWith(r *rand.Rand, p *flow.Plan) lifecycle.Launch {
 		l.Spec = core.JobSpec{Commit: commit, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Argv: []string{"true"}, Timeout: time.Minute}}
 	case p.Kind == core.JobCheck:
 		l.Spec = core.JobSpec{Commit: commit, Environment: p.Environment.Kind, Settings: core.CheckSettings{}}
+	case p.Kind == core.JobTrace:
+		l.Spec = core.JobSpec{Commit: commit, Environment: p.Environment.Kind, Settings: core.TraceSettings{}}
 	default:
 		l.Spec = core.JobSpec{Commit: commit, Environment: p.Environment.Kind, Settings: core.MeasureSettings{Samples: p.Samples}}
 	}

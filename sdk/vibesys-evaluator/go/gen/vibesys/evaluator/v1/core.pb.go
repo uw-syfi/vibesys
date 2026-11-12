@@ -382,7 +382,7 @@ func (x *Partial) GetUnit() string {
 // SampleStartRequest starts a sample: resolves its seed and directory (`sample start`).
 type SampleStartRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// "check", "benchmark" or "profile".
+	// "check", "benchmark", "profile" or "trace".
 	Mode string `protobuf:"bytes,1,opt,name=mode,proto3" json:"mode,omitempty"`
 	// The `--seed` flag as the user wrote it, decimal; absent when not given.
 	SeedFlag *string `protobuf:"bytes,2,opt,name=seed_flag,json=seedFlag,proto3,oneof" json:"seed_flag,omitempty"`

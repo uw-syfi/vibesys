@@ -83,7 +83,7 @@ const eventFileName = "state/runs/run-a/1.json"
 func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 	t.Run("the layout", func(t *testing.T) {
 		mem := populated(t)
-		mem.Put("state/format", []byte(`{"format":8}`))
+		mem.Put("state/format", []byte(`{"format":9}`))
 		_, err := filestore.Open(stateDir, filestore.WithFS(mem))
 		wantFailure(t, "newer format file", err, core.FailureIncompatible, "state/format")
 	})
@@ -91,7 +91,7 @@ func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 	for _, name := range recordFiles {
 		t.Run(name, func(t *testing.T) {
 			mem := populated(t)
-			mem.Put(name, withVersion(file(t, mem, name), "8"))
+			mem.Put(name, withVersion(file(t, mem, name), "9"))
 			_, err := filestore.Open(stateDir, filestore.WithFS(mem))
 			wantFailure(t, "newer record", err, core.FailureIncompatible, name)
 		})
@@ -99,7 +99,7 @@ func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 
 	t.Run("an event, read when asked for", func(t *testing.T) {
 		mem := populated(t)
-		mem.Put(eventFileName, withVersion(file(t, mem, eventFileName), "8"))
+		mem.Put(eventFileName, withVersion(file(t, mem, eventFileName), "9"))
 		s, err := filestore.Open(stateDir, filestore.WithFS(mem))
 		if err != nil {
 			t.Fatalf("Open: %v", err)
@@ -212,7 +212,7 @@ func TestInconsistentLayoutIsRefusedWithTheFileNamed(t *testing.T) {
 			rewriteWorkstream(t, m, 1, func(w *cliv1.Workstream) { w.Origin.At = nil })
 		}, []string{"state/workstreams/1.json"}},
 		{"two open workstreams with one title", func(m *fsys.MemFS) {
-			second := &cliv1.WorkstreamFile{Format: 6, Workstream: &cliv1.Workstream{
+			second := &cliv1.WorkstreamFile{Format: 8, Workstream: &cliv1.Workstream{
 				Number: 2, Title: "kv CACHE layout", Status: cliv1.WorkstreamStatus_WORKSTREAM_STATUS_ACTIVE,
 				Origin: &cliv1.RecordOrigin{At: timestamppb.New(at(40))}, UpdatedAt: timestamppb.New(at(40)),
 			}}
@@ -411,11 +411,11 @@ func TestEncodingIsPinned(t *testing.T) {
 	if err := script()[0].run(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := unspaced(file(t, mem, "state/format")), `{"format":7}`; got != want {
+	if got, want := unspaced(file(t, mem, "state/format")), `{"format":8}`; got != want {
 		t.Errorf("format file = %q, want %q", got, want)
 	}
 	const wantJob = `{
-  "format": 7,
+  "format": 8,
   "job": {
     "id": "j1",
     "spec": {
@@ -453,7 +453,7 @@ func TestEncodingIsPinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	const wantPromotion = `{
-  "format": 7,
+  "format": 8,
   "seq": "1",
   "promotion": {
     "commit": "c1",
@@ -493,7 +493,7 @@ func TestThePlanFileIsPinned(t *testing.T) {
 		}
 	}
 	const want = `{
-  "format": 7,
+  "format": 8,
   "plan": {
     "number": 1,
     "title": "tile the loop",
@@ -551,7 +551,7 @@ func TestTheWorkstreamFileIsPinned(t *testing.T) {
 		}
 	}
 	const want = `{
-  "format": 7,
+  "format": 8,
   "workstream": {
     "number": 1,
     "title": "KV cache layout",
@@ -580,7 +580,7 @@ func TestTheBoundFileIsPinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	const want = `{
-  "format": 7,
+  "format": 8,
   "bound": {
     "seq": "1",
     "origin": {

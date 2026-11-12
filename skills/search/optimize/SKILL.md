@@ -101,7 +101,10 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    each point on the run's chart is tied to its idea; `vibesysd` refuses a measure from a run that
    names neither `--plan <n>` nor `--no-plan`. Say `--no-plan` only for the baseline and for
    re-measuring the head, which test no idea. Combine parked or won plans with
-   combine-candidates, and use profile-revision when a question needs evidence. Record outcomes
+   combine-candidates, and use profile-revision when a question needs evidence. In a task with
+   `[trace]`, trace the base when you measure it and every new head when you promote it
+   (`vibesys-cli submit trace <sha>`, `vibesys:measure` [traces.md]): name the trace job in every
+   planner and profile brief, so per-hop latency and the critical path are the planners' evidence. Record outcomes
    and lessons as plan comments, link every other job to its plan too (`--plan`), and close the
    plan with its gain or its reason: `won` when promoted, `parked` or `rejected` when a
    measurement settles it, set when it happens and not at the end.

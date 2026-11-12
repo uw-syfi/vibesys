@@ -83,6 +83,51 @@ func TestReadsATaskOfTwoImages(t *testing.T) {
 	}
 }
 
+// [trace] is optional: a task with it has the command a trace job runs, with its own time limit or
+// the default one, its placeholders checked; a task without it has none.
+func TestSchema02ReadsAnOptionalTrace(t *testing.T) {
+	without, err := task.Read(repo(v02Files(withoutCandidate())), "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if without.Trace != nil {
+		t.Fatalf("a task without [trace] has the trace %+v", without.Trace)
+	}
+	for _, c := range []struct {
+		section string
+		limit   time.Duration
+	}{
+		{"[trace]\ncommand = [\"python\", \"/task/bench.py\", \"trace\", \"--project-root\", \"${PROJECT_ROOT}\"]\n", 30 * time.Minute},
+		{"[trace]\ncommand = [\"python\", \"/task/bench.py\", \"trace\", \"--project-root\", \"${PROJECT_ROOT}\"]\ntimeout_seconds = 1200\n", 20 * time.Minute},
+	} {
+		got, err := task.Read(repo(v02Files(withoutCandidate()+c.section)), "t")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Trace == nil || got.Trace.Timeout != c.limit {
+			t.Fatalf("%q: trace %+v", c.section, got.Trace)
+		}
+		if argv := strings.Join(got.Trace.Resolve("/work"), " "); argv != "python /task/bench.py trace --project-root /work" {
+			t.Fatalf("%q: the trace runs %q", c.section, argv)
+		}
+		if got.Version == without.Version {
+			t.Fatalf("%q: adding [trace] left the task version as it was", c.section)
+		}
+	}
+	for name, c := range map[string]struct{ section, says string }{
+		"no command":             {"[trace]\ntimeout_seconds = 60\n", "trace"},
+		"an empty command":       {"[trace]\ncommand = []\n", "trace"},
+		"an unknown key":         {"[trace]\ncommand = [\"x\"]\nsamples = 3\n", `"trace.samples"`},
+		"an unknown placeholder": {"[trace]\ncommand = [\"x\", \"${HOST}\"]\n", "${HOST}"},
+		"an entrypoint":          {"[trace]\ncommand = [\"x\"]\nentrypoint = \"x\"\n", "[trace] entrypoint"},
+	} {
+		_, err := task.Parse("t", []byte(withoutCandidate()+c.section), []byte(v02Objectives))
+		if f := failureOf(t, err); !strings.Contains(f.Message, c.says) {
+			t.Errorf("%s: got %+v, want it to name %q", name, f, c.says)
+		}
+	}
+}
+
 // withoutCandidate is v02Manifest with no [candidate] section.
 func withoutCandidate() string {
 	start := strings.Index(v02Manifest, "[candidate]")

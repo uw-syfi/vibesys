@@ -19,8 +19,9 @@ func testValues(t *testing.T, newStore New) {
 			populated(t, "promotion", g.promotion())
 			populated(t, "refusal", g.refusal())
 			populated(t, "note", g.note())
-			populated(t, "measure result", g.result("j1", "k", "c", true))
-			populated(t, "check result", g.result("j1", "k", "c", false))
+			populated(t, "measure result", g.result("j1", "k", "c", core.JobMeasure))
+			populated(t, "check result", g.result("j1", "k", "c", core.JobCheck))
+			populated(t, "trace result", g.result("j1", "k", "c", core.JobTrace))
 			populated(t, "draft", g.draft("run", g.job()))
 		}
 	})
@@ -29,11 +30,16 @@ func testValues(t *testing.T, newStore New) {
 		for seed := range uint64(25) {
 			g := newGen(seed)
 			e := newEnv(t, newStore)
-			measure := g.pick(2) == 0
+			kind := []core.JobKind{core.JobCheck, core.JobMeasure, core.JobTrace}[g.pick(3)]
+			measure := kind == core.JobMeasure
 			sub := core.Submission{Spec: g.spec(), Key: core.JobKey(g.name()), Needs: g.needs(), TaskVersion: g.name(), Note: ptr(g.note()), At: g.instant()}
-			sub.Spec.Settings = core.CheckSettings{}
-			if measure {
+			switch kind {
+			case core.JobMeasure:
 				sub.Spec.Settings = core.MeasureSettings{Samples: 1 + g.r.Uint32(), Recheck: g.pick(2) == 0}
+			case core.JobTrace:
+				sub.Spec.Settings = core.TraceSettings{}
+			default:
+				sub.Spec.Settings = core.CheckSettings{}
 			}
 			plan := e.createPlan("link")
 			sub.Plan = plan.Number
@@ -62,7 +68,7 @@ func testValues(t *testing.T, newStore New) {
 			if want := cmp.Or(start.Key, sub.Key); running.Key != want || e.job(job.ID).Key != want {
 				t.Fatalf("seed %d: the started job has the key %q, want %q", seed, running.Key, want)
 			}
-			res := g.acceptedResult(running, measure)
+			res := g.acceptedResult(running, kind)
 			finish := core.Transition{Job: job.ID, From: core.JobRunning, To: core.JobSucceeded, At: g.instant(), ExitCode: &code, Result: &res}
 			if measure {
 				finish.CheckJob = res.Outcome.(core.MeasureOutcome).CheckJob

@@ -16,7 +16,7 @@ machine.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from vibesys_evaluator._private.sample import SampleError
 
@@ -148,6 +148,16 @@ class PhaseRunner(Protocol):
             PhaseRunError: The command exited non-zero, timed out, or could
                 not be started or reached.
         """
+        ...
+
+
+@runtime_checkable
+class NamespacedRunner(PhaseRunner, Protocol):
+    """A runner whose system runs in one Kubernetes namespace of its own, which a trace instruments."""
+
+    @property
+    def namespace(self) -> str:
+        """The namespace the system and its phase pods run in."""
         ...
 
 

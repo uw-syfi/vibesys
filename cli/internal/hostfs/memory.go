@@ -77,6 +77,38 @@ func (m *Memory) remove(dir string) {
 	}
 }
 
+// ListDir implements FS. A directory is there when MakeDir made it or a file was put under it,
+// and its entries are the files and the directories directly in it.
+func (m *Memory) ListDir(p string) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	dir := path.Clean(p)
+	found := m.dirs[dir] || m.scratch[dir]
+	names := map[string]bool{}
+	add := func(q string) {
+		if rest, ok := strings.CutPrefix(q, dir+"/"); ok {
+			found = true
+			name, _, _ := strings.Cut(rest, "/")
+			names[name] = true
+		}
+	}
+	for f := range m.files {
+		add(f)
+	}
+	for d := range m.dirs {
+		add(d)
+	}
+	if !found {
+		return nil, &fs.PathError{Op: "open", Path: p, Err: fs.ErrNotExist}
+	}
+	out := make([]string, 0, len(names))
+	for n := range names {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // ReadFile implements FS.
 func (m *Memory) ReadFile(p string, limit int64) ([]byte, error) {
 	m.mu.Lock()

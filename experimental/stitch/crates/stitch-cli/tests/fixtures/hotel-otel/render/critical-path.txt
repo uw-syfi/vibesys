@@ -1,0 +1,58 @@
+STITCH CRITICAL PATH
+Algorithm wall_clock_active_leaf_v1: at each instant of the root span, the deepest span active on the synchronous path is critical; among parallel children the one ending last wins. A remote call's server node also owns its client's interval, so network time counts toward the callee. Segments cover the root's wall time exactly; a parent's own time between children is its self time. Producer/consumer and link relationships are excluded.
+share = this node's critical time / all root wall time. ms/req = critical time per root request. mean and p95 are over the traces where the node was critical (on-path).
+
+════════════════════════════════════════════════════════════════════════════════════════════════════
+ROOT frontend: GET /hotels   requests 12  errors 1
+latency mean 13.17 ms  p50 12.35 ms  p95 20.28 ms  p99 20.83 ms  max 20.97 ms
+
+rank   share    ms/req   mean ms    p95 ms        on-path  node
+   1   26.0%      3.42      3.42      5.27          12/12  profile: memcached get
+   2   12.0%      1.58      1.58      2.43          12/12  geo: mongodb find
+   3   12.0%      1.58      1.58      2.43          12/12  rate: mongodb find
+   4   10.0%      1.32      1.32      2.03          12/12  frontend: GET /hotels
+   5   10.0%      1.32      1.32      2.03          12/12  search: search.Search/Nearby
+   6    9.0%      1.19      1.19      1.83          12/12  profile: profile.Profile/GetProfiles
+   7    7.0%      0.92      0.92      1.42          12/12  rate: rate.Rate/GetRates
+   8    6.0%      0.79      0.79      1.22          12/12  rate: memcached get
+   9    5.0%      0.66      0.66      1.01          12/12  frontend: render
+  10    3.0%      0.40      0.40      0.61          12/12  geo: geo.Geo/Nearby
+
+Critical path of the p95-representative trace 0000000000000000000000000000a000 (19.71 ms):
+ offset ms     dur ms  node
+      0.00       0.99  frontend: GET /hotels
+      0.99       0.99  search: search.Search/Nearby
+      1.97       0.59  geo: geo.Geo/Nearby
+      2.56       2.37  geo: mongodb find
+      4.93       0.59  rate: rate.Rate/GetRates
+      5.52       1.18  rate: memcached get
+      6.70       0.20  rate: rate.Rate/GetRates
+      6.90       2.37  rate: mongodb find
+      9.27       0.59  rate: rate.Rate/GetRates
+      9.86       0.99  search: search.Search/Nearby
+     10.84       0.59  frontend: GET /hotels
+     11.43       0.79  profile: profile.Profile/GetProfiles
+… 5 segments not shown (raise --max-nodes)
+async relationships excluded: 0
+
+════════════════════════════════════════════════════════════════════════════════════════════════════
+ROOT frontend: HTTP GET /recommendations   requests 5  errors 0
+latency mean 5.78 ms  p50 5.70 ms  p95 7.15 ms  p99 7.28 ms  max 7.31 ms
+
+rank   share    ms/req   mean ms    p95 ms        on-path  node
+   1   50.0%      2.89      2.89      3.57            5/5  recommendation: recommendation.Recommendation/GetRecommendations
+   2   20.0%      1.16      1.16      1.43            5/5  profile: memcached get
+   3   15.0%      0.87      0.87      1.07            5/5  profile: profile.Profile/GetProfiles
+   4   15.0%      0.87      0.87      1.07            5/5  frontend: HTTP GET /recommendations
+
+Critical path of the p95-representative trace 0000000000000000000000000000b001 (7.31 ms):
+ offset ms     dur ms  node
+      0.00       0.55  frontend: HTTP GET /recommendations
+      0.55       3.65  recommendation: recommendation.Recommendation/GetRecommendations
+      4.20       0.37  frontend: HTTP GET /recommendations
+      4.57       0.37  profile: profile.Profile/GetProfiles
+      4.93       1.46  profile: memcached get
+      6.39       0.73  profile: profile.Profile/GetProfiles
+      7.12       0.18  frontend: HTTP GET /recommendations
+async relationships excluded: 0
+

@@ -54,6 +54,8 @@ func describe(j *cliv1.Job) string {
 		fmt.Fprint(&b, "\tcheck")
 	case spec.GetMeasure() != nil:
 		fmt.Fprintf(&b, "\tmeasure (%d samples)", spec.GetMeasure().GetSamples())
+	case spec.GetTrace() != nil:
+		fmt.Fprint(&b, "\ttrace")
 	}
 	if p := placementOf(j.GetEnvironment()); p != "" {
 		fmt.Fprintf(&b, "\ton %s", p)

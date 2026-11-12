@@ -361,7 +361,7 @@ func testJobs(t *testing.T, newStore New) {
 					f.States = []core.JobState{core.JobStates()[rng.IntN(6)], core.JobStates()[rng.IntN(6)]}
 				}
 				if rng.IntN(3) == 0 {
-					f.Kind = []core.JobKind{core.JobCheck, core.JobCommand, core.JobMeasure}[rng.IntN(3)]
+					f.Kind = []core.JobKind{core.JobCheck, core.JobCommand, core.JobMeasure, core.JobTrace}[rng.IntN(4)]
 				}
 				if rng.IntN(3) == 0 {
 					f.NoteContains = []string{"fast", "Fast", "retry", "miss", "zzz"}[rng.IntN(5)]

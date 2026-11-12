@@ -62,7 +62,8 @@
   "sdk/vibesys-evaluator/python/src/vibesys_evaluator/_private/core.py": {
     "VIBESYS_EVALUATOR_BIN": 1,
     "VIBESYS_EVALUATOR_LOADGEN": 1,
-    "VIBESYS_EVALUATOR_OTELCAPTURE": 1
+    "VIBESYS_EVALUATOR_OTELCAPTURE": 1,
+    "VIBESYS_EVALUATOR_STITCH": 1
   },
   "sdk/vibesys-evaluator/python/src/vibesys_evaluator/_private/sample.py": {
     "VIBESYS_SAMPLE_SEED": 1

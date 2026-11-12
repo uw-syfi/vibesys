@@ -91,7 +91,9 @@ Read-only worktree of the revision, placed and removed as for the judge. When th
 expose something it does not (a profiler endpoint, symbols), create a branch and worktree for
 it at the revision and name it as the instrumentation branch; a profile of an earlier revision
 can be reused on a later one by cherry-picking its instrumentation commit onto a new branch. Profiles that drive load run as
-`vibesys-cli submit command` jobs; their output is read with `vibesys-cli logs`.
+`vibesys-cli submit command` jobs; their output is read with `vibesys-cli logs`. In a task with
+`[trace]`, a question about where a request's time goes starts from the revision's trace job
+(`vibesys-cli submit trace <sha>`; name it in the brief if one exists).
 
 ```
 Question: <one question about one revision>      Revision: <SHA>

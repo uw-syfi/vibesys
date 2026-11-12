@@ -15,6 +15,7 @@ var jobSpecFieldsAddedBy = map[string]int{
 	"commit": 2, "environment": 2, "check": 2, "command": 2, "measure": 2,
 	"placement":  4,
 	"allocation": 7,
+	"trace":      8,
 }
 
 // Every field of a job's spec is named under the version that added it, and no version named is

@@ -14,7 +14,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
-// keyFlow resolves a check or a measure submission before it is queued: it reads the task as the
+// keyFlow resolves a check, a measure or a trace submission before it is queued: it reads the task as the
 // submission's commit has it, decides the environment the job runs in and fingerprints it, and
 // puts the sample count a measure asks for into the spec, so the job and its key say what will
 // run. It gives the submission the job's cache key, what its task needs of a placement, and the
@@ -34,6 +34,10 @@ func (a *App) keyFlow(ctx context.Context, sub core.Submission) (core.Submission
 	}
 	if err := a.refuseChangedTask(ctx, c.Scope, spec.Commit, t); err != nil {
 		return sub, err
+	}
+	if _, ok := spec.Settings.(core.TraceSettings); ok && t.Trace == nil {
+		return sub, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
+			"task %q declares no [trace] at commit %s, so it has no trace to run; add a [trace] command to its %s", t.Name, spec.Commit, task.ManifestName)}
 	}
 	kind, err := core.ChooseEnvironment(t.Setup(), spec.Environment)
 	if err != nil {
@@ -211,7 +215,7 @@ func (a *App) refuseChangedTask(ctx context.Context, scope core.Scope, commit co
 		commit, scope.Task(), head, strings.Join(named, ", "), more, task.TasksDir, scope.Task())}
 }
 
-// planFlow makes the plan of a queued check or measure job that is about to start: the rule for
+// planFlow makes the plan of a queued check, measure or trace job that is about to start: the rule for
 // what the cache lets it skip, applied now and not when the job was queued (flow.Prepare). It
 // fails when the task or the environment is not what the job was keyed under.
 func (a *App) planFlow(ctx context.Context, st store.Store, scope core.Scope, job core.Job, fingerprint core.Fingerprint) (flow.Plan, error) {

@@ -32,7 +32,11 @@ Commit first: a job runs a commit, never a working copy, so what is not committe
 | --- | --- |
 | The correctness check on a commit | `vibesys-cli submit check <sha>` |
 | The official number: check, then benchmark samples | `vibesys-cli submit measure <sha> --samples 5 --plan <n>` |
+| Where a request's time goes, per hop (a task with `[trace]`: OpenTelemetry spans, call tree, critical path) | `vibesys-cli submit trace <sha>` |
 | Any other work that drives load (a sanity or tuning run, a profile) | `vibesys-cli submit command <sha> -- <argv...>` |
+
+A trace is evidence, never a score: it is saved per commit and reused like a check pass, and its
+reports are text you read first. What it holds and how to read it: [traces.md](references/traces.md).
 
 Each prints a job id and returns at once. A measure says what it tests: `--plan <n>` links it to
 your plan, so the number is read against that idea, and `--no-plan` says it tests none, as the

@@ -30,7 +30,12 @@ const (
 	// allocation it was asked to run in, so a command line sends it only to a daemon of 6
 	// (AllocationsSince). MinDaemonProtocolVersion stays 4: a command line that names no allocation
 	// works with an older daemon as it always did.
-	ProtocolVersion uint32 = 6
+	//
+	// 7: a submission may ask for a trace job (JobSpec.trace), whose result is a trace
+	// (Result.trace) and whose failure may name the trace stage. A daemon of 6 reads such a
+	// submission as one with no settings and refuses it; it serves everything else as before, so
+	// the command line's minimum stays where it is.
+	ProtocolVersion uint32 = 7
 
 	// MinProtocolVersion is the oldest ProtocolVersion this build still serves. A daemon still
 	// serves command lines and supervisors of 1: an older command line waits through Watch and

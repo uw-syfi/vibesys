@@ -305,7 +305,7 @@ func (s *Supervisor) executePlan(plan flow.Plan) lifecycle.Verdict {
 	case flow.NotAttempted:
 		return lifecycle.NotAttempted{Failure: v.Failure}
 	case flow.Rejected:
-		return lifecycle.Rejected{Reason: v.Reason, Stage: flow.StageBenchmark.JobStage()}
+		return lifecycle.Rejected{Reason: v.Reason, Stage: v.Stage.JobStage()}
 	case flow.Stopped:
 		// A step that ended unlike a pass: the job's output says which, and the settlement of the
 		// exit says the rest.

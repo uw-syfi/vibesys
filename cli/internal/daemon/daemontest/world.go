@@ -41,6 +41,9 @@ type World struct {
 	// CardFiles holds the files DescribeTask reads a task's card from.
 	CardFiles *task.MemoryCardFiles
 	Files     *hostfs.Memory
+	// Artifacts, when set before a daemon starts, names the artifacts directory of a job in Files,
+	// as the daemon's machine does; without it the jobs keep none.
+	Artifacts func(repository, task string, job core.JobID) string
 	// Scheduler and Allocations, when set, are how the daemons share the machine and keep standing
 	// allocations; the zero values run one job at a time and keep none.
 	Scheduler   app.Scheduler
@@ -78,7 +81,7 @@ func NewWorld(t testing.TB) *World {
 func (w *World) Runtime() daemon.Runtime {
 	envs := fakeenv.Environments{core.EnvironmentHost: w.Env}
 	clk := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond)
-	host := supervisor.Host{Files: w.Files, Clock: clk}
+	host := supervisor.Host{Files: w.Files, Clock: clk, Artifacts: w.Artifacts}
 	return daemon.Runtime{
 		Stores: w.Stores, Environments: envs, Branches: w.Branches, Repositories: w.Git, Tasks: w.Tasks, CardFiles: w.CardFiles,
 		Supervisors: supervisor.NewInProcess(envs, w.Checkouts, w.Survivors).WithHost(host),

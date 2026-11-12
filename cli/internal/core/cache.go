@@ -57,12 +57,14 @@ type CachePlan struct {
 //   - A measure reuses its saved samples. When more samples are asked for than were saved, only the
 //     difference runs, and when none were saved the whole count runs. The count asked for is the
 //     settings' Samples, or the task's default when that is zero.
+//   - A trace reuses the newest saved trace of its key, as a check reuses a pass. A failed trace
+//     saves no result, so failures always rerun.
 //   - NoCache runs the whole job, with a fresh check. Recheck runs a fresh check in a measure job
 //     that runs; a measure that is answered from saved samples runs nothing, so it has no check
 //     to redo.
 //
 // It fails with a *Failure of kind FailureInvalidInput for missing settings, settings that are not
-// check, command or measure settings, or a measure job with no sample count to ask for.
+// check, command, measure or trace settings, or a measure job with no sample count to ask for.
 func PlanCache(q CacheQuery) (CachePlan, error) {
 	switch settings := q.Settings.(type) {
 	case CommandSettings:
@@ -71,11 +73,21 @@ func PlanCache(q CacheQuery) (CachePlan, error) {
 		return planCheck(q), nil
 	case MeasureSettings:
 		return planMeasure(q, settings)
+	case TraceSettings:
+		return planTrace(q), nil
 	case nil:
 		return CachePlan{}, failf(FailureInvalidInput, "settings: missing")
 	default:
-		return CachePlan{}, failf(FailureInvalidInput, "settings: %T is not check, command or measure settings", q.Settings)
+		return CachePlan{}, failf(FailureInvalidInput, "settings: %T is not check, command, measure or trace settings", q.Settings)
 	}
+}
+
+func planTrace(q CacheQuery) CachePlan {
+	traces := savedBy(q.Saved, func(r Result) bool { _, ok := r.Outcome.(TraceOutcome); return ok && r.Key == q.Key })
+	if q.NoCache || len(traces) == 0 {
+		return CachePlan{Action: CacheRun}
+	}
+	return CachePlan{Action: CacheReuse, From: []JobID{traces[len(traces)-1].Job}}
 }
 
 func planCheck(q CacheQuery) CachePlan {
@@ -158,6 +170,9 @@ func CanJoin(existing Job, submission Submission, defaultSamples uint32) bool {
 	switch theirs := submission.Spec.Settings.(type) {
 	case CheckSettings:
 		_, same := existing.Spec.Settings.(CheckSettings)
+		return same
+	case TraceSettings:
+		_, same := existing.Spec.Settings.(TraceSettings)
 		return same
 	case MeasureSettings:
 		ours, same := existing.Spec.Settings.(MeasureSettings)

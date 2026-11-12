@@ -10,7 +10,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
-// Plan is everything a check or a measure job needs to run. The daemon makes it when the job
+// Plan is everything a check, a measure or a trace job needs to run. The daemon makes it when the job
 // starts and the supervisor only follows it: nothing in a plan is decided by the process that
 // carries it out.
 type Plan struct {
@@ -35,6 +35,9 @@ type Plan struct {
 	// Objectives is what a measure job of a multi-objective task is judged on: every sample must
 	// report each of them, and the result records them. It is the zero value for any other task.
 	Objectives core.Objectives
+	// Trace is the task's [trace] command, which a trace job runs once after the build and the
+	// candidate, with no check. It is for a trace job only.
+	Trace task.Command
 
 	// Samples is how many benchmark runs this job takes now: what the cache lacks, not the count
 	// the submission asked for. It is zero for a check job.
@@ -54,14 +57,17 @@ type Plan struct {
 	Service *task.Service
 }
 
-// serves reports whether the job starts its job-scoped server: a measure job of a task with one,
-// and a check job when the check shares it.
+// serves reports whether the job starts its job-scoped server: a measure or a trace job of a task
+// with one, and a check job when the check shares it.
 func (p Plan) serves() bool {
-	return p.Service != nil && (p.Kind == core.JobMeasure || p.Service.ShareWithCheck)
+	return p.Service != nil && (p.Kind == core.JobMeasure || p.Kind == core.JobTrace || p.Service.ShareWithCheck)
 }
 
-// RunsCheck reports whether the job runs the check.
-func (p Plan) RunsCheck() bool { return p.Kind == core.JobCheck || p.CheckPass == "" }
+// RunsCheck reports whether the job runs the check: a check job always, a measure job that links
+// no pass, and a trace job never.
+func (p Plan) RunsCheck() bool {
+	return p.Kind == core.JobCheck || (p.Kind == core.JobMeasure && p.CheckPass == "")
+}
 
 // Validate reports why a plan cannot be followed, naming the field. A plan that passes can be
 // stepped; a plan that does not never starts.
@@ -90,8 +96,15 @@ func (p Plan) Validate() error {
 		if err := validObjectives(p.Metric, p.Result, p.Objectives); err != nil {
 			return bad("%v", err)
 		}
+	case core.JobTrace:
+		if p.Samples != 0 || p.CheckPass != "" {
+			return bad("a trace job has no samples and links no pass")
+		}
+		if err := validCommand("trace", p.Trace); err != nil {
+			return bad("%v", err)
+		}
 	default:
-		return bad("kind %q is neither check nor measure", p.Kind)
+		return bad("kind %q is not check, measure or trace", p.Kind)
 	}
 	if p.Task == "" || p.TaskVersion == "" || p.Key == "" {
 		return bad("the task, its version and the job key are all required")
@@ -200,6 +213,8 @@ const (
 	StageCheck     Stage = "check"
 	StageBenchmark Stage = "benchmark"
 	StageObserve   Stage = "observe"
+	// StageTrace runs the task's [trace] command of a trace job.
+	StageTrace Stage = "trace"
 	// StageService starts the job-scoped server: before the first sample, before the check when the
 	// check shares it, and again before a sample whose server ended.
 	StageService Stage = "service"
@@ -209,7 +224,7 @@ const (
 
 // JobStage is the stage of a job's record that an ending in this step belongs to: the image or the
 // candidate's image that did not build is BUILD, the correctness check is CHECK, the benchmark is
-// MEASURE. A step outside those (the checkout, a server, a reset, a look at the machine) is none: it
+// MEASURE, the trace command is TRACE. A step outside those (the checkout, a server, a reset, a look at the machine) is none: it
 // says nothing of whether the candidate built or the check judged it.
 func (s Stage) JobStage() core.JobStage {
 	switch s {
@@ -219,6 +234,8 @@ func (s Stage) JobStage() core.JobStage {
 		return core.StageCheck
 	case StageBenchmark:
 		return core.StageMeasure
+	case StageTrace:
+		return core.StageTrace
 	}
 	return ""
 }
@@ -240,6 +257,12 @@ type Findings struct {
 	// Services is the server each sample ran on, one per sample, for a job with a job-scoped
 	// server, and nil otherwise.
 	Services []core.SampleService
+	// TraceTook, TraceArtifacts and TraceFiles are what a trace job's command left: how long it
+	// ran, its artifacts directory as the shell reported it, and the entries directly under that
+	// directory's trace/ directory, sorted.
+	TraceTook      time.Duration
+	TraceArtifacts string
+	TraceFiles     []string
 }
 
 // Record is the result to save for a job that passed. A measure job names itself as its check pass
@@ -250,8 +273,12 @@ func (p Plan) Record(job core.JobID, commit core.Commit, f Findings, at time.Tim
 		SchemaVersion: core.SchemaVersion, Environment: p.Environment,
 		Machine: f.Machine, Load: f.Load, RecordedAt: at, CandidateImage: f.CandidateImage,
 	}
-	if p.Kind == core.JobCheck {
+	switch p.Kind {
+	case core.JobCheck:
 		r.Outcome = core.CheckOutcome{Duration: f.CheckTook}
+		return r
+	case core.JobTrace:
+		r.Outcome = core.TraceOutcome{ArtifactsDir: f.TraceArtifacts, Files: slices.Clone(f.TraceFiles), Duration: f.TraceTook}
 		return r
 	}
 	checkJob := p.CheckPass

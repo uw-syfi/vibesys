@@ -144,6 +144,17 @@ func checkPass(job string, commit core.Commit, minute int, options ...func(*core
 	return r
 }
 
+// savedTrace is a trace of a commit that succeeded.
+func savedTrace(job string, commit core.Commit, minute int, options ...func(*core.Result)) core.Result {
+	r := checkPass(job, commit, minute)
+	r.Key = "key-trace"
+	r.Outcome = core.TraceOutcome{ArtifactsDir: "state/artifacts/kv/" + job + "/02-trace", Files: []string{"README.txt", "report.txt"}}
+	for _, option := range options {
+		option(&r)
+	}
+	return r
+}
+
 func inEnvironment(f core.Fingerprint) func(*core.Result) {
 	return func(r *core.Result) { r.Environment = f }
 }

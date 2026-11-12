@@ -59,6 +59,43 @@ func TestACheckReusesPassesOnly(t *testing.T) {
 	}
 }
 
+// A trace reuses the newest saved trace of its own key, as a check reuses a pass: a pass, a
+// measurement or a trace under another key never answers it, and no-cache always runs it.
+func TestATraceReusesTheNewestTraceOfItsKeyOnly(t *testing.T) {
+	first := savedTrace("t1", commitN(1), 5, underKey("k"))
+	later := savedTrace("t2", commitN(1), 9, underKey("k"))
+	elsewhere := savedTrace("t3", commitN(1), 12, underKey("other-key"))
+	pass := checkPass("c1", commitN(1), 13, underKey("k"))
+	measured := measurement("m1", commitN(1), []float64{1, 2, 3}, 14, underKey("k"))
+	cases := []struct {
+		name  string
+		saved []core.Result
+		no    bool
+		want  core.CachePlan
+	}{
+		{"nothing saved: a failed trace saves nothing, so it reruns", nil, false, core.CachePlan{Action: core.CacheRun}},
+		{"a trace under the key", []core.Result{first}, false, core.CachePlan{Action: core.CacheReuse, From: []core.JobID{"t1"}}},
+		{"the newest trace", []core.Result{later, first}, false, core.CachePlan{Action: core.CacheReuse, From: []core.JobID{"t2"}}},
+		{"a trace under another key does not count", []core.Result{elsewhere}, false, core.CachePlan{Action: core.CacheRun}},
+		{"a pass is not a trace", []core.Result{pass}, false, core.CachePlan{Action: core.CacheRun}},
+		{"a measurement is not a trace", []core.Result{measured}, false, core.CachePlan{Action: core.CacheRun}},
+		{"no cache", []core.Result{first, later}, true, core.CachePlan{Action: core.CacheRun}},
+	}
+	for _, c := range cases {
+		got := plan(t, core.CacheQuery{Key: "k", Settings: core.TraceSettings{}, NoCache: c.no, Saved: c.saved})
+		if got.Action != c.want.Action || !slices.Equal(got.From, c.want.From) || got.Samples != 0 || got.FreshCheck {
+			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
+		}
+	}
+	// A saved trace holds no check pass, so a check is never answered by one.
+	if key, ok := first.PassKey(); ok {
+		t.Errorf("a trace holds the pass of %q", key)
+	}
+	if got := plan(t, core.CacheQuery{Key: "k", Settings: core.CheckSettings{}, Saved: []core.Result{first}}); got.Action != core.CacheRun {
+		t.Errorf("a check answered by a trace: %+v", got)
+	}
+}
+
 func TestAMeasureTopsUpToTheRequestedCount(t *testing.T) {
 	saved := func(counts ...int) []core.Result {
 		var out []core.Result
@@ -201,6 +238,12 @@ func TestSubmissionsJoinOnlyJobsThatAnswerThem(t *testing.T) {
 		{"no cache never joins", queuedJob(core.JobCheck, "k", check, core.JobRunning), submit("k", check, true), false},
 		{"another key", queuedJob(core.JobCheck, "k", check, core.JobRunning), submit("j", check, false), false},
 		{"a check does not join a measure", queuedJob(core.JobMeasure, "k", measure(3, false), core.JobRunning), submit("k", check, false), false},
+		{"the same trace, queued", queuedJob(core.JobTrace, "k", core.TraceSettings{}, core.JobQueued), submit("k", core.TraceSettings{}, false), true},
+		{"the same trace, running", queuedJob(core.JobTrace, "k", core.TraceSettings{}, core.JobRunning), submit("k", core.TraceSettings{}, false), true},
+		{"a finished trace is reuse, not a join", queuedJob(core.JobTrace, "k", core.TraceSettings{}, core.JobSucceeded), submit("k", core.TraceSettings{}, false), false},
+		{"a trace with no cache never joins", queuedJob(core.JobTrace, "k", core.TraceSettings{}, core.JobRunning), submit("k", core.TraceSettings{}, true), false},
+		{"a trace does not join a check", queuedJob(core.JobCheck, "k", check, core.JobRunning), submit("k", core.TraceSettings{}, false), false},
+		{"a check does not join a trace", queuedJob(core.JobTrace, "k", core.TraceSettings{}, core.JobRunning), submit("k", check, false), false},
 		{"a command never joins", queuedJob(core.JobCommand, "", core.CommandSettings{Argv: []string{"x"}}, core.JobRunning), submit("", core.CommandSettings{Argv: []string{"x"}}, false), false},
 		{"equal samples", queuedJob(core.JobMeasure, "k", measure(5, false), core.JobRunning), submit("k", measure(5, false), false), true},
 		{"more samples than asked", queuedJob(core.JobMeasure, "k", measure(8, false), core.JobRunning), submit("k", measure(5, false), false), true},
