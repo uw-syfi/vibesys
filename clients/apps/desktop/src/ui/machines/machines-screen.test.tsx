@@ -4,10 +4,12 @@ import {
   EvalPlaceKind,
   EvalPlaceSchema,
   ListEvalPlacesResponseSchema,
+  OffersSource,
   OffersUnreadableReason,
 } from '@vibesys/orchestrator-proto';
-import fc from 'fast-check';
+import type {ReactNode} from 'react';
 import {
+  emptyAddMachine,
   failedOf,
   type MachineRow,
   type MachineView,
@@ -17,49 +19,76 @@ import {
 } from '../../state/index.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
 import {richPlaces} from '../../testing/orchestrator/new-run-catalogue.js';
-import {MachinesFactsLine} from './machines-facts.js';
+import type {MachineControls} from './add-machine/machine-controls.js';
 import {type MachineStatsHost, MachinesScreen, type PlacesHost} from './machines-screen.js';
 
 installDom();
 
 const GIB = 1024 ** 3;
 
-const live: MachineRow = {
+const local: MachineRow = {
   key: 'local',
   label: 'This machine',
   status: {kind: 'live', cause: null, staleForMs: null},
 };
+
+const remote: MachineRow = {
+  key: 'ssh:operator@host-a',
+  label: 'operator@host-a',
+  status: {kind: 'stale', cause: null, staleForMs: 120_000},
+};
+
 const refused: MachineRow = {
   key: 'ssh:host-b',
   label: 'host-b',
   status: {kind: 'refused', cause: null, staleForMs: null},
 };
 
+const sample = (cpuPercent: number): MachineView => ({
+  _tag: 'Shown',
+  stale: null,
+  sample: {
+    cpuPercent: {_tag: 'Read', value: cpuPercent},
+    memory: {_tag: 'Read', value: {usedBytes: 8 * GIB, totalBytes: 32 * GIB}},
+    gpus: {_tag: 'Read', value: []},
+  },
+});
+
 const notProbed = create(EvalPlaceSchema, {
   name: 'cluster-c',
   kind: EvalPlaceKind.SLURM,
   state: {case: 'unreadable', value: {reason: OffersUnreadableReason.NOT_PROBEABLE}},
 });
+
 const response = create(ListEvalPlacesResponseSchema, {places: [...richPlaces(), notProbed]});
 
-const sample: MachineView = {
-  _tag: 'Shown',
-  stale: null,
-  sample: {
-    cpuPercent: {_tag: 'Read', value: 37.5},
-    memory: {_tag: 'Read', value: {usedBytes: 41 * GIB, totalBytes: 128 * GIB}},
-    gpus: {
-      _tag: 'Read',
-      value: [
-        {
-          index: 0,
-          name: 'H100',
-          utilizationPercent: 92,
-          memory: {usedBytes: 71 * GIB, totalBytes: 80 * GIB},
-        },
-      ],
-    },
+const directPlace = (name: string) =>
+  create(EvalPlaceSchema, {
+    name,
+    kind: EvalPlaceKind.SSH,
+    state: {case: 'known', value: {source: OffersSource.PROBED}},
+  });
+
+const controls = (remove: (key: string) => void, toasts: ReactNode = null): MachineControls => ({
+  add: {
+    state: emptyAddMachine,
+    type: () => undefined,
+    pick: () => undefined,
+    submit: () => undefined,
+    reset: () => undefined,
   },
+  remove,
+  toasts,
+  selected: null,
+  select: () => undefined,
+});
+
+const card = (container: HTMLElement, title: string): HTMLElement => {
+  const found = [...container.querySelectorAll<HTMLElement>('section.vs-card')].find(section =>
+    section.querySelector('.vs-card-title')?.textContent?.includes(title),
+  );
+  if (found === undefined) throw new Error(`no card named ${title}`);
+  return found;
 };
 
 function open(
@@ -70,7 +99,7 @@ function open(
   } = {},
 ) {
   const refreshed: string[] = [];
-  const rows = options.rows ?? [live];
+  const rows = options.rows ?? [local];
   const draw = (places: Readonly<Record<string, PlacesHost['places']>>) => (
     <MachinesScreen
       rows={rows}
@@ -95,128 +124,91 @@ function open(
   return {screen, refreshed, draw};
 }
 
-const bodyRows = (container: HTMLElement) => [
-  ...container.querySelectorAll<HTMLElement>('table[aria-label="Machines"] tbody tr'),
-];
+const cells = (container: HTMLElement, label: string): string[][] =>
+  [...container.querySelectorAll(`table[aria-label="${label}"] tbody tr`)].map(row =>
+    [...row.querySelectorAll('td')].map(cell => cell.textContent?.trim() ?? ''),
+  );
 
-/** Each row as the person reads it: its kind and the text of each cell. */
-const cells = (container: HTMLElement): string[][] =>
-  bodyRows(container).map(row => [
-    row.getAttribute('data-kind') ?? 'machine',
-    ...[...row.querySelectorAll('td')].map(cell => cell.textContent?.trim() ?? ''),
-  ]);
+const dimmed = (container: HTMLElement, label: string): number =>
+  container.querySelectorAll(`table[aria-label="${label}"] .vs-stale[data-stale]`).length;
 
-describe('the Machines page', () => {
-  it('is one table: the machine, then each place it can run jobs at, in the host’s order', () => {
-    const {screen} = open({places: {local: readOf(response)}, stats: {local: sample}});
-    expect(screen.container.querySelectorAll('table')).toHaveLength(1);
-    expect(cells(screen.container).map(row => row.slice(0, 2))).toEqual([
-      ['machine', 'This machine'],
-      ['sub', 'local'],
-      ['sub', 'host-a'],
-      ['sub', 'cluster-a'],
-      ['sub', 'cluster-b'],
-      ['sub', 'cluster-c'],
-    ]);
-    screen.unmount();
-  });
-
-  it('gives the machine its status and readings, and each place its reach and what it offers', () => {
-    const {screen} = open({places: {local: readOf(response)}, stats: {local: sample}});
-    const rows = cells(screen.container);
-    expect(rows[0]).toEqual([
-      'machine',
-      'This machine',
-      'Live',
-      '37.5%',
-      '41 / 128 GiB',
-      '92%',
-      '',
-    ]);
-    expect(
-      rows.slice(1).map(row => row.slice(1, 2).concat(row.slice(2, 3), row.slice(5, 6))),
-    ).toEqual([
-      ['local', 'Reachable', 'CPU only'],
-      ['host-a', 'Reachable', '8× H100'],
-      ['cluster-a', 'Reachable', '8× MI300X'],
-      ['cluster-b', 'Unreachable', ''],
-      ['cluster-c', 'Not probed', ''],
-    ]);
-    screen.unmount();
-  });
-
-  it('sizes a status chip to its word and names a machine whole on hover, never wrapped', () => {
-    const {screen} = open({places: {local: readOf(response)}});
-    for (const chip of screen.container.querySelectorAll('.vs-chip')) {
-      expect(chip.hasAttribute('data-even')).toBe(false);
-    }
-    const name = screen.container.querySelector<HTMLElement>('td[data-clip]');
-    expect(name?.getAttribute('title')).toBe('This machine');
-    screen.unmount();
-  });
-
-  it('says what the readings and places wait for in the same rows, so nothing moves as they come', () => {
-    const {screen} = open({rows: [live, refused]});
-    expect(cells(screen.container)).toEqual([
-      ['machine', 'This machine', 'Live', 'Waiting for the first reading', ''],
-      ['sub', 'Waiting for job places', '', '', '', '', ''],
-      ['machine', 'host-b', 'Refused', 'Waiting for the first reading', ''],
-      ['sub', 'Waiting for job places', '', '', '', '', ''],
-    ]);
-    screen.unmount();
-  });
-
-  it('keeps every clipped place note whole in the document and on hover', () => {
-    const cases = [
-      {places: NOT_READ, note: 'Waiting for job places'},
-      {places: readOf(create(ListEvalPlacesResponseSchema, {places: []})), note: 'No job places'},
-      {places: failedOf(NOT_READ, 'host unreachable'), note: 'Job places not read'},
-    ] as const;
-    for (const {places, note} of cases) {
-      const {screen} = open({places: {local: places}});
-      const clipped = screen.container.querySelector<HTMLElement>(
-        'tr[data-kind="sub"] td[data-clip]',
-      );
-      expect(clipped?.textContent?.trim()).toBe(note);
-      expect(clipped?.getAttribute('title')).toBe(note);
-      screen.unmount();
-    }
-  });
-
-  it('says No stats with a hint, and why places were not read, for a machine that cannot say', () => {
-    const {screen} = open({
-      rows: [refused],
-      stats: {'ssh:host-b': {_tag: 'Missing', why: 'unsupported'}},
-      places: {'ssh:host-b': failedOf(NOT_READ, 'host unreachable')},
-    });
-    const rows = cells(screen.container);
-    expect(rows[0]?.[3]).toBe('No stats · not supported on this host');
-    expect(rows[1]).toEqual(['sub', 'Job places not read', 'Not read', '', '', '', '']);
-    const hint = screen.container.querySelector('.vs-chip[aria-description]');
-    expect(hint?.getAttribute('aria-description')).toBe('host unreachable');
-    screen.unmount();
-  });
-
-  it('shows an unreachable place’s reason as the hint of its chip', () => {
-    const reason = create(EvalPlaceSchema, {
-      name: 'cluster-b',
-      kind: EvalPlaceKind.SLURM,
-      state: {
-        case: 'unreadable',
-        value: {reason: OffersUnreadableReason.UNREACHABLE, detail: 'connection timed out'},
+describe('the Machines operator page', () => {
+  it('joins connection, repository, telemetry and eval places by host key into professional cards', () => {
+    const refreshed: string[] = [];
+    const removed: string[] = [];
+    const stats: readonly MachineStatsHost[] = [
+      {key: remote.key, label: remote.label, view: sample(73)},
+      {key: local.key, label: local.label, view: sample(11)},
+    ];
+    const places: readonly PlacesHost[] = [
+      {
+        key: remote.key,
+        label: remote.label,
+        places: readOf(
+          create(ListEvalPlacesResponseSchema, {places: [directPlace('gpu-cluster')]}),
+        ),
       },
-    });
-    const answer = readOf(create(ListEvalPlacesResponseSchema, {places: [reason]}));
-    const {screen} = open({places: {local: answer}});
-    const chip = [...screen.container.querySelectorAll('.vs-chip')].find(
-      each => each.textContent === 'Unreachable',
+      {
+        key: local.key,
+        label: local.label,
+        places: readOf(create(ListEvalPlacesResponseSchema, {places: [directPlace('local')]})),
+      },
+    ];
+    const screen = mount(
+      <MachinesScreen
+        rows={[local, remote]}
+        stats={stats}
+        places={{hosts: places, refresh: key => refreshed.push(key)}}
+        repositories={{[remote.key]: '~/work'}}
+        controls={controls(key => removed.push(key))}
+        addMachine={() => undefined}
+      />,
     );
-    expect(chip?.getAttribute('aria-description')).toBe('connection timed out');
+
+    const localCard = card(screen.container, 'This machine');
+    const remoteCard = card(screen.container, 'operator@host-a');
+    expect(localCard.textContent).toContain('ConnectionLocal');
+    expect(localCard.textContent).toContain('RepositoriesHost default');
+    expect(localCard.textContent).toContain('11%');
+    expect(localCard.textContent).toContain('local');
+    expect(remoteCard.textContent).toContain('ConnectionSSH');
+    expect(remoteCard.textContent).toContain('Destinationhost-a');
+    expect(remoteCard.textContent).toContain('Useroperator');
+    expect(remoteCard.textContent).toContain('PortResolved by SSH');
+    expect(remoteCard.textContent).toContain('Repositories~/work');
+    expect(remoteCard.textContent).toContain('73%');
+    expect(remoteCard.textContent).toContain('gpu-cluster');
+    expect(screen.controls('Remove This machine from this app')).toHaveLength(0);
+
+    screen.press(screen.control('Refresh job places on operator@host-a'));
+    screen.press(screen.control('Remove operator@host-a from this app'));
+    expect(refreshed).toEqual([remote.key]);
+    expect(removed).toEqual([remote.key]);
     screen.unmount();
   });
 
-  it('says in one line how many machines, how many are live, how many places and how many cannot be reached', () => {
-    const {screen} = open({rows: [live, refused], places: {local: readOf(response)}});
+  it('labels SSH-config values as resolved instead of inventing a user or port', () => {
+    const screen = mount(
+      <MachinesScreen
+        rows={[
+          {
+            key: 'ssh:gpu-a',
+            label: 'gpu-a',
+            status: {kind: 'connecting', cause: null, staleForMs: null},
+          },
+        ]}
+      />,
+    );
+    const machine = card(screen.container, 'gpu-a');
+    expect(machine.textContent).toContain('Destinationgpu-a');
+    expect(machine.textContent).toContain('UserResolved by SSH');
+    expect(machine.textContent).toContain('PortResolved by SSH');
+    expect(machine.textContent).not.toContain('22');
+    screen.unmount();
+  });
+
+  it('summarises machines and their places from the same joined facts', () => {
+    const {screen} = open({rows: [local, refused], places: {local: readOf(response)}});
     const facts = [...screen.container.querySelectorAll('.vs-fact')].map(each => each.textContent);
     expect(facts).toEqual([
       '2 machines',
@@ -225,67 +217,57 @@ describe('the Machines page', () => {
       '1 place unreachable',
       'job places not read on 1 machine',
     ]);
+    expect(screen.container.querySelectorAll('section.vs-card')).toHaveLength(2);
     screen.unmount();
   });
 
-  it('keeps a space between every figure and its word, whatever the counts', () => {
-    fc.assert(
-      fc.property(fc.nat(30), fc.nat(30), fc.nat(30), (machines, live, places) => {
-        const facts = {machines, live, places, unreachable: machines, unread: live};
-        const screen = mount(<MachinesFactsLine facts={facts} />);
-        for (const fact of screen.container.querySelectorAll('.vs-fact')) {
-          expect(fact.textContent).not.toMatch(/\d[A-Za-z]/);
-          expect(fact.textContent).toMatch(/\d+ \S/);
-        }
-        screen.unmount();
+  it('keeps the dedicated Add machine action prominent in the empty state', () => {
+    let opened = 0;
+    const screen = mount(<MachinesScreen rows={[]} addMachine={() => (opened += 1)} />);
+    expect(screen.text()).toContain('No machines connected');
+    expect(screen.controls('Add machine or server')).toHaveLength(1);
+    screen.press(screen.control('Add machine or server'));
+    expect(opened).toBe(1);
+    screen.unmount();
+  });
+
+  it('shows probe failures and unreachable reasons without calling unread data a status', () => {
+    const reason = create(EvalPlaceSchema, {
+      name: 'cluster-b',
+      kind: EvalPlaceKind.SLURM,
+      state: {
+        case: 'unreadable',
+        value: {reason: OffersUnreadableReason.UNREACHABLE, detail: 'connection timed out'},
+      },
+    });
+    const {screen, draw} = open({
+      places: {
+        local: readOf(create(ListEvalPlacesResponseSchema, {places: [reason]})),
+      },
+    });
+    const unreachable = [...screen.container.querySelectorAll<HTMLElement>('.vs-chip')].find(
+      chip => chip.textContent === 'Unreachable',
+    );
+    expect(unreachable?.getAttribute('aria-description')).toBe('connection timed out');
+    screen.render(
+      draw({
+        local: failedOf(
+          readOf(create(ListEvalPlacesResponseSchema, {places: [reason]})),
+          'host unreachable',
+        ),
       }),
-      {numRuns: 20},
     );
-  });
-
-  it('draws a place as a quiet chip when it is reachable and in colour only when something is wrong', () => {
-    const {screen} = open({places: {local: readOf(response)}});
-    const tones = new Map(
-      [...screen.container.querySelectorAll('.vs-chip')].map(chip => [
-        chip.textContent,
-        chip.getAttribute('data-tone'),
-      ]),
+    expect(screen.text()).not.toContain('Not read');
+    const failure = [...screen.container.querySelectorAll<HTMLElement>('.vs-chip')].find(
+      chip => chip.textContent === 'Probe failed',
     );
-    expect(tones.get('Reachable')).toBe('neutral');
-    expect(tones.get('Unreachable')).toBe('err');
+    expect(failure?.getAttribute('aria-description')).toBe('host unreachable');
     screen.unmount();
-  });
-
-  it('sets its table in a card, so its first column is inset like the other dense tables', () => {
-    const {screen} = open();
-    expect(screen.container.querySelector('.vs-card table[aria-label="Machines"]')).not.toBeNull();
-    screen.unmount();
-  });
-
-  it('names each icon by what it acts on, for hover and assistive technology', () => {
-    const {screen} = open({rows: [live, refused]});
-    expect(screen.control('Refresh job places on host-b').getAttribute('aria-label')).toBe(
-      'Refresh job places on host-b',
-    );
-    screen.unmount();
-  });
-
-  it('picks no place row, and shows an empty list as one quiet row', () => {
-    const {screen} = open({places: {local: readOf(response)}});
-    expect(
-      [...screen.container.querySelectorAll('tr[data-kind="sub"]')].filter(each =>
-        each.hasAttribute('data-selectable'),
-      ),
-    ).toHaveLength(0);
-    screen.unmount();
-    const none = mount(<MachinesScreen rows={[]} />);
-    expect(cells(none.container)).toEqual([['empty', 'No machines']]);
-    none.unmount();
   });
 });
 
-describe('Refresh of a machine’s places', () => {
-  it('asks the host to probe again, and offers no editing', () => {
+describe('Refresh of a machine’s eval places', () => {
+  it('asks only that host to probe again and offers no editing', () => {
     const {screen, refreshed} = open({places: {local: readOf(response)}});
     screen.press(screen.control('Refresh job places on This machine'));
     expect(refreshed).toEqual(['local']);
@@ -295,47 +277,37 @@ describe('Refresh of a machine’s places', () => {
     screen.unmount();
   });
 
-  const dimmed = (container: HTMLElement): number =>
-    container.querySelectorAll('tr[data-kind="sub"] .vs-stale[data-stale]').length;
-
-  it('does not dim the places for the read that opening the page starts, and swaps once to the answer', () => {
+  it('does not dim an automatic read, but dims a person-requested read until its answer replaces it', () => {
     const {screen, draw} = open({places: {local: readOf(response)}});
     screen.render(draw({local: readingOf(readOf(response))}));
-    expect(dimmed(screen.container)).toBe(0);
-    expect(cells(screen.container)).toHaveLength(6);
-    const answer = create(ListEvalPlacesResponseSchema, {places: [notProbed]});
-    screen.render(draw({local: readOf(answer)}));
-    expect(dimmed(screen.container)).toBe(0);
-    expect(cells(screen.container).map(row => row[1])).toEqual(['This machine', 'cluster-c']);
-    screen.unmount();
-  });
+    expect(dimmed(screen.container, 'This machine places')).toBe(0);
 
-  it('dims that machine’s places while the read the person asked for goes on, and swaps once to the answer', () => {
-    const {screen, draw} = open({places: {local: readOf(response)}});
+    screen.render(draw({local: readOf(response)}));
     screen.press(screen.control('Refresh job places on This machine'));
-    // The host's answer to the press is not in yet: nothing is dimmed before the read begins.
-    expect(dimmed(screen.container)).toBe(0);
+    expect(dimmed(screen.container, 'This machine places')).toBe(0);
     screen.render(draw({local: readingOf(readOf(response))}));
-    // Each place dims its name, its reach and its offers.
-    expect(dimmed(screen.container)).toBe(5 * 3);
-    expect(cells(screen.container)).toHaveLength(6);
+    expect(dimmed(screen.container, 'This machine places')).toBe(5 * 3);
     expect(screen.control('Refresh job places on This machine').getAttribute('aria-disabled')).toBe(
       'true',
     );
+
     const answer = create(ListEvalPlacesResponseSchema, {places: [notProbed]});
     screen.render(draw({local: readOf(answer)}));
-    expect(dimmed(screen.container)).toBe(0);
-    expect(cells(screen.container).map(row => row[1])).toEqual(['This machine', 'cluster-c']);
+    expect(dimmed(screen.container, 'This machine places')).toBe(0);
+    expect(cells(screen.container, 'This machine places')).toEqual([
+      ['cluster-c', 'Not probed', ''],
+    ]);
     screen.unmount();
   });
 
-  it('dims only the machine asked about', () => {
-    const rows = [live, refused];
-    const both = {local: readOf(response), 'ssh:host-b': readOf(response)};
+  it('dims only the machine whose Refresh was pressed', () => {
+    const rows = [local, refused];
+    const both = {local: readOf(response), [refused.key]: readOf(response)};
     const {screen, draw} = open({rows, places: both});
     screen.press(screen.control('Refresh job places on This machine'));
     screen.render(draw({...both, local: readingOf(readOf(response))}));
-    expect(dimmed(screen.container)).toBe(5 * 3);
+    expect(dimmed(screen.container, 'This machine places')).toBe(5 * 3);
+    expect(dimmed(screen.container, 'host-b places')).toBe(0);
     screen.unmount();
   });
 });

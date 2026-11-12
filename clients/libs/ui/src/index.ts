@@ -120,7 +120,13 @@ export {type LogLine, LogPane} from './components/log-pane.js';
 export {LinkOpener, Markdown} from './components/markdown.js';
 export {markdownToPlain} from './components/markdown-plain.js';
 export {Measure} from './components/measure.js';
-export {Menu, MenuBounds, type MenuItem} from './components/menu.js';
+export {
+  Menu,
+  MenuBounds,
+  type MenuHandle,
+  type MenuItem,
+  type MenuProps,
+} from './components/menu.js';
 export {
   Message,
   type MessageTone,
@@ -218,6 +224,7 @@ export {Stale} from './components/stale.js';
 export {Chip, StatusDot, type StatusTone} from './components/status.js';
 export {type StepItem, StepList, type StepState} from './components/step-list.js';
 export {type ReplyField, StructuredReply} from './components/structured-reply.js';
+export {SummaryCard, type SummaryCardUpdate} from './components/summary-card.js';
 export {Swatch, type SwatchItem, SwatchLegend} from './components/swatch-legend.js';
 export {Table, type TableColumn, type TableSort} from './components/table.js';
 export {Tabs} from './components/tabs.js';

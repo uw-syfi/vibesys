@@ -3,7 +3,7 @@
  * runs, each agent's and each run's cost), and how far each agent's stream has been applied. The
  * cursor lives inside the value, so the data and the cursor can only change together.
  */
-import type {WatchRunsResponse} from '@vibesys/orchestrator-proto';
+import type {RunSearchResult, WatchRunsResponse} from '@vibesys/orchestrator-proto';
 import type {CostView} from './orchestrator/cost.js';
 import {
   type AgentFrame,
@@ -54,6 +54,25 @@ export type HostFrame =
   | ({readonly from: 'run-history'} & RunHistoryFrame);
 
 export const emptyHostModel: HostModel = {data: emptyState, agentCursors: {}};
+
+/**
+ * A transient model in which a whole-history search result can be opened. Search does not mutate
+ * the feed's store or cursor: it supplies only the authoritative Run and RunSummary that the run
+ * page needs until the bounded run feed includes them again.
+ */
+export function withRunSearchResult(model: HostModel, result: RunSearchResult): HostModel {
+  const {run, summary} = result;
+  if (run === undefined || summary === undefined || run.id === '' || summary.runId !== run.id)
+    return model;
+  return {
+    ...model,
+    data: {
+      ...model.data,
+      runs: {...model.data.runs, [run.id]: run},
+      summaries: {...model.data.summaries, [run.id]: summary},
+    },
+  };
+}
 
 /**
  * Fold one frame. Runs and agents fold into one state, so the two streams' copies of an item

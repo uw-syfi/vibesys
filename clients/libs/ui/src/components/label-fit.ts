@@ -13,7 +13,7 @@ export interface PlacedLabel {
   readonly left: number;
 }
 
-/** The width of one glyph of the `section` style (mono, tracked), which every axis label uses. */
+/** A conservative glyph advance for the tracked `section` style every axis label uses. */
 const SECTION_GLYPH = TYPE.section.size * (MONO_ADVANCE + TYPE.section.tracking);
 /** The air kept between two labels on one axis. */
 const LABEL_GAP = 8;

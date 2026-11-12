@@ -33,6 +33,8 @@ import {
   type RunChange,
   type RunSummary,
   RunSummarySchema,
+  SearchRunsRequestSchema,
+  SearchRunsResponseSchema,
   SnapshotDetail,
   WatchAgentRequestSchema,
   WatchAgentResponseSchema,
@@ -94,6 +96,8 @@ export interface DaemonOptions {
   readonly files?: FakeFiles;
   /** What `ListCatalogue` answers; the fixture's rich catalogue (see `new-run-fixtures`) by default. */
   readonly catalogue?: ListCatalogueResponse;
+  /** `unserved` makes SearchRuns unknown, as it is on hosts from before whole-history search. */
+  readonly searchRuns?: 'unserved';
 }
 
 const PREFIX = `/${OrchestratorService.typeName}/`;
@@ -229,6 +233,25 @@ function runHistorySteps(
     return [{end: {message: `no run ${request.runId}`, status: RpcStatus.NOT_FOUND}}];
   const page = daemon.history(request.runId, request.cursor, pageMessages);
   return [{frame: toBinary(GetRunHistoryResponseSchema, page)}];
+}
+
+/** The bounded whole-history matches for one operator query. */
+function searchRunsSteps(
+  daemon: FakeDaemon,
+  options: DaemonOptions,
+  target: CallTarget,
+): ReadonlyArray<Step> {
+  if (options.searchRuns === 'unserved')
+    return [{end: {message: 'unknown method', status: RpcStatus.UNIMPLEMENTED}}];
+  const {query} = fromBinary(SearchRunsRequestSchema, target.request);
+  const words = query
+    .normalize('NFKD')
+    .toLowerCase()
+    .replace(/[^\p{Letter}\p{Number}]+/gu, ' ')
+    .trim();
+  if (words === '')
+    return [{end: {message: 'query has no searchable words', status: RpcStatus.INVALID_ARGUMENT}}];
+  return [{frame: toBinary(SearchRunsResponseSchema, daemon.searchRuns(query))}];
 }
 
 const frameOf = (body: Parameters<typeof create<typeof WatchRunsResponseSchema>>[1]): Uint8Array =>
@@ -385,22 +408,23 @@ function watchAgentSteps(
   return [...steps, ...tail];
 }
 
+/** One Hello answer, or the configured fault for this attempt. */
+function helloSteps(options: DaemonOptions, nth: number): ReadonlyArray<Step> {
+  const failure = invokeCallback(() => options.helloFails?.(nth));
+  if (failure !== undefined) return [{end: {message: 'hello failed', status: failure}}];
+  const bytes = toBinary(
+    HelloResponseSchema,
+    create(HelloResponseSchema, {
+      daemon: create(BuildVersionsSchema, FAKE_DAEMON),
+      compatibility: options.compatibility ?? Compatibility.COMPATIBLE,
+    }),
+  );
+  return [{frame: bytes}];
+}
+
 export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {}): Recording {
   const tail: ReadonlyArray<Step> =
     options.closeStreams === true ? [{close: true}] : [{hang: true}];
-
-  const hello = (nth: number): ReadonlyArray<Step> => {
-    const failure = invokeCallback(() => options.helloFails?.(nth));
-    if (failure !== undefined) return [{end: {message: 'hello failed', status: failure}}];
-    const bytes = toBinary(
-      HelloResponseSchema,
-      create(HelloResponseSchema, {
-        daemon: create(BuildVersionsSchema, FAKE_DAEMON),
-        compatibility: options.compatibility ?? Compatibility.COMPATIBLE,
-      }),
-    );
-    return [{frame: bytes}];
-  };
 
   const dispatch = (target: CallTarget, nth: number): ReadonlyArray<Step> => {
     const fate = invokeCallback(() => options.dispatch?.(nth)) ?? 'ok';
@@ -424,7 +448,7 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
       if (ahead !== undefined) return ahead;
       switch (target.method) {
         case methodPathOf('Hello'):
-          return hello(nth);
+          return helloSteps(options, nth);
         case methodPathOf('Dispatch'):
           return dispatch(target, nth);
         case IDENTIFY:
@@ -437,6 +461,8 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
           return getItemSteps(daemon, target);
         case methodPathOf('GetRunHistory'):
           return runHistorySteps(daemon, target, options.historyPageMessages);
+        case methodPathOf('SearchRuns'):
+          return searchRunsSteps(daemon, options, target);
         case methodPathOf('CheckRepository'):
           return checkRepositorySteps(options, target);
         case methodPathOf('ListCatalogue'):

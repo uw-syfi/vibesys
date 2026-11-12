@@ -343,6 +343,7 @@ const fleet: fc.Arbitrary<readonly FleetHostInput[]> = fc
 const filter: fc.Arbitrary<FleetFilter> = fc.record({
   state: fc.constantFrom(...FLEET_STATES),
   host: fc.option(fc.constantFrom('host-0', 'host-1', 'host-2', 'host-3', 'nobody'), {nil: null}),
+  query: fc.constant(''),
 });
 
 const keysOf = (rows: readonly FleetRow[]): string[] => rows.map(row => row.key);
@@ -611,12 +612,12 @@ describe('the fleet of runs', () => {
       fc.property(fleet, filter, (hosts, by) => {
         const view = fleetView(hosts, by);
         expect(view.hosts.map(host => host.key)).toEqual(hosts.map(host => host.key));
-        const underState = shown(hosts, {state: by.state, host: null});
+        const underState = shown(hosts, {state: by.state, host: null, query: ''});
         for (const host of view.hosts) {
           expect(host.runs).toBe(underState.filter(row => row.host.key === host.key).length);
         }
         // The host filter never changes what the strip says about the other hosts.
-        const whole = fleetView(hosts, {state: by.state, host: null});
+        const whole = fleetView(hosts, {state: by.state, host: null, query: ''});
         expect(view.hosts).toEqual(whole.hosts);
       }),
     );

@@ -9,6 +9,7 @@ import {Window} from 'happy-dom';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {type ParetoAxis, ParetoChart, type ParetoPoint} from './index.js';
+import {MONO_ADVANCE, TYPE} from './tokens/index.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -31,8 +32,8 @@ afterAll(async () => {
   await window.happyDOM.close();
 });
 
-/** One glyph of the chart's tracked labels (11.5px, mono, tracked 0.08em: 7.82px). */
-const GLYPH = 7.82;
+/** The conservative advance the chart uses for one glyph of its tracked section labels. */
+const GLYPH = TYPE.section.size * (MONO_ADVANCE + TYPE.section.tracking);
 /** A mark's reach around its centre, with the ring a highlighted point has. */
 const REACH = 10;
 

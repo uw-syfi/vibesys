@@ -6,5 +6,5 @@
     "noEmit": true,
     "tsBuildInfoFile": ".tsbuild/e2e.tsbuildinfo"
   },
-  "include": ["e2e/**/*.ts", "playwright.config.ts"]
+  "include": ["e2e/**/*.ts", "playwright.config.ts", "playwright.fixture.config.ts", "../../tools/e2e/free-port.mts"]
 }

@@ -251,6 +251,7 @@ directory = "clients"
 timeout_seconds = 1200
 commands = [
   ["pnpm", "--filter", "@vibesys/app-ui-gallery", "test:e2e"],
+  ["pnpm", "--filter", "@vibesys/desktop", "test:fixture"],
 ]
 
 [[check_groups]]

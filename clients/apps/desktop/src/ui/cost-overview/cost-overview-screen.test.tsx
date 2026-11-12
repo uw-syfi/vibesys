@@ -1,5 +1,5 @@
 import {describe, expect, it} from '@effect/vitest';
-import type {AgentRole} from '@vibesys/orchestrator-proto';
+import {type AgentRole, Harness, RunStatus} from '@vibesys/orchestrator-proto';
 import type {JSX} from 'react';
 import type {HostCostView, HostStatus} from '../../state/index.js';
 import {installDom, mount, type Screen} from '../../testing/dom/harness.js';
@@ -42,7 +42,13 @@ function page(
   );
 }
 
-const PANELS = ['Spend over time', 'By run', 'By agent type', 'By model'];
+const PANELS = [
+  'Cost controls and attribution',
+  'Spend over time',
+  'By run',
+  'By agent type',
+  'By CLI provider and model',
+];
 const headings = (screen: Screen): string[] =>
   [...screen.container.querySelectorAll('h2')].map(each => each.textContent ?? '');
 const bars = (screen: Screen): number => screen.container.querySelectorAll('.vs-bars-bar').length;
@@ -113,7 +119,7 @@ describe('the Cost page of one host', () => {
       fact.textContent?.includes('unpriced'),
     );
     expect(unpriced?.getAttribute('title')).toMatch(/tokens and no price/);
-    expect(screen.text()).not.toContain('Last hour');
+    expect(text).not.toContain('Last hour');
     screen.unmount();
   });
 
@@ -181,13 +187,17 @@ describe('the Cost page of one host', () => {
     }
   });
 
-  it('draws a model by its id in the code face, with its color beside it in the table, and no made-up name', () => {
+  it('draws the actual provider and model in the code face, with its color beside it in the table', () => {
     const screen = mount(page(views.week));
-    const table = screen.container.querySelector('table[aria-label="Cost by model on Host A"]');
+    const table = screen.container.querySelector(
+      'table[aria-label="Cost by CLI provider and model on Host A"]',
+    );
     const names = [...(table?.querySelectorAll('tbody td:first-child [data-mono-id]') ?? [])].map(
       each => each.textContent,
     );
-    expect(names).toEqual(expect.arrayContaining(['claude-opus-5-5', 'gpt-5-codex']));
+    expect(names).toEqual(
+      expect.arrayContaining(['Claude Code · claude-opus-5-5', 'Codex · gpt-5-codex']),
+    );
     expect(table?.querySelectorAll('tbody .vs-series-swatch').length).toBe(
       table?.querySelectorAll('tbody tr').length,
     );
@@ -198,7 +208,7 @@ describe('the Cost page of one host', () => {
   it('says when the bounded model list or one of its names was shortened', () => {
     const screen = mount(page({...views.short, modelsTruncated: true}));
     expect(screen.text()).toContain(
-      'The host shortened the model list or a model name. Totals still include every model.',
+      'Some provider and model rows are not shown because the host shortened the list or a name. Totals still include every model.',
     );
     screen.unmount();
   });
@@ -316,5 +326,197 @@ describe('the Cost page of one host', () => {
       expect(screen.text()).not.toMatch(/UNSPECIFIED|undefined|NaN|\[object|null/);
       screen.unmount();
     }
+  });
+});
+
+const operatorUsage = (costUsd: number | null) => ({
+  inputTokens: 1_000,
+  cacheReadTokens: null,
+  cacheCreationTokens: null,
+  outputTokens: 200,
+  reasoningTokens: null,
+  costUsd,
+});
+
+/** A whole host view in the shape the public state API gives the screen. */
+function operatorHostView(options: {
+  readonly cost: number | null;
+  readonly lastHour: number | null;
+  readonly runs: number;
+  readonly turns: number;
+  readonly unpriced: number;
+  readonly truncated?: boolean;
+}): HostCostView {
+  return {
+    sequence: 1n,
+    asOfMs: Date.parse('2026-11-01T19:00:00Z'),
+    total: operatorUsage(options.cost),
+    runCount: options.runs,
+    turns: options.turns,
+    unpricedTurns: options.unpriced,
+    runs: [
+      {
+        runId: 'run-a',
+        name: 'Reduce tail latency',
+        status: RunStatus.RUNNING,
+        maxCostUsd: 100,
+        turns: options.turns,
+        unpricedTurns: options.unpriced,
+        usage: operatorUsage(options.cost),
+        totalTokens: 1_200,
+      },
+    ],
+    otherRuns: null,
+    roles: [],
+    models: [
+      {
+        model: {harness: Harness.CODEX, model: 'model-a'},
+        turns: options.turns,
+        unpricedTurns: options.unpriced,
+        usage: operatorUsage(options.cost),
+        totalTokens: 1_200,
+      },
+    ],
+    series: {
+      startMs: Date.parse('2026-11-01T18:00:00Z'),
+      bucketMs: 3_600_000,
+      buckets: [
+        {
+          startMs: Date.parse('2026-11-01T18:00:00Z'),
+          costUsd: options.cost ?? 0,
+          byModel:
+            options.cost === null
+              ? []
+              : [
+                  {
+                    model: {harness: Harness.CODEX, model: 'model-a'},
+                    costUsd: options.cost,
+                  },
+                ],
+        },
+      ],
+    },
+    lastHourUsd: options.lastHour,
+    modelsTruncated: options.truncated ?? false,
+  };
+}
+
+const operatorHost = (
+  view: HostCostView | undefined,
+  lastDayView?: HostCostView,
+  workstreams = {count: 3, complete: true},
+) => ({
+  key: 'host-a',
+  label: 'Host A',
+  status: {kind: 'live' as const, cause: null, staleForMs: null},
+  feed: {_tag: 'Live' as const},
+  view,
+  lastDayView,
+  workstreams,
+  titles: {},
+  started: {},
+  working: new Map<AgentRole, number>(),
+});
+
+describe('the Cost destination operator summary', () => {
+  it('shows whole-history, last-hour and exact last-day figures as separate served facts', () => {
+    const all = operatorHostView({cost: 80, lastHour: 7, runs: 1, turns: 20, unpriced: 0});
+    const day = operatorHostView({cost: 12.5, lastHour: 7, runs: 1, turns: 4, unpriced: 0});
+    const screen = mount(
+      <CostOverviewScreen
+        hosts={[operatorHost(all, day)]}
+        words={COST_OVERVIEW_WORDS}
+        open={() => undefined}
+        retry={() => undefined}
+      />,
+    );
+
+    const text = screen.text();
+    for (const label of [
+      'Total spend',
+      'Last hour',
+      'Last 24 hours',
+      'Runs',
+      'Turns',
+      'Unpriced turns',
+      'Workstreams explored',
+      'Cost per workstream',
+    ]) {
+      expect(text).toContain(label);
+    }
+    expect(text).toContain('$80.00');
+    expect(text).toContain('$7.00');
+    expect(text).toContain('$12.50');
+    expect(text).toContain('Codex · model-a');
+    expect(text).toContain('By CLI provider and model');
+    expect(text).toContain('Workstreams explored3');
+    expect(text).toContain('Cost per workstream$26.67');
+    expect(text).toContain('Total priced spend ÷ explored workstreams');
+    screen.unmount();
+  });
+
+  it('keeps the operator average distinct from attribution and provider quotas', () => {
+    const all = operatorHostView({cost: 20, lastHour: 2, runs: 1, turns: 5, unpriced: 0});
+    const opened: [string, string][] = [];
+    const screen = mount(
+      <CostOverviewScreen
+        hosts={[operatorHost(all)]}
+        words={COST_OVERVIEW_WORDS}
+        open={(machine, runId) => opened.push([machine, runId])}
+        retry={() => undefined}
+      />,
+    );
+
+    const text = screen.text();
+    expect(text).toContain('Workstreams explored3');
+    expect(text).toContain('Cost per workstream$6.67');
+    expect(text).toContain('operator-wide average, not turn attribution');
+    expect(text).toContain('Provider limits');
+    expect(text).toContain('expose no provider-specific cost quota');
+    expect(text).toContain('Run cost limits');
+    expect(text).toContain('Select a run below, then choose Adjust');
+    const row = screen.container.querySelector<HTMLElement>('tr[data-selectable]');
+    if (row === null) throw new Error('no run listed');
+    screen.press(row);
+    expect(opened).toEqual([['host-a', 'run-a']]);
+    screen.unmount();
+  });
+
+  it('marks partial totals as floors and names incomplete machine coverage', () => {
+    const all = operatorHostView({
+      cost: 40,
+      lastHour: 4,
+      runs: 1,
+      turns: 9,
+      unpriced: 1,
+      truncated: true,
+    });
+    const day = operatorHostView({cost: 10, lastHour: 4, runs: 1, turns: 3, unpriced: 1});
+    const screen = mount(
+      <CostOverviewScreen
+        hosts={[
+          operatorHost(all, day),
+          {
+            ...operatorHost(undefined, undefined, {count: 0, complete: false}),
+            key: 'host-b',
+            label: 'Host B',
+            status: {kind: 'unavailable', cause: null, staleForMs: null},
+          },
+        ]}
+        words={COST_OVERVIEW_WORDS}
+        open={() => undefined}
+        retry={() => undefined}
+      />,
+    );
+
+    expect(screen.text()).toContain('1 of 2 machines reporting');
+    expect(screen.text()).toContain('≥ $40.00');
+    expect(screen.text()).toContain('≥ $10.00');
+    expect(screen.text()).toContain('Workstreams explored≥ 3at least');
+    expect(screen.text()).toContain('1 of 2 machine cost views available');
+    expect(screen.text()).toContain('1 unpriced turn remains');
+    expect(screen.text()).toContain('1 of 2 machines have complete workstream views');
+    expect(screen.text()).toContain('Some provider and model rows are not shown');
+    screen.unmount();
   });
 });

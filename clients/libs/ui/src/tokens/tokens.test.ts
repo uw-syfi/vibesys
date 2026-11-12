@@ -22,10 +22,24 @@ import {
   THEMES,
   type ThemeMode,
   type ThemeName,
+  TYPE,
 } from './index.js';
 
 const THEME_NAMES = Object.keys(THEMES) as ThemeName[];
 const read = (name: string): string => readFileSync(new URL(`../${name}`, import.meta.url), 'utf8');
+
+describe('TYPE', () => {
+  test('uses the mono face only for code and the wordmark, with sentence-case section labels', () => {
+    expect(
+      Object.entries(TYPE)
+        .filter(([, spec]) => spec.family === 'mono')
+        .map(([name]) => name),
+    ).toEqual(['display', 'code']);
+    expect(TYPE.section).toMatchObject({family: 'sans', uppercase: false});
+    expect(TYPE.metric.family).toBe('sans');
+    expect(TYPE.hero.family).toBe('sans');
+  });
+});
 
 describe('THEMES', () => {
   test('are the six themes, each with a mode and a default per mode', () => {

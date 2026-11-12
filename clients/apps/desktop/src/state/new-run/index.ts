@@ -1,5 +1,13 @@
 export {
+  availableEntry,
   type CatalogueFilter,
+  type CatalogueItem,
+  type CatalogueItemGroup,
+  catalogueItemDomain,
+  catalogueItemExample,
+  catalogueItemKey,
+  catalogueItemNeedsClone,
+  catalogueItems,
   catalogueProblemWords,
   type DomainGroup,
   domainOf,
@@ -9,6 +17,8 @@ export {
   fitWord,
   folderName,
   groupByDomain,
+  groupCatalogueItems,
+  visibleCatalogueItems,
   visibleEntries,
 } from './catalogue.js';
 export {
@@ -19,6 +29,11 @@ export {
   nameOfExample,
   pickExample,
 } from './example.js';
+export {
+  REGISTERED_EXAMPLES,
+  type RegisteredExample,
+  type RegisteredExampleCategory,
+} from './generated/registered-examples.js';
 export {
   type FolderEntryFacts,
   firstPage,

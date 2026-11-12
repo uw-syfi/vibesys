@@ -38,11 +38,14 @@
     }
   },
   "scripts": {
+    "generate:examples": "uv run --project ../../.. python ../../../scripts/generate_desktop_examples.py",
     "build": "tsc -b tsconfig.core.json tsconfig.state.json tsconfig.ui.json tsconfig.main.json tsconfig.preload.json && vite build && node scripts/build-gateway.mjs",
     "check": "tsc -b",
     "start": "pnpm build && electron .",
     "test": "node ../../tools/scripts/run_vitest.mjs ./src",
     "build:fixture": "vite build --mode fixture",
+    "test:fixture": "pnpm build:fixture && playwright test -c playwright.fixture.config.ts --grep-invert @capture",
+    "capture:fixture": "pnpm build:fixture && playwright test -c playwright.fixture.config.ts --grep @capture",
     "test:e2e": "pnpm build && playwright test"
   },
   "dependencies": {

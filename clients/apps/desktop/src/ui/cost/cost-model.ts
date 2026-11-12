@@ -78,6 +78,8 @@ export interface CostScreenModel {
   readonly models: readonly BarRow<3>[];
   /** By kind of token: tokens. */
   readonly kinds: readonly BarRow<1>[];
+  /** Totals are whole, but the host left provider/model rows out to fit its bound. */
+  readonly modelsTruncated: boolean;
 }
 
 /** What a row says is missing from its cost: all of it, or the turns that left it a floor. */
@@ -340,5 +342,6 @@ export function costScreenModel(view: CostView, words: CostWords): CostScreenMod
     types: typeRows(view, precision, words),
     models: modelRows(view, precision, slots, words),
     kinds: kindRows(view),
+    modelsTruncated: view.modelsTruncated,
   };
 }

@@ -70,6 +70,7 @@ export {
   type HostFrame,
   type HostModel,
   runsCursor,
+  withRunSearchResult,
 } from './host-model.js';
 export {
   HOST_PREREQUISITES,
@@ -119,7 +120,12 @@ export {
   type SpendSeriesView,
 } from './orchestrator/cost.js';
 export {
+  type ExploredWorkstreams,
+  exploredWorkstreams,
+} from './orchestrator/cost-workstreams.js';
+export {
   FLEET_COLUMNS,
+  FLEET_SEARCH_REGISTRY,
   FLEET_STATES,
   type FleetAbsence,
   type FleetAttention,
@@ -130,12 +136,17 @@ export {
   type FleetHostRef,
   type FleetHostView,
   type FleetObjective,
+  type FleetRemoteSearch,
   type FleetRow,
+  type FleetSearchEntry,
+  type FleetSearchField,
   type FleetSort,
   type FleetState,
+  type FleetUpdate,
   type FleetView,
   fleetKey,
   fleetRows,
+  fleetSearchScore,
   fleetView,
   type GenericDiscoveryStatus,
   type GenericFleetRow,
@@ -159,13 +170,16 @@ export {
   isFinalItem,
   type OlderFrame,
   type RunHistoryFrame,
+  replaceSnapshot,
   type WholeViewPhase,
 } from './orchestrator/fold.js';
 export {
+  COST_DAY_MS,
   type HostCostRead,
   type HostCostView,
   type HostCostWindow,
   type HostRunCostView,
+  lastDayWindow,
   type OtherRunsCostView,
   readHostCost,
   sinceWindow,
@@ -309,6 +323,13 @@ export {
 } from './settings/appearance.js';
 export {type Reach, reachOf, unreadableDetail} from './settings/eval-places.js';
 export {
+  emptyMachineDraft,
+  type MachineConnectionKind,
+  type MachineDraft,
+  type MachineDraftResult,
+  machineDraftResult,
+} from './settings/machine-draft.js';
+export {
   type MachineHost,
   type MachineRow,
   machineRow,
@@ -374,11 +395,14 @@ export {
   type Destination,
   type FleetPlace,
   initialNavigation,
+  type MachinesPlace,
   NAVIGATION_KINDS,
   type Navigation,
   type NavigationAction,
   type NavigationKind,
   navigationReducer,
+  type RunReceipt,
+  runIsUnread,
 } from './shell/navigation.js';
 export {
   labelFromName,

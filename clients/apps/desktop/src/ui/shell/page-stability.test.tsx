@@ -145,7 +145,7 @@ function openPage(screen: ReturnType<typeof mount>, page: (typeof PAGES)[number]
     if (found === undefined) throw new Error(`nothing matches ${selector}`);
     return found;
   };
-  screen.press(first('[role="option"]'));
+  screen.press(first('.vs-summary-card-press'));
   if (page === 'cost') screen.press(screen.control('Open cost'));
   if (page === 'agents' || page === 'an agent') screen.press(screen.control('Open agents'));
   if (page === 'an agent') screen.press(first('[role="listbox"] [role="option"]'));

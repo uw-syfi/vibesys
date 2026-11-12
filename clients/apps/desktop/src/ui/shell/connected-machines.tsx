@@ -33,10 +33,13 @@ export function ConnectedMachines(props: {
   readonly rows: readonly MachineRow[];
   /** The Add machine and remove controls; a window without them lists the machines only. */
   readonly controls?: MachineControls;
+  readonly addMachine?: () => void;
   readonly places: {
     readonly hosts: readonly PlacesHost[];
     readonly refresh: (key: string) => void;
   };
+  /** The explicit repositories folder of each host, by host key. */
+  readonly repositories: Readonly<Record<string, string>>;
 }): JSX.Element {
   const {hosts, controls} = props;
   useAtomMount(useMemo(() => watchMachines(hosts), [hosts]));
@@ -46,6 +49,8 @@ export function ConnectedMachines(props: {
       rows={props.rows}
       stats={stats}
       places={props.places}
+      repositories={props.repositories}
+      {...(props.addMachine === undefined ? {} : {addMachine: props.addMachine})}
       {...(controls === undefined ? {} : {controls})}
     />
   );

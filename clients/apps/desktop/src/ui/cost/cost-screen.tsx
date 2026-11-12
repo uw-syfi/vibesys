@@ -80,10 +80,10 @@ function Splits(props: {readonly model: CostScreenModel}): JSX.Element {
         />
       </Card>
       <ChartColumns align="start">
-        <Card section="By model">
+        <Card section="By CLI provider and model">
           <BarRows
-            label="Cost by model"
-            nameHeader="Model"
+            label="Cost by CLI provider and model"
+            nameHeader="Provider · model"
             barLabel="Share of the largest cost"
             columns={MODEL_COLUMNS}
             rows={model.models}
@@ -154,6 +154,9 @@ export function CostScreen(props: {
           ) : (
             <>
               {model.chart === null ? null : <SpendOverTime chart={model.chart} />}
+              {model.modelsTruncated ? (
+                <Chip label="Some provider and model rows are not shown" tone="warn" dot />
+              ) : null}
               <Splits model={model} />
             </>
           )}

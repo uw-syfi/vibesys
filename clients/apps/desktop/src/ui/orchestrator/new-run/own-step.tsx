@@ -2,6 +2,7 @@ import type {EvalPlace} from '@vibesys/orchestrator-proto';
 import {
   Button,
   Card,
+  Chip,
   Field,
   Measure,
   PathInput,
@@ -34,20 +35,32 @@ import {placeLabel, provisionLine} from './words.js';
 
 const CASES: readonly {
   readonly value: OwnCase;
+  readonly kicker: string;
   readonly title: string;
   readonly note: string;
+  readonly details: readonly string[];
 }[] = [
   {
     value: 'tasks',
+    kicker: 'Ready to run',
     title: 'A repository with a task',
-    note: 'It has .vibesys/tasks/. Pick one and start.',
+    note: 'Pick a task already defined under .vibesys/tasks/, review its limits, and start immediately.',
+    details: ['Existing repository', 'Existing task'],
   },
   {
     value: 'repo',
+    kicker: 'Guided setup',
     title: 'A repository without a task',
-    note: 'Describe the goal; a setup chat writes the task.',
+    note: 'Choose an existing Git repository, describe the outcome, and use a setup chat to create the task.',
+    details: ['Existing repository', 'Create task'],
   },
-  {value: 'none', title: 'Nothing yet', note: 'We create the repository, then the setup chat.'},
+  {
+    value: 'none',
+    kicker: 'Start fresh',
+    title: 'Nothing yet',
+    note: 'Name a new repository. VibeSys creates it first, then guides you through defining the task.',
+    details: ['Create repository', 'Create task'],
+  },
 ];
 
 /** What the host said of the path typed: its refusal, or the tasks it holds; one line that keeps its room. */
@@ -335,8 +348,10 @@ export function OwnStep(
         {CASES.map(each => (
           <PickCard
             key={each.value}
+            kicker={each.kicker}
             title={each.title}
             note={each.note}
+            chips={each.details.map(detail => <Chip key={detail} label={detail} />)}
             selected={page.own === each.value}
             press={() => {
               // A case starts with an empty path, as the prototype's does: the one typed was for another case.

@@ -3,7 +3,7 @@
  * in order (`commit` reveals more of the scenario, `dispatch` appends the facts a command causes),
  * answers a snapshot, events after a sequence, and pages of items, and notifies watchers.
  */
-import {create} from '@bufbuild/protobuf';
+import {create, toBinary} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {
   AgentRole,
@@ -40,11 +40,14 @@ import {
   type RunChange,
   RunChangeSchema,
   type RunCost,
+  RunSearchResultSchema,
   RunStatus,
   type RunSummary,
   RunSummarySchema,
   type RunsSnapshot,
   RunsSnapshotSchema,
+  type SearchRunsResponse,
+  SearchRunsResponseSchema,
   type SearchState,
   type SetupView,
   SnapshotDetail,
@@ -56,6 +59,7 @@ import {
   ViewerSchema,
   type WindowFacts,
 } from '@vibesys/orchestrator-proto';
+import {fleetRows, fleetSearchScore} from '../../state/orchestrator/fleet.js';
 import {applyChange} from '../../state/orchestrator/fold.js';
 import {emptyState, type OrchestratorState} from '../../state/orchestrator/state.js';
 import {ms} from '../../state/orchestrator/time.js';
@@ -263,6 +267,65 @@ export class FakeDaemon {
   /** The summary the host serves of each run it lists, as it stands now. */
   summaries(): RunSummary[] {
     return [...this.snapshot().summaries];
+  }
+
+  /**
+   * Search every run held by the fake host, including runs a byte-bounded snapshot says it omitted.
+   * It uses the desktop's public semantic registry so recordings exercise the same contract without
+   * keeping a second test-only interpretation of titles, models, workstreams, and the other fields.
+   */
+  searchRuns(query: string): SearchRunsResponse {
+    const snapshot = this.snapshot();
+    const state: OrchestratorState = {
+      ...this.#state(this.#visible),
+      summaries: Object.fromEntries(snapshot.summaries.map(summary => [summary.runId, summary])),
+      searches: Object.fromEntries(snapshot.searches.map(search => [search.runId, search])),
+      searchRevisions: Object.fromEntries(
+        snapshot.searches.map(search => [search.runId, search.revision]),
+      ),
+      cut: {truncated: snapshot.truncated, runsLeftOut: snapshot.runsLeftOut},
+    };
+    const rows = fleetRows([
+      {
+        key: '',
+        label: '',
+        data: state,
+        freshness: 'live',
+        status: {kind: 'live', cause: null, staleForMs: null},
+      },
+    ]).flatMap(row => {
+      const score = fleetSearchScore(row, query);
+      const run = state.runs[row.runId];
+      const summary = state.summaries[row.runId];
+      return score === null || run === undefined || summary === undefined
+        ? []
+        : [{row, score, result: create(RunSearchResultSchema, {run, summary})}];
+    });
+    rows.sort(
+      (a, b) =>
+        b.score - a.score ||
+        (b.row.startedMs ?? Number.NEGATIVE_INFINITY) -
+          (a.row.startedMs ?? Number.NEGATIVE_INFINITY) ||
+        a.row.runId.localeCompare(b.row.runId),
+    );
+
+    const results = [];
+    let bytes = 0;
+    let truncated = false;
+    for (const found of rows) {
+      const encoded = toBinary(RunSearchResultSchema, found.result).length;
+      if (results.length === 25 || bytes + encoded > 3 * 1024 * 1024) {
+        truncated = true;
+        break;
+      }
+      results.push(found.result);
+      bytes += encoded;
+    }
+    return create(SearchRunsResponseSchema, {
+      sequence: this.sequence,
+      results,
+      truncated,
+    });
   }
 
   /** The summary of each run in `state`, read with the search views the host holds. */

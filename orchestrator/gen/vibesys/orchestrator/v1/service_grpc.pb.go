@@ -26,6 +26,7 @@ const (
 	OrchestratorService_ListItems_FullMethodName           = "/vibesys.orchestrator.v1.OrchestratorService/ListItems"
 	OrchestratorService_GetItem_FullMethodName             = "/vibesys.orchestrator.v1.OrchestratorService/GetItem"
 	OrchestratorService_GetRunHistory_FullMethodName       = "/vibesys.orchestrator.v1.OrchestratorService/GetRunHistory"
+	OrchestratorService_SearchRuns_FullMethodName          = "/vibesys.orchestrator.v1.OrchestratorService/SearchRuns"
 	OrchestratorService_WatchRunCost_FullMethodName        = "/vibesys.orchestrator.v1.OrchestratorService/WatchRunCost"
 	OrchestratorService_CheckRepository_FullMethodName     = "/vibesys.orchestrator.v1.OrchestratorService/CheckRepository"
 	OrchestratorService_ListDirectory_FullMethodName       = "/vibesys.orchestrator.v1.OrchestratorService/ListDirectory"
@@ -58,6 +59,9 @@ type OrchestratorServiceClient interface {
 	// One run's history, paged: the agents, turns and check-ins it has and its messages, which a
 	// snapshot of detail SUMMARY leaves out.
 	GetRunHistory(ctx context.Context, in *GetRunHistoryRequest, opts ...grpc.CallOption) (*GetRunHistoryResponse, error)
+	// Search every run the host holds, including the older finished runs a bounded WatchRuns snapshot
+	// left out. The answer is a bounded set of authoritative run/summary pairs, not another run feed.
+	SearchRuns(ctx context.Context, in *SearchRunsRequest, opts ...grpc.CallOption) (*SearchRunsResponse, error)
 	// What one run has cost: its whole cost view, then the whole view again each time it changes. The
 	// host works it out, so the client sums nothing.
 	WatchRunCost(ctx context.Context, in *WatchRunCostRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRunCostResponse], error)
@@ -178,6 +182,16 @@ func (c *orchestratorServiceClient) GetRunHistory(ctx context.Context, in *GetRu
 	return out, nil
 }
 
+func (c *orchestratorServiceClient) SearchRuns(ctx context.Context, in *SearchRunsRequest, opts ...grpc.CallOption) (*SearchRunsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SearchRunsResponse)
+	err := c.cc.Invoke(ctx, OrchestratorService_SearchRuns_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *orchestratorServiceClient) WatchRunCost(ctx context.Context, in *WatchRunCostRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRunCostResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &OrchestratorService_ServiceDesc.Streams[2], OrchestratorService_WatchRunCost_FullMethodName, cOpts...)
@@ -289,6 +303,9 @@ type OrchestratorServiceServer interface {
 	// One run's history, paged: the agents, turns and check-ins it has and its messages, which a
 	// snapshot of detail SUMMARY leaves out.
 	GetRunHistory(context.Context, *GetRunHistoryRequest) (*GetRunHistoryResponse, error)
+	// Search every run the host holds, including the older finished runs a bounded WatchRuns snapshot
+	// left out. The answer is a bounded set of authoritative run/summary pairs, not another run feed.
+	SearchRuns(context.Context, *SearchRunsRequest) (*SearchRunsResponse, error)
 	// What one run has cost: its whole cost view, then the whole view again each time it changes. The
 	// host works it out, so the client sums nothing.
 	WatchRunCost(*WatchRunCostRequest, grpc.ServerStreamingServer[WatchRunCostResponse]) error
@@ -341,6 +358,9 @@ func (UnimplementedOrchestratorServiceServer) GetItem(context.Context, *GetItemR
 }
 func (UnimplementedOrchestratorServiceServer) GetRunHistory(context.Context, *GetRunHistoryRequest) (*GetRunHistoryResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetRunHistory not implemented")
+}
+func (UnimplementedOrchestratorServiceServer) SearchRuns(context.Context, *SearchRunsRequest) (*SearchRunsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SearchRuns not implemented")
 }
 func (UnimplementedOrchestratorServiceServer) WatchRunCost(*WatchRunCostRequest, grpc.ServerStreamingServer[WatchRunCostResponse]) error {
 	return status.Error(codes.Unimplemented, "method WatchRunCost not implemented")
@@ -496,6 +516,24 @@ func _OrchestratorService_GetRunHistory_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OrchestratorService_SearchRuns_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SearchRunsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrchestratorServiceServer).SearchRuns(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrchestratorService_SearchRuns_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrchestratorServiceServer).SearchRuns(ctx, req.(*SearchRunsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _OrchestratorService_WatchRunCost_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(WatchRunCostRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -634,6 +672,10 @@ var OrchestratorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetRunHistory",
 			Handler:    _OrchestratorService_GetRunHistory_Handler,
+		},
+		{
+			MethodName: "SearchRuns",
+			Handler:    _OrchestratorService_SearchRuns_Handler,
 		},
 		{
 			MethodName: "CheckRepository",

@@ -18,6 +18,10 @@ export {
 } from './generated/vibesys/cli/v1/environment_pb.js';
 export {JobState} from './generated/vibesys/cli/v1/job_pb.js';
 export {type Plan, PlanSchema, PlanStatus} from './generated/vibesys/cli/v1/plan_pb.js';
+export {
+  type RecordOrigin,
+  RecordOriginSchema,
+} from './generated/vibesys/cli/v1/record_pb.js';
 export {Direction} from './generated/vibesys/cli/v1/result_pb.js';
 export {
   type CardObjective,
@@ -30,6 +34,7 @@ export {
 export {VerdictKind} from './generated/vibesys/cli/v1/verdict_pb.js';
 export {
   type Workstream,
+  WorkstreamSchema,
   WorkstreamStatus,
 } from './generated/vibesys/cli/v1/workstream_pb.js';
 export * from './generated/vibesys/orchestrator/v1/catalogue_pb.js';

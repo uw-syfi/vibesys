@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from scripts.generate_desktop_examples import DEFAULT_OUTPUT, generated_source
 from tests.support import run_test_command
 from tests.support.example_registry import (
     REPO_ROOT,
@@ -92,6 +93,14 @@ def _app_tasks(entry: ExampleEntry) -> tuple[str, ...]:
 def test_registry_entries_exist() -> None:
     missing = [entry.path for entry in ENTRIES if not example_root(entry).is_dir()]
     assert not missing, f"{REGISTRY_RELATIVE} lists paths that do not exist: {missing}"
+
+
+def test_desktop_offline_catalogue_is_generated_from_the_registry() -> None:
+    """The disconnected desktop never drifts from the release builder's example inventory."""
+    assert DEFAULT_OUTPUT.read_text(encoding="utf-8") == generated_source(REPO_ROOT), (
+        "the desktop example inventory is stale; run "
+        "`uv run python scripts/generate_desktop_examples.py`"
+    )
 
 
 def test_every_example_directory_is_registered() -> None:

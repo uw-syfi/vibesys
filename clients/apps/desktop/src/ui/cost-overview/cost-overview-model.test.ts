@@ -164,15 +164,17 @@ describe('the screen model of a host', () => {
     expect(short.ranges).toEqual([]);
   });
 
-  it('names a model by the id the host served, and keeps the harness default in words, every legend name in the code face', () => {
+  it('names the actual CLI provider beside every model id, every legend name in the code face', () => {
     const week = model(views.week);
     const names = week.chart?.legend.map(item => item.label) ?? [];
-    expect(names).toEqual(expect.arrayContaining(['claude-opus-5-5', 'gpt-5-codex']));
-    expect(names).toContain('Codex default');
+    expect(names).toEqual(
+      expect.arrayContaining(['Claude Code · claude-opus-5-5', 'Codex · gpt-5-codex']),
+    );
+    expect(names).toContain('Codex · default');
     expect(week.chart?.legend.every(item => item.mono === true)).toBe(true);
-    const opus = week.models.find(line => line.name === 'claude-opus-5-5');
+    const opus = week.models.find(line => line.name === 'Claude Code · claude-opus-5-5');
     expect(opus?.title).toBe('claude-opus-5-5 on Claude Code');
-    expect(week.models.find(line => line.name === 'Codex default')?.title).toBe(
+    expect(week.models.find(line => line.name === 'Codex · default')?.title).toBe(
       'Codex default model',
     );
   });
@@ -278,5 +280,53 @@ describe('the screen model of a host', () => {
     expect(week.runs.map(line => line.key)).toEqual(
       views.week.runs.map(run => `host-a/${run.runId}`),
     );
+  });
+});
+
+const hostView = (costUsd: number, unpricedTurns = 0): HostCostView => ({
+  sequence: 1n,
+  asOfMs: 1_000,
+  total: usage({costUsd}),
+  runCount: 1,
+  turns: 2,
+  unpricedTurns,
+  runs: [],
+  otherRuns: null,
+  roles: [],
+  models: [],
+  series: {startMs: 0, bucketMs: 1_000, buckets: []},
+  lastHourUsd: costUsd,
+  modelsTruncated: false,
+});
+
+describe('the public operator cost figures', () => {
+  it('divides complete priced spend by complete explored run-workstreams', () => {
+    const figures = totalFigures(
+      [hostView(40), hostView(60)],
+      2,
+      [],
+      [
+        {count: 2, complete: true},
+        {count: 3, complete: true},
+      ],
+    );
+    expect(figures.costPerWorkstream).toEqual({kind: 'average', figure: '$20.00'});
+  });
+
+  it('names every failed coverage proof instead of presenting a partial average', () => {
+    const figures = totalFigures(
+      [hostView(40, 1)],
+      2,
+      [],
+      [
+        {count: 0, complete: true},
+        {count: 0, complete: false},
+      ],
+    );
+    expect(figures.costPerWorkstream).toEqual({
+      kind: 'unavailable',
+      reason:
+        '1 of 2 machine cost views available · 1 unpriced turn remains · 1 of 2 machines have complete workstream views · No explored workstreams',
+    });
   });
 });

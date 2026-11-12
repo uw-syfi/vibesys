@@ -1,0 +1,124 @@
+/* A full-width operator summary with its visual result filling the end. Imported by components.css. */
+
+.vs-summary-card {
+  position: relative;
+  box-sizing: border-box;
+  min-width: 0;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  container-type: inline-size;
+  transition: border-color var(--duration-fast) var(--easing);
+}
+.vs-summary-card[data-attention] {
+  border-color: var(--chip-accent-border);
+  box-shadow: inset var(--space-1) 0 0 var(--accent);
+}
+.vs-summary-card:hover {
+  border-color: var(--muted);
+}
+/* A real button covers the surface while the content stays valid, non-interactive document markup. */
+.vs-summary-card-press {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.vs-summary-card-press:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-summary-card-content {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(var(--column-chart), 7fr);
+  min-width: 0;
+  min-height: var(--summary-card-chart);
+  pointer-events: none;
+}
+.vs-summary-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+}
+.vs-summary-card[data-menu] .vs-summary-card-copy {
+  padding-right: calc(var(--control-sm) + var(--space-4));
+}
+.vs-summary-card-title,
+.vs-summary-card-description,
+.vs-summary-card-latest-text,
+.vs-summary-card-metadata {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-summary-card-latest {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+.vs-summary-card-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  margin-top: auto;
+  padding-top: var(--space-2);
+}
+.vs-summary-card-metadata {
+  flex: 1;
+}
+.vs-summary-card-footer > :last-child {
+  flex: none;
+}
+.vs-summary-card-chart {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  min-height: var(--summary-card-chart);
+  padding: var(--space-4);
+  border-left: var(--hairline) solid var(--line);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  background: var(--panel-2);
+}
+.vs-summary-card-chart > * {
+  flex: 1;
+  min-width: 0;
+}
+.vs-summary-card-chart > .vs-result-chart {
+  height: auto;
+  min-height: var(--summary-card-chart);
+}
+.vs-summary-card-menu {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 2;
+  pointer-events: auto;
+}
+
+@container (max-width: 760px) {
+  .vs-summary-card-content {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .vs-summary-card-chart {
+    border-top: var(--hairline) solid var(--line);
+    border-left: 0;
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  }
+}

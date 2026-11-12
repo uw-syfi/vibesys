@@ -17,6 +17,7 @@ import {
   type Navigation,
   type NavigationAction,
   navigationReducer,
+  REGISTERED_EXAMPLES,
   type RepositoryChecked,
   readOf,
 } from '../../state/index.js';
@@ -77,12 +78,12 @@ function open(
   return {screen, seen};
 }
 
-/** A card, or any control, named by its text start: a card's name is all of its text. */
-function card(screen: Screen, start: string): HTMLElement {
+/** A card, or any control, named by text it contains: kickers may precede a card's title. */
+function card(screen: Screen, words: string): HTMLElement {
   const found = [...screen.container.querySelectorAll<HTMLElement>('button')].find(each =>
-    (each.textContent ?? '').startsWith(start),
+    (each.textContent ?? '').includes(words),
   );
-  if (found === undefined) throw new Error(`no card starting ${start}`);
+  if (found === undefined) throw new Error(`no card containing ${words}`);
   return found;
 }
 
@@ -141,14 +142,14 @@ describe('the New run page', () => {
     expect(text).toContain('Evals on');
     expect(text).toContain('Local Docker');
     expect(text).not.toContain('modal');
-    expect(screen.controls('Edit in Machines')).toHaveLength(1);
+    expect(screen.controls('Add machine or server')).toHaveLength(1);
     screen.unmount();
   });
 
-  it('sends the Edit in Machines link to Machines, and the Runs crumb back to the list', () => {
+  it('sends Add machine or server to Machines, and the Runs crumb back to the list', () => {
     const {screen, seen} = open();
-    screen.press(screen.control('Edit in Machines'));
-    expect(seen.at(-1)).toEqual({type: 'open-machines'});
+    screen.press(screen.control('Add machine or server'));
+    expect(seen.at(-1)).toEqual({type: 'open-add-machine', origin: 'new-run'});
     screen.unmount();
     const again = open();
     again.screen.press(again.screen.control('Runs'));
@@ -247,11 +248,11 @@ describe('the New run page', () => {
   it('points to Machines, with a status word, when no eval place can be read', () => {
     const none = create(ListEvalPlacesResponseSchema, {places: []});
     const {screen, seen} = open([read({evalPlaces: readOf(none)})]);
-    screen.press(screen.control('No eval place'));
-    expect(seen.at(-1)).toEqual({type: 'open-machines'});
+    screen.press(screen.control('Set up an eval place'));
+    expect(seen.at(-1)).toEqual({type: 'open-add-machine', origin: 'new-run'});
     screen.unmount();
     const ok = open();
-    expect(ok.screen.controls('No eval place')).toHaveLength(0);
+    expect(ok.screen.controls('Set up an eval place')).toHaveLength(0);
     ok.screen.unmount();
   });
 
@@ -280,9 +281,10 @@ describe('the New run page', () => {
     );
     screen.press(screen.control('New run'));
     act(() => segment(screen, 'host-b').click());
-    // host-b is being read: host-a's counts are still there, dimmed.
+    // host-b is being read: host-a's eval places are still there, dimmed.
     expect(screen.container.querySelector('[data-stale]')).not.toBeNull();
-    expect(screen.text()).toContain('catalog tasks fit');
+    expect(screen.text()).toContain('Local Docker');
+    expect(screen.text()).not.toContain('catalog tasks fit');
     screen.render(
       <Window
         hosts={[before, read({key: 'ssh:host-b', label: 'host-b'})]}
@@ -296,6 +298,26 @@ describe('the New run page', () => {
 });
 
 describe('the catalog step', () => {
+  it('browses the complete VibeSys registry before any machine is connected', () => {
+    const {screen} = open([]);
+    screen.press(card(screen, 'CatalogStart from an example'));
+    expect(screen.text()).toContain('No machine connected. You can still browse every example.');
+    expect(screen.text()).toContain(
+      `${REGISTERED_EXAMPLES.length} of ${REGISTERED_EXAMPLES.length} examples`,
+    );
+    expect(screen.text()).toContain('Browsing offline · connect a machine to start');
+    expect(screen.text()).toContain('Model serving');
+    expect(screen.text()).toContain('Data structures');
+    expect(screen.container.querySelectorAll('.vs-pick-card')).toHaveLength(
+      REGISTERED_EXAMPLES.length,
+    );
+    screen.press(card(screen, 'queue-rs'));
+    expect(screen.text()).toContain('Connect a machine that provides it');
+    expect(screen.text()).toContain('git clone https://github.com/uw-syfi/vibesys.git');
+    expect(screen.controls('Start run')).toHaveLength(0);
+    screen.unmount();
+  });
+
   it('lists the examples by domain as cards with a title, an id line and objective chips', () => {
     const {screen} = open();
     screen.press(card(screen, 'CatalogStart from an example'));
@@ -304,26 +326,26 @@ describe('the catalog step', () => {
     expect(text).toContain('Catalog');
     expect(text).toContain('Model serving');
     expect(text).toContain('Data structures');
-    expect(text).toMatch(/Fits · \d+/);
-    expect(text).toMatch(/All · \d+/);
+    expect(text).toMatch(/\d+ of \d+ examples/);
+    expect(text).not.toContain('Fits ·');
+    expect(text).not.toContain('All ·');
     // The id line is the example's folder and its task.
     expect(text).toMatch(/\w+ \/ \w+/);
+    const split = screen.container.querySelector('.vs-split');
+    expect(split?.firstElementChild?.classList.contains('vs-split-aside')).toBe(true);
+    expect(split?.hasAttribute('data-aside-at-start')).toBe(true);
     screen.unmount();
   });
 
-  it('narrows by search and by the fit filter, and keeps a card that does not fit in All with what it lacks', () => {
+  it('shows every example with compatibility in place, then narrows by search', () => {
     const {screen} = open();
     screen.press(card(screen, 'CatalogStart from an example'));
-    const fitting = screen.container.querySelectorAll(
-      '.vs-pick-card:not([data-unavailable])',
-    ).length;
-    act(() => segment(screen, 'All').click());
     const all = screen.container.querySelectorAll('.vs-pick-card').length;
-    expect(all).toBeGreaterThan(fitting);
-    expect(screen.container.querySelectorAll('.vs-pick-card[data-unavailable]').length).toBe(
-      all - fitting,
-    );
-    type(field(screen, 'Model, hardware, task'), 'zzz-no-such-example');
+    const unavailable = screen.container.querySelectorAll('.vs-pick-card[data-unavailable]').length;
+    expect(all).toBeGreaterThan(0);
+    expect(unavailable).toBeGreaterThan(0);
+    expect(unavailable).toBeLessThan(all);
+    type(field(screen, 'Example, model, hardware, task'), 'zzz-no-such-example');
     expect(screen.container.querySelectorAll('.vs-pick-card')).toHaveLength(0);
     screen.unmount();
   });

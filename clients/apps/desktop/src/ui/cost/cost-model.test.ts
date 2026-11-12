@@ -297,11 +297,11 @@ describe('the cost screen model', () => {
     );
   });
 
-  it('names a model by the id the host served, and a default by its harness, every name in the code face', () => {
+  it('names the actual CLI provider beside every model id the host served', () => {
     expect(costScreenModel(PRICED_AND_UNPRICED, COST_WORDS).models.map(row => row.name)).toEqual([
-      'model-a',
-      'model-b',
-      'Codex default',
+      'Claude Code · model-a',
+      'Codex · model-b',
+      'Codex · default',
     ]);
     const long = costScreenModel(LONG_NAMES, COST_WORDS);
     expect(long.models[0]?.name.length).toBeGreaterThan(60);
@@ -309,7 +309,7 @@ describe('the cost screen model', () => {
     expect(long.chart?.legend[0]?.mono).toBe(true);
     // The harness's default is no id, but it stands in the same column and legend, so it reads alike.
     const own = costScreenModel(PRICED_AND_UNPRICED, COST_WORDS).models.at(-1);
-    expect(own?.name).toBe('Codex default');
+    expect(own?.name).toBe('Codex · default');
     expect(own?.mono).toBe(true);
     const all = costScreenModel(PRICED_AND_UNPRICED, COST_WORDS);
     expect(all.models.every(row => row.mono === true)).toBe(true);

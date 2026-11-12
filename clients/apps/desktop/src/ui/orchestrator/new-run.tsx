@@ -1,4 +1,4 @@
-import type {CatalogueEntry, EvalPlace} from '@vibesys/orchestrator-proto';
+import type {EvalPlace} from '@vibesys/orchestrator-proto';
 import {Button, type Crumb, Page, PickCard, PickCards, Stack} from '@vibesys/ui';
 import {type JSX, useReducer, useState} from 'react';
 import type {ProvisionExample} from '../../core/index.js';
@@ -7,11 +7,9 @@ import {
   type ExampleDraft,
   emptyExampleDraft,
   exampleTarget,
-  type FolderEntryFacts,
   firstPage,
   folderName,
   listingKey,
-  machineFacts,
   type NewRunPage,
   offeredPlaces,
   type PageAction,
@@ -47,16 +45,6 @@ function repositoriesFolder(host: StartHost | undefined): string {
   const kept = host.repositoriesDirectory ?? '';
   const folder = kept === '' ? (host.catalogue.data?.repositoriesDirectory ?? '') : kept;
   return folder.replace(/\/+$/, '');
-}
-
-/** What the host listed of a folder, or null while it has not. */
-function folderFacts(
-  host: StartHost | undefined,
-  folder: string,
-): readonly FolderEntryFacts[] | null {
-  if (host === undefined || folder === '') return null;
-  const listing = host.directories.get(listingKey(`${folder}/`, false));
-  return listing?._tag === 'Listed' ? listing.entries : null;
 }
 
 /** The title of each step, and the trail down to it. */
@@ -260,23 +248,19 @@ function OwnPane(props: {
 }
 
 /** The two ways in: the catalogue and the person's own repository. */
-function StartStep(props: {
-  readonly examples: readonly CatalogueEntry[];
-  readonly act: (action: PageAction) => void;
-}): JSX.Element {
-  const domains = new Set(props.examples.map(entry => entry.card?.domain)).size;
+function StartStep(props: {readonly act: (action: PageAction) => void}): JSX.Element {
   return (
     <PickCards label="Start from" columns="fit">
       <PickCard
         kicker="Catalog"
         title="Start from an example"
-        note={`${props.examples.length} tasks across ${domains} domains, ready to run.`}
+        note="Browse every bundled example by domain, then choose where to evaluate it."
         press={() => props.act({type: 'open', step: 'catalog'})}
       />
       <PickCard
         kicker="My own"
         title="Bring a repository, or describe one"
-        note="Use your task folder, or set one up in a chat."
+        note="Start an existing task, turn a repository into one, or create a new repository with guided setup."
         press={() => props.act({type: 'open', step: 'own'})}
       />
     </PickCards>
@@ -371,19 +355,12 @@ export function NewRun(
           hosts={props.hosts}
           chosen={picked?.key ?? ''}
           places={places}
-          facts={machineFacts(
-            host?.evalPlaces.data?.places ?? null,
-            host?.catalogue.data?.entries ?? null,
-            folderFacts(host, repositoriesFolder(host)),
-          )}
           stale={reading}
           failure={host?.catalogue.failure ?? host?.evalPlaces.failure ?? null}
           pick={pickMachine}
           editMachines={props.editMachines}
         />
-        {page.step === 'start' ? (
-          <StartStep examples={host?.catalogue.data?.entries ?? []} act={act} />
-        ) : null}
+        {page.step === 'start' ? <StartStep act={act} /> : null}
         {page.step === 'catalog' ? (
           <CatalogPane ctx={ctx} commands={props} example={example} setExample={setExample} />
         ) : null}

@@ -3,6 +3,7 @@ import {describe, expect, it} from '@effect/vitest';
 import {
   Compatibility,
   SearchStateSchema,
+  SnapshotDetail,
   UnreadableReason,
   WatchAgentRequestSchema,
   WatchRunsRequestSchema,
@@ -17,6 +18,7 @@ import * as Stream from 'effect/Stream';
 import * as SubscriptionRef from 'effect/SubscriptionRef';
 import {
   applyChange,
+  applySnapshot,
   emptyHostModel,
   emptyState,
   type FeedStatus,
@@ -75,6 +77,8 @@ const callsTo = (h: HostHarness, method: string) =>
   h.fake.calls().filter(call => call.target.method === methodPathOf(method));
 const openStreams = (h: HostHarness) =>
   h.fake.calls().filter(call => call.kind === 'stream' && call.open);
+const runsRequests = (h: HostHarness) =>
+  callsTo(h, 'WatchRuns').map(call => fromBinary(WatchRunsRequestSchema, call.target.request));
 
 describe('the run stream', () => {
   it.effect('goes Live after a snapshot and holds the host state', () =>
@@ -113,6 +117,139 @@ describe('the run stream', () => {
       unmount();
       yield* h.elapse(1);
       expect(openStreams(h)).toHaveLength(0);
+    }),
+  );
+
+  it.effect(
+    'refreshes from a replacement SUMMARY snapshot and keeps the old rows until it arrives',
+    () =>
+      Effect.gen(function* () {
+        const daemon = daemonAt();
+        const h = yield* hostHarness(daemon, {
+          wrap: base => ({
+            respond: (target, nth) =>
+              target.method === methodPathOf('WatchRuns') && nth === 1
+                ? [{sleep: '10 seconds'}, ...base.respond(target, nth)]
+                : base.respond(target, nth),
+          }),
+        });
+        h.mount(h.session.runs.watch);
+        expect(yield* h.read(h.session.runs.status)).toEqual({_tag: 'Live'});
+        const before = runStreamShape((yield* h.model).data);
+
+        // A manual replacement is authoritative even when the host restarted below the sequence
+        // already shown. Until it arrives, the old model remains whole on screen.
+        daemon.loseTail(Math.max(1, Math.floor(TOTAL / 2)));
+        const replacement = daemon.snapshot(SnapshotDetail.SUMMARY);
+        const expected = runStreamShape(applySnapshot(emptyState, replacement));
+        yield* h.session.runs.refresh;
+        yield* h.session.runs.refresh;
+        yield* h.session.runs.refresh;
+        expect(yield* h.read(h.session.runs.refreshState)).toEqual({_tag: 'Refreshing'});
+        expect(runStreamShape((yield* h.model).data)).toEqual(before);
+        const refreshingCalls = callsTo(h, 'WatchRuns');
+        expect(refreshingCalls).toHaveLength(2);
+        expect(refreshingCalls.map(call => ({open: call.open, released: call.released}))).toEqual([
+          {open: false, released: 1},
+          {open: true, released: 0},
+        ]);
+        expect(runsRequests(h)[1]).toMatchObject({
+          afterSequence: 0n,
+          detail: SnapshotDetail.SUMMARY,
+        });
+
+        yield* h.elapse(9);
+        expect(yield* h.read(h.session.runs.refreshState)).toEqual({_tag: 'Refreshing'});
+        expect(runStreamShape((yield* h.model).data)).toEqual(before);
+        yield* h.elapse(1);
+        expect(yield* h.read(h.session.runs.refreshState)).toEqual({
+          _tag: 'Refreshed',
+          sequence: replacement.sequence,
+        });
+        expect(runStreamShape((yield* h.model).data)).toEqual(expected);
+
+        // Refreshed is an acknowledgement, not a toast timer; it stays until another request.
+        yield* h.elapse(3_600, 3_600);
+        expect(yield* h.read(h.session.runs.refreshState)).toEqual({
+          _tag: 'Refreshed',
+          sequence: replacement.sequence,
+        });
+        expect(callsTo(h, 'WatchRuns')).toHaveLength(2);
+      }),
+  );
+
+  it.effect('reports a refused replacement and leaves the existing RetryGate behavior intact', () =>
+    Effect.gen(function* () {
+      const h = yield* hostHarness(daemonAt(), {
+        wrap: base => ({
+          respond: (target, nth) =>
+            target.method === methodPathOf('WatchRuns') && nth === 1
+              ? [{end: {message: 'runs unavailable', status: RpcStatus.NOT_FOUND}}]
+              : base.respond(target, nth),
+        }),
+      });
+      h.mount(h.session.runs.watch);
+      expect(yield* h.read(h.session.runs.status)).toEqual({_tag: 'Live'});
+      const before = runStreamShape((yield* h.model).data);
+
+      yield* h.session.runs.refresh;
+      expect(yield* h.read(h.session.runs.refreshState)).toEqual({_tag: 'Failed'});
+      expect(yield* h.read(h.session.runs.status)).toMatchObject({
+        _tag: 'Failed',
+        fault: {kind: 'NotFound'},
+      });
+      expect(runStreamShape((yield* h.model).data)).toEqual(before);
+      expect(runsRequests(h).map(request => request.afterSequence)).toEqual([0n, 0n]);
+
+      // The old Retry action still releases a failed feed and resumes at its cursor.
+      yield* h.session.runs.retry;
+      expect(yield* h.read(h.session.runs.status)).toEqual({_tag: 'Live'});
+      expect(runsRequests(h).map(request => request.afterSequence)).toEqual([
+        0n,
+        0n,
+        BigInt(TOTAL),
+      ]);
+      expect(yield* h.read(h.session.runs.refreshState)).toEqual({_tag: 'Failed'});
+
+      // A later Refresh is a new request and can replace the recovered feed.
+      yield* h.session.runs.refresh;
+      expect(yield* h.read(h.session.runs.refreshState)).toEqual({
+        _tag: 'Refreshed',
+        sequence: BigInt(TOTAL),
+      });
+      expect(runsRequests(h).map(request => request.afterSequence)).toEqual([
+        0n,
+        0n,
+        BigInt(TOTAL),
+        0n,
+      ]);
+    }),
+  );
+
+  it.effect('keeps a refresh request across an unmount and completes it on the next mount', () =>
+    Effect.gen(function* () {
+      const h = yield* hostHarness(daemonAt(), {
+        wrap: base => ({
+          respond: (target, nth) =>
+            target.method === methodPathOf('WatchRuns') && nth === 1
+              ? [{sleep: '10 seconds'}, ...base.respond(target, nth)]
+              : base.respond(target, nth),
+        }),
+      });
+      const unmount = h.mount(h.session.runs.watch);
+      expect(yield* h.read(h.session.runs.status)).toEqual({_tag: 'Live'});
+      yield* h.session.runs.refresh;
+      expect(yield* h.read(h.session.runs.refreshState)).toEqual({_tag: 'Refreshing'});
+      unmount();
+      yield* h.elapse(0);
+
+      h.mount(h.session.runs.watch);
+      expect(yield* h.read(h.session.runs.refreshState)).toEqual({
+        _tag: 'Refreshed',
+        sequence: BigInt(TOTAL),
+      });
+      expect(runsRequests(h).map(request => request.afterSequence)).toEqual([0n, 0n, 0n]);
+      expect(callsTo(h, 'WatchRuns').map(call => call.released)).toEqual([1, 1, 0]);
     }),
   );
 

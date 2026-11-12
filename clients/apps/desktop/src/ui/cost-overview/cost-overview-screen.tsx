@@ -5,7 +5,10 @@ import {
   Chip,
   CountedFact,
   FactLine,
+  KeyValue,
   MainSide,
+  MetricTile,
+  MetricTiles,
   MutedFact,
   Page,
   pageState,
@@ -22,6 +25,7 @@ import {
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import {
+  type ExploredWorkstreams,
   type FeedStatus,
   HOST_ORDER,
   type HostCostView,
@@ -31,7 +35,15 @@ import {
   type RunSortKey,
   type SpendRange,
 } from '../../state/index.js';
-import {AgentTypeTable, type CostCell, FLOOR_HINT, floored, formatAxisUsd} from '../cost/index.js';
+import {
+  AgentTypeTable,
+  type CostCell,
+  FLOOR,
+  FLOOR_HINT,
+  floored,
+  formatAxisUsd,
+  NOT_REPORTED,
+} from '../cost/index.js';
 import {HostStatusChip} from '../host-status-chip.js';
 import {
   type BudgetCell,
@@ -62,6 +74,12 @@ export interface CostOverviewHost {
   readonly feed: FeedStatus;
   /** What the host served; undefined until it has. */
   readonly view: HostCostView | undefined;
+  /** What the run/search streams prove about named workstreams on this host. */
+  readonly workstreams?: ExploredWorkstreams | undefined;
+  /** What the host served for the exact 24-hour window fixed when this page opened. */
+  readonly lastDayView?: HostCostView | undefined;
+  /** How that separate 24-hour stream stands; absent for callers that only show all-time cost. */
+  readonly lastDayFeed?: FeedStatus | undefined;
   /** What each run the client holds a card for is called, by run id; other runs keep the host's name. */
   readonly titles: Readonly<Record<string, string>>;
   /** When each run the client holds a card for began, by run id. */
@@ -75,21 +93,32 @@ function Problem(props: {
   readonly words: CostOverviewWords;
   readonly retry: (host: string) => void;
 }): JSX.Element | null {
-  const failed = props.host.feed._tag === 'Failed' ? props.host.feed.fault : null;
-  if (failed === null) return null;
+  const failures = [
+    {window: 'All time', status: props.host.feed},
+    ...(props.host.lastDayFeed === undefined
+      ? []
+      : [{window: 'Last 24 hours', status: props.host.lastDayFeed}]),
+  ].flatMap(({window, status}) =>
+    status._tag === 'Failed' ? [{window, fault: status.fault}] : [],
+  );
+  if (failures.length === 0) return null;
   return (
-    <Row gap="space-3" wrap>
-      <Chip label={props.words.fault(failed.kind)} tone="warn" dot />
-      {failed.retryable ? (
-        <Button
-          text="Retry"
-          label={`Retry cost of ${props.host.label}`}
-          variant="secondary"
-          size="sm"
-          press={() => props.retry(props.host.key)}
-        />
-      ) : null}
-    </Row>
+    <Stack gap="space-2">
+      {failures.map(({window, fault}) => (
+        <Row key={window} gap="space-3" wrap>
+          <Chip label={`${window}: ${props.words.fault(fault.kind)}`} tone="warn" dot />
+          {fault.retryable ? (
+            <Button
+              text="Retry"
+              label={`Retry ${window.toLowerCase()} cost of ${props.host.label}`}
+              variant="secondary"
+              size="sm"
+              press={() => props.retry(props.host.key)}
+            />
+          ) : null}
+        </Row>
+      ))}
+    </Stack>
   );
 }
 
@@ -217,7 +246,7 @@ function runColumns(words: CostOverviewWords): readonly TableColumn<RunLine>[] {
 
 const INPUT_HINT = 'Input tokens: fresh input, cache reads and cache writes';
 
-/** A model's name, in the code face when it is an id, after the swatch of its color on the chart. */
+/** A provider/model name, in the code face, after the swatch of its color on the chart. */
 function ModelName(props: {readonly line: ModelLine}): JSX.Element {
   const {line} = props;
   return (
@@ -231,7 +260,7 @@ function ModelName(props: {readonly line: ModelLine}): JSX.Element {
 const MODEL_COLUMNS: readonly TableColumn<ModelLine>[] = [
   {
     key: 'model',
-    header: 'Model',
+    header: 'Provider · model',
     lead: true,
     clip: line => line.title,
     cell: line => <ModelName line={line} />,
@@ -399,10 +428,10 @@ function SplitCards(props: {
           )}
         </Stack>
       </Card>
-      <Card dense section="By model">
+      <Card dense section="By CLI provider and model">
         <Stack gap="space-3">
           <Table
-            label={`Cost by model on ${host.label}`}
+            label={`Cost by CLI provider and model on ${host.label}`}
             dense
             middle
             columns={MODEL_COLUMNS}
@@ -412,7 +441,8 @@ function SplitCards(props: {
           />
           {model.modelsTruncated ? (
             <Text variant="small" tone="muted">
-              The host shortened the model list or a model name. Totals still include every model.
+              Some provider and model rows are not shown because the host shortened the list or a
+              name. Totals still include every model.
             </Text>
           ) : null}
         </Stack>
@@ -458,6 +488,123 @@ function HostPanels(props: {
       }
       side={<SplitCards host={host} model={model} />}
     />
+  );
+}
+
+const figure = (value: string | null, floor: boolean): string =>
+  value === null ? NOT_REPORTED : `${floor ? FLOOR : ''}${value}`;
+
+const countFigure = (value: string, served: number, total: number): string =>
+  served === 0 ? NOT_REPORTED : `${served < total ? FLOOR : ''}${value}`;
+
+const coverage = (served: number, total: number): string =>
+  served === total
+    ? total === 1
+      ? '1 machine reporting'
+      : `${total} machines reporting`
+    : `${served} of ${total} machines reporting`;
+
+/** The eight operator figures requested by the Cost destination, with absences kept explicit. */
+function OperatorSummary(props: {readonly figures: ReturnType<typeof totalFigures>}): JSX.Element {
+  const {figures} = props;
+  const allCoverage = coverage(figures.servedHosts, figures.hostCount);
+  const dayCoverage = coverage(figures.lastDayHosts, figures.hostCount);
+  const perWorkstream = figures.costPerWorkstream;
+  return (
+    <MetricTiles label="Cost summary" count={8} dense>
+      <MetricTile
+        name="Total spend"
+        figure={figure(figures.figure, figures.floor)}
+        {...(figures.floor ? {note: 'at least'} : {})}
+        {...(figures.figure === null ? {tone: 'muted' as const} : {})}
+        detail={allCoverage}
+        hint="Priced finished turns across the cost views each machine served"
+      />
+      <MetricTile
+        name="Last hour"
+        figure={figure(figures.lastHour, figures.lastHourFloor)}
+        {...(figures.lastHourFloor ? {note: 'partial'} : {})}
+        {...(figures.lastHour === null ? {tone: 'muted' as const} : {})}
+        detail="Priced spend from finished turns in the last hour"
+      />
+      <MetricTile
+        name="Last 24 hours"
+        figure={figure(figures.lastDay, figures.lastDayFloor)}
+        {...(figures.lastDayFloor ? {note: 'at least'} : {})}
+        {...(figures.lastDay === null ? {tone: 'muted' as const} : {})}
+        detail={dayCoverage}
+        hint="An exact 24-hour view fixed when this Cost page opened"
+      />
+      <MetricTile
+        name="Runs"
+        figure={countFigure(figures.runs.count, figures.servedHosts, figures.hostCount)}
+        {...(figures.servedHosts === 0 ? {tone: 'muted' as const} : {})}
+        detail={allCoverage}
+      />
+      <MetricTile
+        name="Turns"
+        figure={countFigure(figures.turns.count, figures.servedHosts, figures.hostCount)}
+        {...(figures.servedHosts === 0 ? {tone: 'muted' as const} : {})}
+        detail="Finished turns"
+      />
+      <MetricTile
+        name="Unpriced turns"
+        figure={countFigure(figures.unpriced?.count ?? '0', figures.servedHosts, figures.hostCount)}
+        {...(figures.servedHosts === 0 ? {tone: 'muted' as const} : {})}
+        detail="Tokens reported without a price"
+      />
+      <MetricTile
+        name="Workstreams explored"
+        figure={figure(figures.workstreams, figures.workstreamsFloor)}
+        {...(figures.workstreamsFloor ? {note: 'at least'} : {})}
+        {...(figures.workstreams === null ? {tone: 'muted' as const} : {})}
+        detail={coverage(figures.workstreamHosts, figures.hostCount)}
+        hint="Named workstreams with at least one idea, counted once per run from complete search views"
+      />
+      <MetricTile
+        name="Cost per workstream"
+        figure={perWorkstream.kind === 'average' ? perWorkstream.figure : NOT_REPORTED}
+        {...(perWorkstream.kind === 'unavailable' ? {tone: 'muted' as const} : {})}
+        detail={
+          perWorkstream.kind === 'average'
+            ? 'Total priced spend ÷ explored workstreams'
+            : perWorkstream.reason
+        }
+        hint="Operator-wide average only; individual turns are not attributed to a workstream"
+      />
+    </MetricTiles>
+  );
+}
+
+/** The controls the current authoritative contracts can and cannot enforce. */
+function CostControls(): JSX.Element {
+  return (
+    <Card section="Cost controls and attribution">
+      <KeyValue
+        items={[
+          {
+            key: 'Run cost limits',
+            value:
+              'Enforced by each machine. Select a run below, then choose Adjust to review or change its cost limit.',
+          },
+          {
+            key: 'Provider limits',
+            value:
+              'Not available yet. Machines attribute provider cost after turns finish and expose no provider-specific cost quota.',
+          },
+          {
+            key: 'Provider and model',
+            value:
+              'The rows below use what finished turns actually reported, never a model merely allowed for a run.',
+          },
+          {
+            key: 'Workstreams',
+            value:
+              'Complete search views provide the explored count. The headline is an operator-wide average, not turn attribution.',
+          },
+        ]}
+      />
+    </Card>
   );
 }
 
@@ -524,9 +671,17 @@ export function CostOverviewScreen(props: {
   readonly words: CostOverviewWords;
   readonly open: (host: string, runId: string) => void;
   readonly retry: (host: string) => void;
+  /** The page has not yet fixed the moment its 24-hour window ends. */
+  readonly loading?: boolean;
 }): JSX.Element {
   const {hosts, words} = props;
   const served = hosts.flatMap(host => (host.view === undefined ? [] : [host.view]));
+  const servedLastDay = hosts.flatMap(host =>
+    host.lastDayView === undefined ? [] : [host.lastDayView],
+  );
+  const workstreams = hosts.flatMap(host =>
+    host.workstreams === undefined ? [] : [host.workstreams],
+  );
   const several = hosts.length > 1;
   const [only] = hosts;
   return (
@@ -534,11 +689,12 @@ export function CostOverviewScreen(props: {
       key="cost"
       width="fill"
       state={pageState(
-        hosts.some(
-          host =>
-            host.view === undefined &&
-            (host.status.kind === 'waiting' || host.status.kind === 'connecting'),
-        ),
+        props.loading === true ||
+          hosts.some(
+            host =>
+              host.view === undefined &&
+              (host.status.kind === 'waiting' || host.status.kind === 'connecting'),
+          ),
       )}
       title="Cost"
       meta={
@@ -550,6 +706,14 @@ export function CostOverviewScreen(props: {
         )
       }
     >
+      {hosts.length === 0 ? null : (
+        <>
+          <OperatorSummary
+            figures={totalFigures(served, hosts.length, servedLastDay, workstreams)}
+          />
+          <CostControls />
+        </>
+      )}
       {hosts.map(host => (
         <Stack key={host.key} gap="space-4">
           {several ? (

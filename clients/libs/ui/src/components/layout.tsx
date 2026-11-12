@@ -44,7 +44,7 @@ export type Justify = 'start' | 'center' | 'end' | 'between';
  * The narrowest column a `Grid` wraps at: a form field, a tile, a theme swatch, or a theme swatch
  * of a group of three that stays in one row down to the narrowest window.
  */
-export type GridColumn = 'field' | 'tile' | 'swatch' | 'swatch-row';
+export type GridColumn = 'field' | 'main' | 'tile' | 'swatch' | 'swatch-row';
 
 interface FlexProps {
   readonly gap?: SpaceToken;

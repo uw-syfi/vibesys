@@ -40,7 +40,6 @@ const placesArb: fc.Arbitrary<EvalPlace[]> = fc.shuffledSubarray([...NAMES]).map
 
 const draftArb = fc.record({
   query: fc.constant(''),
-  fitsOnly: fc.boolean(),
   picked: fc.option(fc.constantFrom('model-serving/a:t', 'databases/b:t', 'x/missing:t'), {
     nil: null,
   }),

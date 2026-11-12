@@ -1,6 +1,6 @@
-import {Button, Card, Field, Row, Stack, TextInput} from '@vibesys/ui';
+import {Button, Card, Field, Row, Stack, Text, TextInput} from '@vibesys/ui';
 import {type JSX, useState} from 'react';
-import {checkRepositoriesFolder, REPOSITORIES_FIELD} from '../../state/index.js';
+import {checkRepositoriesFolder} from '../../state/index.js';
 
 /** One machine and the Repositories folder kept for it; empty when none is kept. */
 interface FolderRow {
@@ -115,11 +115,19 @@ function FolderField(props: {
 /** Settings of the machines: where each one's new repositories are made. */
 export function RepositoriesCard(props: {readonly controls: RepositoriesControls}): JSX.Element {
   return (
-    <Card section={REPOSITORIES_FIELD}>
+    <Card section="Repository defaults">
       <Stack gap="space-4">
-        {props.controls.rows.map(row => (
-          <FolderField key={row.key} row={row} save={props.controls.save} />
-        ))}
+        <Text tone="muted">
+          Choose where each machine creates repositories from catalogue examples. Leave a field
+          empty to use that machine's host default.
+        </Text>
+        {props.controls.rows.length === 0 ? (
+          <Text tone="muted">Add a machine before choosing a repository default.</Text>
+        ) : (
+          props.controls.rows.map(row => (
+            <FolderField key={row.key} row={row} save={props.controls.save} />
+          ))
+        )}
       </Stack>
     </Card>
   );

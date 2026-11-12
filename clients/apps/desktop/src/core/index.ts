@@ -83,12 +83,18 @@ export {
 export {makeRepositoryCheck, type RepositoryCheck} from './repository-check.js';
 export {makeRunHistory, type RunHistory, type RunHistoryStatus} from './run-history.js';
 export {
+  makeRunSearch,
+  RUN_SEARCH_DEBOUNCE,
+  type RunSearch,
+  type RunSearchState,
+} from './run-search.js';
+export {
   makeRunsTopicFeed,
   type RunsTopicFeed,
   type RunsTopicParts,
   type RunsTopicState,
 } from './runs-topic-feed.js';
-export {makeRunsView, type RunsView} from './runs-view.js';
+export {makeRunsView, type RunsRefreshState, type RunsView} from './runs-view.js';
 export {type AppearanceStore, makeAppearance} from './settings/appearance.js';
 export {
   Preferences,

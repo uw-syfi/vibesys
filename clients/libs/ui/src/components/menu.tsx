@@ -3,7 +3,9 @@ import {
   type JSX,
   type KeyboardEvent,
   type ReactNode,
+  type Ref,
   useId,
+  useImperativeHandle,
   useRef,
   useState,
 } from 'react';
@@ -20,6 +22,20 @@ export type MenuItem = {
   | {readonly press: () => void; readonly href?: never}
   | {readonly href: string; readonly press?: never}
 );
+
+/** The one operation a surface that owns a `Menu` may invoke, sharing the trigger's open path. */
+export interface MenuHandle {
+  readonly open: () => void;
+}
+
+export type MenuProps = ButtonFace & {
+  readonly items: readonly MenuItem[];
+  readonly variant?: ButtonVariant;
+  readonly size?: 'sm' | 'md';
+  readonly align?: 'start' | 'end';
+  /** Lets a containing surface open this same menu from a context-menu gesture. */
+  readonly ref?: Ref<MenuHandle>;
+};
 
 /**
  * A box whose `Menu`s open under it, no wider than it: for a menu in a narrow panel, where the
@@ -41,14 +57,7 @@ function items(list: HTMLElement | null): HTMLElement[] {
  * to the button; choosing an item, or moving the focus out, closes it. The panel lines up with
  * the button's `end` edge (the default, for a button at the end of a row) or its `start` edge.
  */
-export function Menu(
-  props: ButtonFace & {
-    readonly items: readonly MenuItem[];
-    readonly variant?: ButtonVariant;
-    readonly size?: 'sm' | 'md';
-    readonly align?: 'start' | 'end';
-  },
-): JSX.Element {
+export function Menu(props: MenuProps): JSX.Element {
   const [open, setOpen] = useState(false);
   const menuId = useId();
   const root = useRef<HTMLDivElement>(null);
@@ -65,6 +74,7 @@ export function Menu(
     firstFocus.current = focus;
     setOpen(true);
   };
+  useImperativeHandle(props.ref, () => ({open: () => show('first')}));
   const close = (refocus: boolean): void => {
     setOpen(false);
     if (refocus) trigger.current?.focus();

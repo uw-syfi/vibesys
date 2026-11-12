@@ -1,3 +1,4 @@
+import {wordsOfId} from '@vibesys/display-names';
 import type {CatalogueEntry, CatalogueProblem, EvalPlace} from '@vibesys/orchestrator-proto';
 import {
   Button,
@@ -10,7 +11,6 @@ import {
   PickCards,
   Row,
   SearchBox,
-  SegmentedControl,
   Select,
   Split,
   Stack,
@@ -20,13 +20,18 @@ import {
 } from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
+  type CatalogueItem,
+  catalogueItemDomain,
+  catalogueItemExample,
+  catalogueItemKey,
+  catalogueItemNeedsClone,
+  catalogueItems,
   catalogueProblemWords,
   completionsOf,
   type ExampleDraft,
-  entryKey,
   fitsHere,
   folderName,
-  groupByDomain,
+  groupCatalogueItems,
   listingKey,
   nameOfExample,
   objectiveChip,
@@ -34,7 +39,7 @@ import {
   placesFor,
   splitPath,
   variantOf,
-  visibleEntries,
+  visibleCatalogueItems,
 } from '../../../state/index.js';
 import {acceleratorName, runTitle} from '../fleet-words.js';
 import type {StartDraft} from '../start-draft.js';
@@ -84,24 +89,47 @@ const lacking = (entry: CatalogueEntry): string => {
   return name === '' ? 'No place' : `No ${name}`;
 };
 
+/** A browse-only example's title, in words rather than its folder id. */
+const browseTitle = (item: CatalogueItem): string =>
+  wordsOfId(folderName({example: catalogueItemExample(item)}));
+
 function Cards(props: {
-  readonly entries: readonly CatalogueEntry[];
+  readonly items: readonly CatalogueItem[];
   readonly places: readonly EvalPlace[];
   readonly picked: string | null;
   readonly pick: (example: string) => void;
 }): JSX.Element {
   return (
     <>
-      {props.entries.map(entry => {
+      {props.items.map(item => {
+        if (item._tag === 'BrowseOnly') {
+          const key = catalogueItemKey(item);
+          return (
+            <PickCard
+              key={key}
+              title={browseTitle(item)}
+              id={item.example.id}
+              note="Connect a machine to load its tasks and compatibility."
+              tag={item.example.needsClone ? 'External source' : 'Browse offline'}
+              selected={props.picked === key}
+              press={() => props.pick(key)}
+            />
+          );
+        }
+        const {entry} = item;
         const variant = variantOf(entry);
         return (
           <PickCard
-            key={entryKey(entry)}
+            key={catalogueItemKey(item)}
             title={runTitle(entry.card ?? null, folderName(entry))}
             id={idLine(entry)}
-            selected={props.picked === entryKey(entry)}
-            press={() => props.pick(entryKey(entry))}
-            {...(variant === undefined ? {} : {tag: variant})}
+            selected={props.picked === catalogueItemKey(item)}
+            press={() => props.pick(catalogueItemKey(item))}
+            {...(variant === undefined
+              ? catalogueItemNeedsClone(item)
+                ? {tag: 'Needs network'}
+                : {}
+              : {tag: variant})}
             {...(fitsHere(entry, props.places) ? {} : {unavailable: lacking(entry)})}
             chips={(entry.card?.objectives ?? []).map(objective => {
               const {text, hint} = objectiveChip(objective);
@@ -124,7 +152,7 @@ function statusOf(line: ReturnType<typeof provisionLine>) {
 /** The picked example: where it evaluates, its limits, and Start; the repository it is copied to is under More options. */
 function Selected(props: {
   readonly host: StartHost | undefined;
-  readonly entry: CatalogueEntry | undefined;
+  readonly item: CatalogueItem | undefined;
   readonly places: readonly EvalPlace[];
   readonly example: ExampleDraft;
   readonly setExample: (draft: ExampleDraft) => void;
@@ -137,8 +165,8 @@ function Selected(props: {
   readonly listDirectory: (host: string, folder: string, hidden: boolean, fresh: boolean) => void;
   readonly status: JSX.Element | null;
 }): JSX.Element {
-  const {host, entry, example, places} = props;
-  if (entry === undefined) {
+  const {host, item, example, places} = props;
+  if (item === undefined) {
     return (
       <Stack gap="space-3">
         <Text variant="section">Selected</Text>
@@ -146,6 +174,34 @@ function Selected(props: {
       </Stack>
     );
   }
+  if (item._tag === 'BrowseOnly') {
+    return (
+      <Stack gap="space-3">
+        <Stack gap="space-1">
+          <Text variant="section">Example</Text>
+          <Text variant="item">{browseTitle(item)}</Text>
+          <Text variant="code">{item.example.id}</Text>
+        </Stack>
+        <Chip label={domainWord(catalogueItemDomain(item))} />
+        <Text>
+          This example is in the VibeSys registry. Connect a machine that provides it to see its
+          tasks, hardware needs and eval compatibility.
+        </Text>
+        {item.example.needsClone ? (
+          <Text tone="muted">
+            Its source is cloned at a pinned revision when the machine provisions it, so starting it
+            needs network access.
+          </Text>
+        ) : null}
+        <Stack gap="space-1">
+          <Text variant="section">Use a source checkout</Text>
+          <Text tone="muted">Run this in a terminal if VibeSys is not installed locally.</Text>
+          <Text variant="code">git clone https://github.com/uw-syfi/vibesys.git</Text>
+        </Stack>
+      </Stack>
+    );
+  }
+  const {entry} = item;
   const set = (change: Partial<ExampleDraft>): void => props.setExample({...example, ...change});
   const fitting = placesFor(entry, places);
   const chosen = placeChoice(example.place, fitting, entry.fit);
@@ -234,9 +290,9 @@ function Selected(props: {
 }
 
 /**
- * The catalogue step: a search and the machine's fit filter over the examples in a card grid per
- * domain, and beside them the picked example. The cards are the machine on screen's (dimmed in place
- * while another machine is read), so the grid and the filter keep their size.
+ * The catalogue step: searchable release examples in a card grid per domain, with the picked
+ * example beside them. Cards the host can provision may start; offline cards stay browseable and
+ * explain what connecting or cloning enables.
  */
 export function CatalogStep(props: {
   /** The machine on screen. */
@@ -257,68 +313,62 @@ export function CatalogStep(props: {
   const {host, example, places} = props;
   const entries = host?.catalogue.data?.entries ?? [];
   const problem = host?.catalogue.data?.problem;
-  const fitting = entries.filter(entry => fitsHere(entry, places)).length;
-  const shown = visibleEntries(entries, {query: example.query, fitsOnly: false}).filter(
-    entry => !example.fitsOnly || fitsHere(entry, places),
-  );
-  const picked = entries.find(entry => entryKey(entry) === example.picked);
-  // A pick the machine on screen does not fit is no pick: the card stays, the panel is empty.
-  const entry = picked !== undefined && fitsHere(picked, places) ? picked : undefined;
+  const items = catalogueItems(entries);
+  const shown = visibleCatalogueItems(items, {query: example.query});
+  const picked = items.find(item => catalogueItemKey(item) === example.picked);
+  // An available task the machine does not fit is no pick; a browse-only example remains inspectable.
+  const item = picked?._tag === 'Available' && !fitsHere(picked.entry, places) ? undefined : picked;
   const set = (change: Partial<ExampleDraft>): void => props.setExample({...example, ...change});
+  const shownExamples = new Set(shown.map(catalogueItemExample)).size;
+  const totalExamples = new Set(items.map(catalogueItemExample)).size;
   return (
     <Split
+      asideFirst
+      asideAtStart
       asideSticky
       main={
         <Stack gap="space-4">
-          {problem !== undefined ? (
-            <CatalogueProblemState problem={problem} />
-          ) : (
-            <>
-              <Row gap="space-3" wrap>
-                <SearchBox
-                  label="Search"
-                  value={example.query}
-                  change={query => set({query})}
-                  placeholder="Model, hardware, task"
-                />
-                <SegmentedControl
-                  label="Show"
-                  size="sm"
-                  value={example.fitsOnly ? 'fits' : 'all'}
-                  options={[
-                    {value: 'fits', label: `Fits · ${fitting}`},
-                    {value: 'all', label: `All · ${entries.length}`},
-                  ]}
-                  change={value => set({fitsOnly: value === 'fits'})}
-                />
-                <Text tone="muted">{host?.catalogue.failure ?? ''}</Text>
-              </Row>
-              <Stale stale={props.stale}>
-                <Stack gap="space-5">
-                  {groupByDomain(shown).map(group => (
-                    <Stack key={group.domain} gap="space-2">
-                      <Text variant="section">{`${domainWord(group.domain)} · ${group.entries.length}`}</Text>
-                      <PickCards label={domainWord(group.domain)} columns="fill">
-                        <Cards
-                          entries={group.entries}
-                          places={places}
-                          picked={entry === undefined ? null : example.picked}
-                          pick={props.pick}
-                        />
-                      </PickCards>
-                    </Stack>
-                  ))}
+          {problem === undefined ? null : <CatalogueProblemState problem={problem} />}
+          <Row gap="space-3" wrap>
+            <SearchBox
+              label="Search"
+              value={example.query}
+              change={query => set({query})}
+              placeholder="Example, model, hardware, task"
+            />
+            <Text tone="muted">{`${shownExamples} of ${totalExamples} examples`}</Text>
+            <Text tone="muted">
+              {host === undefined
+                ? 'Browsing offline · connect a machine to start'
+                : host.catalogue.failure === null
+                  ? ''
+                  : 'Machine catalogue unreadable · showing offline examples'}
+            </Text>
+          </Row>
+          <Stale stale={props.stale}>
+            <Stack gap="space-5">
+              {groupCatalogueItems(shown).map(group => (
+                <Stack key={group.domain} gap="space-2">
+                  <Text variant="section">{`${domainWord(group.domain)} · ${group.items.length}`}</Text>
+                  <PickCards label={domainWord(group.domain)} columns="fill">
+                    <Cards
+                      items={group.items}
+                      places={places}
+                      picked={item === undefined ? null : example.picked}
+                      pick={props.pick}
+                    />
+                  </PickCards>
                 </Stack>
-              </Stale>
-            </>
-          )}
+              ))}
+            </Stack>
+          </Stale>
         </Stack>
       }
       aside={
         <Card>
           <Selected
             host={host}
-            entry={entry}
+            item={item}
             places={places}
             example={example}
             setExample={props.setExample}

@@ -60,7 +60,7 @@ import {
   Viewer,
   viewerOver,
 } from '../../core/index.js';
-import type {CostView} from '../../state/index.js';
+import {type CostView, lastDayWindow, windowSinceMs} from '../../state/index.js';
 import {hostsOfAddress} from '../../ui/address.js';
 import {DisplayClockProvider} from '../../ui/display-clock.js';
 import type {ConnectedHost} from '../../ui/orchestrator/connected.js';
@@ -106,7 +106,7 @@ import {servedCost} from '../orchestrator/served-cost.js';
 import {servedHostCost} from '../orchestrator/served-host-cost.js';
 import {runEntryFrame, runsSyncedFrame, servingRuns} from '../runs-topic.js';
 import {makeFakePreferencesBridge} from '../settings/fakes.js';
-import {fixtureMachineActions} from '../settings/machine-actions.js';
+import {memoryMachineActions} from '../settings/machine-actions.js';
 import {memoryFolders} from '../settings/machine-folders.js';
 import {makeFakeTransport, type Recording} from '../transport/index.js';
 import {makeFakeViewerBridge} from '../viewer/fakes.js';
@@ -181,6 +181,8 @@ const clockOrigin = Date.now();
 const realNow = Date.now.bind(Date);
 Date.now = () => NOW_MS + (realNow() - clockOrigin);
 document.documentElement.dataset.nowMs = String(NOW_MS);
+const LAST_DAY_SINCE_MS = windowSinceMs(lastDayWindow(NOW_MS));
+if (LAST_DAY_SINCE_MS === null) throw new Error('the last-day window unexpectedly counts all time');
 const frozenClock: Clock.Clock = Object.assign(Object.create(Clock.Clock.defaultValue()), {
   currentTimeMillisUnsafe: () => NOW_MS,
   currentTimeMillis: Effect.succeed(NOW_MS),
@@ -217,6 +219,10 @@ function fleetRecording(spec: string): Recording {
       });
       const daemon = new FakeDaemon(hostScenario);
       daemon.publishHostCost(servedHostCost(hostScenario.changes, nowMs));
+      daemon.publishHostCost(
+        servedHostCost(hostScenario.changes, nowMs, LAST_DAY_SINCE_MS),
+        LAST_DAY_SINCE_MS,
+      );
       daemon.runsLeftOut = leftOut;
       return [host.key, daemonRecording(daemon, {files: FIXTURE_FILES, live: true})] as const;
     }),
@@ -304,6 +310,10 @@ const cost =
     : caseWorld.cost;
 if (cost !== undefined) daemon.publishCost(servedCost(cost, scenario.runId));
 daemon.publishHostCost(servedHostCost(scenario.changes, NOW_MS));
+daemon.publishHostCost(
+  servedHostCost(scenario.changes, NOW_MS, LAST_DAY_SINCE_MS),
+  LAST_DAY_SINCE_MS,
+);
 const shape = query.get('catchUp') ?? 'none';
 seedCheckIns(daemon, scenario, CATCH_UP_SHAPES.find(each => each === shape) ?? 'none');
 const served = daemonRecording(daemon, {live: true, files: FIXTURE_FILES});
@@ -371,8 +381,12 @@ Effect.runFork(
     const scope = yield* Scope.make();
     const appearance = yield* makeAppearance().pipe(Scope.provide(scope));
     const navigation = yield* makeNavigation().pipe(Scope.provide(scope));
-    const viewer = (yield* (yield* Viewer).whoami).id;
+    const viewer = yield* (yield* Viewer).whoami;
     const folders = yield* makeMachineFolders(memoryFolders().actions);
+    const machines = folders.follow(
+      memoryMachineActions({aliases: ['host-a', 'host-b'], saved: shown.map(host => host.key)})
+        .actions,
+    );
     const hosts: ConnectedHost[] = [];
     for (const {key, label} of shown) {
       const session = yield* makeHostSession(key).pipe(Scope.provide(scope));
@@ -385,9 +399,9 @@ Effect.runFork(
             hosts={hosts}
             navigation={navigation}
             appearance={appearance}
-            viewerId={viewer}
+            viewer={viewer}
+            machines={machines}
             folders={folders}
-            machines={fixtureMachineActions()}
             dispatch={(effect, then) => {
               Effect.runFork(Effect.map(effect, then));
             }}

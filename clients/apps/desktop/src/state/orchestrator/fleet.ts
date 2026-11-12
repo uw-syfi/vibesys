@@ -8,9 +8,11 @@
  * kept checkouts), never guessed from a duration. The screen formats.
  */
 import {
+  Harness,
   type ObjectiveStanding,
   type Run,
   RunLimit,
+  type RunSearchResult,
   RunStatus,
   type RunSummary,
   type SearchState,
@@ -39,9 +41,11 @@ export interface FleetFilter {
   readonly state: FleetState;
   /** The `HostKey` of the one host shown, or null for every host. */
   readonly host: string | null;
+  /** Plain operator words matched against the run's semantic search document. */
+  readonly query?: string;
 }
 
-export const NO_FLEET_FILTER: FleetFilter = {state: 'all', host: null};
+export const NO_FLEET_FILTER: FleetFilter = {state: 'all', host: null, query: ''};
 
 /** The columns of the run list a person can sort by. */
 export type FleetColumn = 'name' | 'status' | 'host' | 'best' | 'agents' | 'cost';
@@ -82,7 +86,7 @@ export interface FleetHostInput {
   readonly label: string;
   readonly data: OrchestratorState;
   /** The host gateway's atomic generic run index, separate from the managed model above. */
-  readonly runIndex: GenericRunIndex;
+  readonly runIndex?: GenericRunIndex;
   readonly freshness: Freshness;
   /** The one status the host has on every screen. */
   readonly status: HostStatus;
@@ -110,6 +114,54 @@ export interface FleetObjective {
   /** How close the best is to the bound, in percent, as the host served it; null when it did not. */
   readonly percentOfBound: number | null;
 }
+
+/**
+ * The newest structured account of work on a run. A hypothesis is a plan the host explicitly says
+ * belongs to this run; a workstream is one this run started. A report is the honest fallback when
+ * neither exists. The list never extracts an update from narration.
+ */
+export type FleetUpdate =
+  | {
+      readonly kind: 'hypothesis' | 'workstream' | 'report';
+      readonly title: string;
+      readonly detail: string;
+      readonly atMs: number | null;
+    }
+  | {readonly kind: 'none'};
+
+/** The semantic places an operator's words can match, with stable names for tests and diagnostics. */
+export type FleetSearchField =
+  | 'title'
+  | 'description'
+  | 'model'
+  | 'cli'
+  | 'work'
+  | 'objective'
+  | 'repository'
+  | 'host'
+  | 'run-id';
+
+export interface FleetSearchEntry {
+  readonly field: FleetSearchField;
+  readonly value: string;
+}
+
+/**
+ * One registry entry per searchable meaning. The weights are relevance, not presentation order:
+ * a task title beats a path fragment, while every query token still has to match somewhere.
+ */
+export const FLEET_SEARCH_REGISTRY: Readonly<Record<FleetSearchField, {readonly weight: number}>> =
+  {
+    title: {weight: 12},
+    description: {weight: 8},
+    model: {weight: 11},
+    cli: {weight: 9},
+    work: {weight: 10},
+    objective: {weight: 7},
+    repository: {weight: 5},
+    host: {weight: 4},
+    'run-id': {weight: 3},
+  };
 
 /** Where the host says the run stands on one objective, as a row carries its best: absent as null. */
 const objectiveOf = (standing: ObjectiveStanding): FleetObjective => ({
@@ -154,6 +206,14 @@ interface FleetRowBase {
   readonly name: string;
   /** What the host read of the run's task when it started; null for a run recorded before cards. */
   readonly card: TaskCard | null;
+  /** A short host-authored description, absent on rows made by pre-card consumers. */
+  readonly description?: string;
+  /** The newest structured work item or report the host served. */
+  readonly update?: FleetUpdate;
+  /** Changes when an operator-relevant structured update changes. */
+  readonly activityKey?: string;
+  /** The values searched by `fleetView`, absent only on rows made by pre-search consumers. */
+  readonly search?: readonly FleetSearchEntry[];
   readonly repository: string;
   /** Still working: starting, running or stopping. */
   readonly live: boolean;
@@ -184,6 +244,15 @@ interface FleetRowBase {
   readonly deadlineMs: number | null;
   /** Why the run wants a look, in the order of `ATTENTION_KINDS`; empty when nothing does. */
   readonly attention: readonly FleetAttention[];
+  /** The run came from whole-history search and is absent from the bounded runs snapshot. */
+  readonly searchOnly?: boolean;
+}
+
+/** One host's authoritative whole-history matches for exactly `query`. */
+export interface FleetRemoteSearch {
+  readonly host: string;
+  readonly query: string;
+  readonly results: readonly RunSearchResult[];
 }
 
 /** A row backed by the managed orchestrator model. */
@@ -284,13 +353,129 @@ function attentionOf(run: Run, search: SearchState | undefined): readonly FleetA
   return found;
 }
 
+const HARNESS_SEARCH: Readonly<Record<Harness, string>> = {
+  [Harness.UNSPECIFIED]: '',
+  [Harness.CLAUDE_CODE]: 'Claude Code Claude',
+  [Harness.CODEX]: 'Codex OpenAI',
+};
+
+/** A one-line description the task authored, without repeating its title. */
+function descriptionOf(card: TaskCard | undefined): string {
+  if (card === undefined) return '';
+  return card.workloadDescription || card.heading;
+}
+
+const line = (value: string): string => value.split(/\r?\n/u)[0]?.trim() ?? '';
+
+/** The newest plan explicitly in this run, the newest workstream it started, or its latest report. */
+function updateOf(
+  run: Run,
+  summary: RunSummary | undefined,
+  search: SearchState | undefined,
+): FleetUpdate {
+  const hypotheses = (search?.plans ?? []).flatMap((plan, index) => {
+    if (search?.ideas[index]?.inRun !== true) return [];
+    return [
+      {
+        kind: 'hypothesis' as const,
+        title: plan.title,
+        detail: line(plan.body),
+        atMs: ms(plan.updatedAt),
+        tie: plan.number,
+      },
+    ];
+  });
+  const workstreams = (search?.workstreams ?? []).flatMap(workstream =>
+    workstream.origin?.runId !== run.id
+      ? []
+      : [
+          {
+            kind: 'workstream' as const,
+            title: workstream.title,
+            detail: workstream.note,
+            atMs: ms(workstream.updatedAt),
+            tie: workstream.number,
+          },
+        ],
+  );
+  const latest = [...hypotheses, ...workstreams].sort(
+    (a, b) =>
+      (b.atMs ?? Number.NEGATIVE_INFINITY) - (a.atMs ?? Number.NEGATIVE_INFINITY) || b.tie - a.tie,
+  )[0];
+  if (latest !== undefined) {
+    return {
+      kind: latest.kind,
+      title: latest.title,
+      detail: latest.detail,
+      atMs: latest.atMs,
+    };
+  }
+  const report = summary?.report?.body.case === 'report' ? summary.report.body.value : undefined;
+  return report === undefined
+    ? {kind: 'none'}
+    : {
+        kind: 'report',
+        title: report.headline,
+        detail: line(report.inFlight || report.changed),
+        atMs: ms(summary?.report?.at),
+      };
+}
+
+function searchEntries(
+  host: FleetHostRef,
+  run: Run,
+  summary: RunSummary | undefined,
+  search: SearchState | undefined,
+  description: string,
+): readonly FleetSearchEntry[] {
+  const card = run.taskCard;
+  const report = summary?.report?.body.case === 'report' ? summary.report.body.value : undefined;
+  const entries: FleetSearchEntry[] = [
+    {field: 'title', value: run.task},
+    {field: 'title', value: card?.heading ?? ''},
+    {field: 'description', value: description},
+    {field: 'model', value: card?.modelName ?? ''},
+    {field: 'description', value: card?.workloadName ?? ''},
+    {field: 'description', value: card?.hardwareName ?? ''},
+    {field: 'repository', value: run.repository},
+    {field: 'host', value: `${host.label} ${host.key}`},
+    {field: 'run-id', value: run.id},
+    ...(card?.objectives ?? []).flatMap(objective => [
+      {field: 'objective' as const, value: objective.name},
+      {field: 'objective' as const, value: objective.unit},
+    ]),
+    ...run.allowedAgents.flatMap(agent => [
+      {field: 'cli' as const, value: HARNESS_SEARCH[agent.harness]},
+      {field: 'model' as const, value: agent.model},
+    ]),
+    ...(search?.workstreams ?? []).flatMap(workstream => [
+      {field: 'work' as const, value: workstream.title},
+      {field: 'work' as const, value: workstream.note},
+    ]),
+    ...(search?.plans ?? []).flatMap(plan => [
+      {field: 'work' as const, value: plan.title},
+      {field: 'work' as const, value: plan.body},
+    ]),
+    {field: 'work', value: report?.headline ?? ''},
+    {field: 'work', value: report?.changed ?? ''},
+    {field: 'work', value: report?.inFlight ?? ''},
+    {field: 'work', value: report?.decisions ?? ''},
+  ];
+  return entries.filter(entry => entry.value.trim() !== '');
+}
+
 function rowOf(
   host: FleetHostRef,
   summary: RunSummary | undefined,
   search: SearchState | undefined,
   run: Run,
+  searchOnly = false,
 ): ManagedFleetRow {
   const live = isLive(run.status);
+  const description = descriptionOf(run.taskCard);
+  const update = updateOf(run, summary, search);
+  const reportSequence =
+    summary?.report?.body.case === 'report' ? summary.report.body.value.sequence : 0;
   return {
     source: 'managed',
     key: fleetKey(host.key, run.id),
@@ -298,6 +483,15 @@ function rowOf(
     runId: run.id,
     name: run.task,
     card: run.taskCard ?? null,
+    description,
+    update,
+    activityKey: [
+      String(run.status),
+      String(reportSequence),
+      update.kind,
+      update.kind === 'none' ? '' : String(update.atMs ?? ''),
+    ].join(':'),
+    search: searchEntries(host, run, summary, search, description),
     repository: run.repository,
     setup: inSetup(run),
     status: run.status,
@@ -313,6 +507,7 @@ function rowOf(
     reportUnavailable: summary?.reportUnavailable ?? false,
     deadlineMs: ms(run.deadline),
     attention: attentionOf(run, search),
+    searchOnly,
   };
 }
 
@@ -337,6 +532,18 @@ function genericRowOf(
     runId: run.runId,
     name: 'Run',
     card: null,
+    description: '',
+    update: {kind: 'none'},
+    activityKey: `${run.state}:${run.needsUser}:${freshness}`,
+    search: [
+      {field: 'title', value: 'Run'},
+      {field: 'description', value: run.state},
+      {field: 'repository', value: run.projectRoot ?? ''},
+      {field: 'host', value: `${host.label} ${host.key}`},
+      {field: 'run-id', value: run.runId},
+      {field: 'objective', value: run.objective?.name ?? ''},
+      {field: 'objective', value: run.objective?.unit ?? ''},
+    ].filter(entry => entry.value.trim() !== '') as readonly FleetSearchEntry[],
     repository: run.projectRoot ?? '',
     state: run.state,
     projectRoot: run.projectRoot,
@@ -364,6 +571,7 @@ function genericRowOf(
     reportUnavailable: false,
     deadlineMs: null,
     attention: [],
+    searchOnly: false,
   };
 }
 
@@ -382,7 +590,7 @@ export function fleetRows(hosts: readonly FleetHostInput[]): readonly FleetRow[]
     const managed = Object.values(host.data.runs)
       .filter(run => !run.neverOpened)
       .map(run => rowOf(ref, host.data.summaries[run.id], host.data.searches[run.id], run));
-    const {runIndex} = host;
+    const runIndex = host.runIndex ?? ({_tag: 'Dormant'} as const);
     if (runIndex._tag !== 'Ready') return managed;
     const managedIds = new Set(managed.map(row => row.runId));
     const generic = [...runIndex.runs.values()]
@@ -432,14 +640,15 @@ function hostAbsence(host: FleetHostInput): FleetAbsence {
           ? {kind: 'unconfirmed'}
           : {kind: 'unavailable', reason: null};
   const generic: FleetAbsence = (() => {
-    switch (host.runIndex._tag) {
+    const index = host.runIndex ?? ({_tag: 'Dormant'} as const);
+    switch (index._tag) {
       case 'Dormant':
       case 'Loading':
         return {kind: 'opening'};
       case 'Ready':
-        return host.runIndex.freshness === 'current' ? {kind: 'complete'} : {kind: 'unconfirmed'};
+        return index.freshness === 'current' ? {kind: 'complete'} : {kind: 'unconfirmed'};
       case 'Unavailable':
-        return {kind: 'unavailable', reason: host.runIndex.reason};
+        return {kind: 'unavailable', reason: index.reason};
     }
   })();
   return worseAbsence(managed, generic);
@@ -449,7 +658,8 @@ function combinedAbsence(hosts: readonly FleetHostInput[]): FleetAbsence {
   return hosts.map(hostAbsence).reduce<FleetAbsence>(worseAbsence, {kind: 'complete'});
 }
 
-const genericDiscoveryStatus = (index: GenericRunIndex): GenericDiscoveryStatus => {
+const genericDiscoveryStatus = (index: GenericRunIndex | undefined): GenericDiscoveryStatus => {
+  if (index === undefined) return {kind: 'opening'};
   switch (index._tag) {
     case 'Dormant':
     case 'Loading':
@@ -461,24 +671,139 @@ const genericDiscoveryStatus = (index: GenericRunIndex): GenericDiscoveryStatus 
   }
 };
 
+const searchWords = (value: string | undefined): readonly string[] =>
+  (value ?? '')
+    .normalize('NFKD')
+    .toLowerCase()
+    .replace(/[^\p{Letter}\p{Number}]+/gu, ' ')
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean);
+
+function entryScore(entry: FleetSearchEntry, token: string): number {
+  const words = searchWords(entry.value);
+  if (words.length === 0) return 0;
+  const weight = FLEET_SEARCH_REGISTRY[entry.field].weight;
+  if (words.length === 1 && words[0] === token) return weight * 4;
+  if (words.some(word => word === token)) return weight * 3;
+  if (words.some(word => word.startsWith(token))) return weight * 2;
+  return words.join(' ').includes(token) ? weight : 0;
+}
+
+/**
+ * Relevance for an operator query, or null when any token has no semantic match. Every token may
+ * match a different registered field (`codex cache`, for example); empty queries leave ordering to
+ * the fleet's time sort.
+ */
+export function fleetSearchScore(row: FleetRow, query: string): number | null {
+  const tokens = searchWords(query);
+  if (tokens.length === 0) return 0;
+  let total = 0;
+  for (const token of tokens) {
+    const best = Math.max(0, ...(row.search ?? []).map(entry => entryScore(entry, token)));
+    if (best === 0) return null;
+    total += best;
+  }
+  return total;
+}
+
+function searched(rows: readonly FleetRow[], query: string): readonly FleetRow[] {
+  if (searchWords(query).length === 0) return rows;
+  return rows
+    .flatMap(row => {
+      const score = fleetSearchScore(row, query);
+      return score === null ? [] : [{row, score}];
+    })
+    .sort((a, b) => b.score - a.score || byKey(a.row, b.row))
+    .map(found => found.row);
+}
+
+const sameQuery = (left: string | undefined, right: string | undefined): boolean =>
+  searchWords(left).join('\u0000') === searchWords(right).join('\u0000');
+
+/**
+ * Rows the host found outside (or with facts beyond) the bounded snapshot. Search results are
+ * trusted as matches: a plan or workstream that matched is intentionally not repeated in the
+ * response. When the snapshot does hold the run, its SearchState can still supply the graph.
+ */
+function remoteRows(
+  hosts: readonly FleetHostInput[],
+  filter: FleetFilter,
+  remote: readonly FleetRemoteSearch[],
+): readonly FleetRow[] {
+  if (searchWords(filter.query).length === 0) return [];
+  return remote.flatMap(answer => {
+    if (!sameQuery(answer.query, filter.query)) return [];
+    if (filter.host !== null && answer.host !== filter.host) return [];
+    const host = hosts.find(candidate => candidate.key === answer.host);
+    if (host === undefined) return [];
+    const ref: FleetHostRef = {
+      key: host.key,
+      label: host.label,
+      freshness: host.freshness,
+      status: host.status,
+    };
+    return answer.results.flatMap(result => {
+      const {run, summary} = result;
+      if (
+        run === undefined ||
+        summary === undefined ||
+        run.neverOpened ||
+        run.id === '' ||
+        summary.runId !== run.id
+      )
+        return [];
+      const row = rowOf(
+        ref,
+        summary,
+        host.data.searches[run.id],
+        run,
+        host.data.runs[run.id] === undefined,
+      );
+      return inState(filter.state, row) ? [row] : [];
+    });
+  });
+}
+
 /**
  * The fleet under `filter`: live runs, then history, and every host with the number of runs it
  * would show under the state filter. A host with no data yet, or one that cannot be reached, still
  * appears in `hosts` (its freshness says so), and one whose link is down keeps the rows it had.
  */
-export function fleetView(hosts: readonly FleetHostInput[], filter: FleetFilter): FleetView {
+export function fleetView(
+  hosts: readonly FleetHostInput[],
+  filter: FleetFilter,
+  remote: readonly FleetRemoteSearch[] = [],
+): FleetView {
   const includedHosts = hosts.filter(host => filter.host === null || host.key === filter.host);
   const allRows = fleetRows(hosts);
   const includedRows = allRows.filter(row => filter.host === null || row.host.key === filter.host);
   const byState = allRows.filter(row => inState(filter.state, row));
-  const shown = byState.filter(row => filter.host === null || row.host.key === filter.host);
   const statusUncertain =
     filter.state !== 'all' && includedRows.some(row => row.section === 'unknown');
   const evidence = combinedAbsence(includedHosts);
+  const local = searched(
+    byState.filter(row => filter.host === null || row.host.key === filter.host),
+    filter.query ?? '',
+  );
+  const seen = new Set(local.map(row => row.key));
+  const shown = [
+    ...local,
+    ...remoteRows(hosts, filter, remote).filter(row => {
+      if (seen.has(row.key)) return false;
+      seen.add(row.key);
+      return true;
+    }),
+  ];
+  const ordered = searchWords(filter.query).length > 0;
+  const section = (name: FleetRow['section'], order: (a: FleetRow, b: FleetRow) => number) => {
+    const rows = shown.filter(row => row.section === name);
+    return ordered ? rows : rows.sort(order);
+  };
   return {
-    live: shown.filter(row => row.section === 'live').sort(startedFirst),
-    history: shown.filter(row => row.section === 'history').sort(endedFirst),
-    unknown: shown.filter(row => row.section === 'unknown').sort(byKey),
+    live: section('live', startedFirst),
+    history: section('history', endedFirst),
+    unknown: section('unknown', byKey),
     hosts: hosts.map(host => ({
       key: host.key,
       label: host.label,

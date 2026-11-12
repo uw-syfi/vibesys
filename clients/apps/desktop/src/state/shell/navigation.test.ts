@@ -8,6 +8,7 @@ import {
   type NavigationAction,
   type NavigationKind,
   navigationReducer,
+  runIsUnread,
 } from './navigation.js';
 
 /** One generator per kind of move: the type makes a kind with none a compile error. */
@@ -57,8 +58,28 @@ const generators: {
     column: fc.constantFrom('status', 'best', 'cost'),
     width: fc.option(fc.integer({min: -5, max: 900}), {nil: null}),
   }),
+  'filter-runs-by-query': fc.record({
+    type: fc.constant('filter-runs-by-query' as const),
+    query: fc.string({maxLength: 40}),
+  }),
+  'mark-run-read': fc.record({
+    type: fc.constant('mark-run-read' as const),
+    host: fc.constantFrom('host-a', 'host-b'),
+    runId: fc.constantFrom('run-1', 'run-2'),
+    activityKey: fc.string({minLength: 1, maxLength: 20}),
+  }),
+  'mark-run-unread': fc.record({
+    type: fc.constant('mark-run-unread' as const),
+    host: fc.constantFrom('host-a', 'host-b'),
+    runId: fc.constantFrom('run-1', 'run-2'),
+  }),
   'open-cost': fc.constant({type: 'open-cost' as const}),
   'open-machines': fc.constant({type: 'open-machines' as const}),
+  'open-add-machine': fc.record({
+    type: fc.constant('open-add-machine' as const),
+    origin: fc.constantFrom('machines' as const, 'new-run' as const),
+  }),
+  'close-add-machine': fc.constant({type: 'close-add-machine' as const}),
   'open-settings': fc.constant({type: 'open-settings' as const}),
   back: fc.constant({type: 'back' as const}),
 };
@@ -80,10 +101,11 @@ const walk = (moves: readonly NavigationAction[]): Navigation =>
 
 const moves = fc.array(action, {maxLength: 40});
 
-/** The two moves of the run list's own controls. */
+/** The moves of the run list's own filters. */
 const FILTER_MOVES: readonly NavigationAction[] = [
   {type: 'filter-runs-by-state', state: 'live'},
   {type: 'filter-runs-by-host', host: 'host-b'},
+  {type: 'filter-runs-by-query', query: 'cache'},
 ];
 
 /** The rail's destinations other than the runs, each with the intent that opens it. */
@@ -134,7 +156,10 @@ describe('navigation', () => {
       fc.property(moves, steps => {
         const before = walk(steps);
         const after = navigationReducer(before, {type: 'back'});
-        const atRoot = before.destination === 'runs' && before.runs.screen === 'runs';
+        const atRoot =
+          before.destination === 'runs' &&
+          before.runs.screen === 'runs' &&
+          before.machines.screen === 'list';
         if (atRoot) expect(after).toEqual(before);
         else expect(after).not.toEqual(before);
       }),
@@ -165,6 +190,34 @@ describe('navigation', () => {
     expect(page).toMatchObject({destination: 'runs', runs: {screen: 'new-run'}});
     expect(navigationReducer(page, {type: 'back'}).runs).toEqual({screen: 'runs'});
     expect(navigationReducer(page, {type: 'open-runs'}).runs).toEqual({screen: 'runs'});
+  });
+
+  it('Add machine returns to the New run flow or the Machines list that opened it', () => {
+    const newRun = walk([{type: 'open-new-run'}]);
+    const fromNewRun = navigationReducer(newRun, {
+      type: 'open-add-machine',
+      origin: 'new-run',
+    });
+    expect(fromNewRun).toMatchObject({
+      destination: 'runs',
+      machines: {screen: 'add', origin: 'new-run'},
+      runs: {screen: 'new-run'},
+    });
+    expect(navigationReducer(fromNewRun, {type: 'back'})).toMatchObject({
+      destination: 'runs',
+      machines: {screen: 'list'},
+      runs: {screen: 'new-run'},
+    });
+
+    const machines = navigationReducer(initialNavigation, {type: 'open-machines'});
+    const fromMachines = navigationReducer(machines, {
+      type: 'open-add-machine',
+      origin: 'machines',
+    });
+    expect(navigationReducer(fromMachines, {type: 'close-add-machine'})).toMatchObject({
+      destination: 'machines',
+      machines: {screen: 'list'},
+    });
   });
 
   it('back from a screen of the run goes to its report, and from the report to the runs', () => {
@@ -213,9 +266,11 @@ describe('navigation', () => {
     expect(initialNavigation.fleet).toEqual({
       state: 'all',
       host: null,
+      query: '',
       selected: null,
       sort: null,
       widths: {},
+      receipts: {},
     });
   });
 
@@ -297,7 +352,15 @@ describe('navigation', () => {
             ),
           ]) {
             expect(home.runs).toEqual({screen: 'runs'});
-            expect(home.fleet).toMatchObject({state, host, selected: 'host-b/run-2'});
+            expect(home.fleet).toEqual({
+              state,
+              host,
+              query: '',
+              selected: 'host-b/run-2',
+              sort: null,
+              widths: {},
+              receipts: {},
+            });
           }
         },
       ),
@@ -335,5 +398,58 @@ describe('navigation', () => {
         expect(nav.fleet.selected).toBe(expected);
       }),
     );
+  });
+
+  it('keeps the operator query with the other list filters', () => {
+    const searched = navigationReducer(initialNavigation, {
+      type: 'filter-runs-by-query',
+      query: '  prefix cache  ',
+    });
+    const run = navigationReducer(searched, {
+      type: 'open-run',
+      host: 'host-a',
+      runId: 'run-1',
+    });
+    expect(navigationReducer(run, {type: 'back'}).fleet.query).toBe('  prefix cache  ');
+  });
+
+  it('records the exact revision opened, and a later revision naturally needs attention', () => {
+    const opened = navigationReducer(initialNavigation, {
+      type: 'open-run',
+      host: 'host-a',
+      runId: 'run-1',
+      activityKey: 'report:4',
+    });
+    const receipt = opened.fleet.receipts['host-a/run-1'];
+    expect(receipt).toEqual({kind: 'read', activityKey: 'report:4'});
+    expect(runIsUnread(receipt, 'report:4')).toBe(false);
+    expect(runIsUnread(receipt, 'report:5')).toBe(true);
+  });
+
+  it('marks a card unread or read only while the run list is showing', () => {
+    const unread = navigationReducer(initialNavigation, {
+      type: 'mark-run-unread',
+      host: 'host-b',
+      runId: 'run-2',
+    });
+    expect(unread.fleet.receipts['host-b/run-2']).toEqual({kind: 'unread'});
+    const read = navigationReducer(unread, {
+      type: 'mark-run-read',
+      host: 'host-b',
+      runId: 'run-2',
+      activityKey: 'workstream:8',
+    });
+    expect(read.fleet.receipts['host-b/run-2']).toEqual({
+      kind: 'read',
+      activityKey: 'workstream:8',
+    });
+    const away = navigationReducer(read, {type: 'open-settings'});
+    expect(
+      navigationReducer(away, {
+        type: 'mark-run-unread',
+        host: 'host-b',
+        runId: 'run-2',
+      }),
+    ).toBe(away);
   });
 });

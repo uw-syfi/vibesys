@@ -31,6 +31,7 @@ import {
   type Roster,
   Viewer,
   ViewerFromWindow,
+  type ViewerIdentity,
 } from '../core/index.js';
 import {hostsOfAddress} from './address.js';
 import {DisplayClockProvider} from './display-clock.js';
@@ -55,7 +56,6 @@ const open = Effect.gen(function* () {
   // Who this install is, to tell which check-ins a host keeps are its own; the main process stamps it
   // on every call, so an app that cannot read it still works and just lists none as its own.
   const viewer = yield* (yield* Viewer).whoami.pipe(
-    Effect.map(identity => identity.id),
     Effect.catch(error =>
       Effect.logWarning(`could not read the viewer: ${error.detail}`).pipe(Effect.as(null)),
     ),
@@ -91,7 +91,7 @@ function Window(props: {
   readonly folders: MachineFolders;
   readonly navigation: NavigationStore;
   readonly appearance: AppearanceStore;
-  readonly viewerId: string | null;
+  readonly viewer: ViewerIdentity | null;
 }): JSX.Element {
   const hosts = useAtomValue(props.roster.entries);
   return (
@@ -100,7 +100,7 @@ function Window(props: {
       dispatch={dispatch}
       navigation={props.navigation}
       appearance={props.appearance}
-      viewerId={props.viewerId}
+      viewer={props.viewer}
       machines={props.machines}
       folders={props.folders}
     />
@@ -123,7 +123,7 @@ Effect.runFork(
             folders={folders}
             navigation={navigation}
             appearance={appearance}
-            viewerId={viewer}
+            viewer={viewer}
           />
         </DisplayClockProvider>
       </StrictMode>,

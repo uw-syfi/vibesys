@@ -525,6 +525,9 @@ body > div:first-child {
 .vs-grid[data-min="field"] {
   --grid-min: var(--column-field);
 }
+.vs-grid[data-min="main"] {
+  --grid-min: var(--column-main);
+}
 .vs-grid[data-min="tile"] {
   --grid-min: var(--column-tile);
 }
