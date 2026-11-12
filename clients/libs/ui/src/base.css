@@ -315,8 +315,9 @@ body > div:first-child {
   visibility: hidden;
 }
 .vs-flex[data-width="chart"] {
-  flex: 1 1 var(--column-chart);
-  min-width: min(100%, var(--column-chart));
+  /* A performance chart stays readable beside its summary or takes the next flex line whole. */
+  flex: 1 1 var(--chart-flex-min);
+  min-width: min(100%, var(--chart-flex-min));
 }
 /* A column of text to be read: as wide as a page of text reads well, centred in what holds it. */
 .vs-flex[data-width="reading"] {
@@ -607,4 +608,3 @@ body > div:first-child {
   width: var(--icon);
   height: var(--icon);
 }
-

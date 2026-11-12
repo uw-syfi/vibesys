@@ -77,20 +77,30 @@ export function ReportMeta(props: {
 }
 
 /**
- * The report's actions as one group in the title row: Catch me up, the run's leading action, and
- * beside it Stop run while the run can be stopped. Both are the standard size; Stop run is drawn as
- * an outline in the danger color, so it is never louder than the action the page leads with.
+ * The report's actions as one group in the title row: Catch me up, then Stop run while the run can
+ * be stopped or Run again once it is over. Recovery becomes the leading action for an over run;
+ * Stop run is drawn as an outline in the danger color, so it is never louder than the read action.
  */
 export function ReportActions(props: {
   readonly stoppable: boolean;
+  readonly repeatable: boolean;
   readonly stopProgress: CommandProgress | undefined;
   readonly stop: () => void;
   /** Open the run's Catch me up page. Opening it only reads: a check-in is made by New check-in there. */
   readonly openCatchUp: () => void;
+  /** Leave this over run for a fresh New run. */
+  readonly runAgain: () => void;
 }): JSX.Element {
   return (
     <>
-      <Button text="Catch me up" variant="primary" press={props.openCatchUp} />
+      <Button
+        text="Catch me up"
+        variant={props.repeatable ? 'secondary' : 'primary'}
+        press={props.openCatchUp}
+      />
+      {props.repeatable ? (
+        <Button text="Run again" variant="primary" press={props.runAgain} />
+      ) : null}
       {props.stoppable ? (
         <Button
           text="Stop run"

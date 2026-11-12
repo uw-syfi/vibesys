@@ -280,7 +280,26 @@ const startHostsOf = (hosts: readonly HostSnapshot[]): readonly StartHost[] =>
     }),
   );
 
-/** The Runs page's way to New run: it reads every machine's catalogue, places and Repositories folder, for the page's tabs. */
+/** Every way to New run: read every machine's catalogue, places and Repositories folder for its tabs. */
+function openNewRun(
+  hosts: readonly HostSnapshot[],
+  commands: AppCommands,
+  go: (action: NavigationAction) => void,
+): void {
+  // Every way in opens fresh, with no outcome of an earlier start.
+  commands.clearStart();
+  for (const host of hosts) {
+    commands.forgetProvision(host.key);
+    commands.loadNewRun(host.key);
+    if (host.repositoriesDirectory !== '') {
+      const folder = host.repositoriesDirectory.replace(/\/+$/, '');
+      commands.listDirectory(host.key, `${folder}/`, false, true);
+    }
+  }
+  go({type: 'open-new-run'});
+}
+
+/** The Runs page's way to New run. */
 function NewRunButton(props: {
   readonly hosts: readonly HostSnapshot[];
   readonly commands: AppCommands;
@@ -291,19 +310,7 @@ function NewRunButton(props: {
       text="New run"
       icon="plus"
       variant="primary"
-      press={() => {
-        // Every way in is this press: the page opens fresh, with no outcome of an earlier start.
-        props.commands.clearStart();
-        for (const host of props.hosts) {
-          props.commands.forgetProvision(host.key);
-          props.commands.loadNewRun(host.key);
-          if (host.repositoriesDirectory !== '') {
-            const folder = host.repositoriesDirectory.replace(/\/+$/, '');
-            props.commands.listDirectory(host.key, `${folder}/`, false, true);
-          }
-        }
-        props.go({type: 'open-new-run'});
-      }}
+      press={() => openNewRun(props.hosts, props.commands, props.go)}
     />
   );
 }
@@ -376,6 +383,7 @@ export function OrchestratorApp(props: {
   return (
     <RunDestination
       route={route}
+      hosts={hosts}
       host={host}
       nowMs={props.nowMs}
       commands={commands}
@@ -470,6 +478,8 @@ function runReading(props: {
  */
 function RunDestination(props: {
   readonly route: Extract<Route, {screen: 'run'}>;
+  /** Every connected host, which the New run page will offer after this run ends. */
+  readonly hosts: readonly HostSnapshot[];
   readonly host: HostSnapshot;
   readonly nowMs: number;
   readonly commands: AppCommands;
@@ -558,6 +568,7 @@ function RunDestination(props: {
       reading={reading}
       commands={commands}
       retryCost={props.retryCost}
+      runAgain={() => openNewRun(props.hosts, commands, go)}
       go={go}
     />
   );
@@ -643,6 +654,8 @@ function ReportDestination(props: {
   readonly reading: JSX.Element | null;
   readonly commands: AppCommands;
   readonly retryCost: (host: string, runId: string) => void;
+  /** Leave an over run for a fresh New run, prepared exactly as the Runs page prepares it. */
+  readonly runAgain: () => void;
   readonly go: (action: NavigationAction) => void;
 }): JSX.Element {
   const {host, runId, nowMs, commands, go} = props;
@@ -675,6 +688,7 @@ function ReportDestination(props: {
       stop={() => commands.stopRun(host.key, runId)}
       retryStop={() => commands.retryStop(runId)}
       openCatchUp={() => go({type: 'show', view: 'catch-up'})}
+      runAgain={props.runAgain}
       goRuns={() => go({type: 'close-run'})}
       openAgents={() => go({type: 'show', view: 'agents'})}
       openCost={() => go({type: 'show', view: 'cost'})}

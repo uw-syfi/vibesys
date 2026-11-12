@@ -24,8 +24,10 @@
   gap: var(--space-3);
 }
 .vs-card-title {
+  flex: none;
   margin: 0;
   display: flex;
+  white-space: nowrap;
 }
 .vs-card[data-flush] .vs-card-title {
   padding: var(--space-4) var(--space-5);
@@ -34,6 +36,7 @@
    so the heading's baseline is the same in every card whatever the link is. */
 .vs-card-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);

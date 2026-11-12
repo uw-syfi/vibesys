@@ -61,16 +61,8 @@ function SideColumn(props: {
   );
 }
 
-/**
- * A run's bird's-eye report, as the page a run opens on: who and how it stands (its title row and the
- * facts line under it), what the lead says in one row, and then two columns. The main column is how
- * each objective is doing over time and the run's ideas; the side column is the latest measurements,
- * the workstreams, and the agents with their cost. The layout is one for every state: every panel is
- * in its place from the first minute, an empty one shows its frame and says in a line what it waits
- * for, and none moves as the run grows. It shows no agent's turns: the agents and the cost each open
- * their own screen. A point of a chart links to the idea it measured and back.
- */
-export function ReportScreen(props: {
+/** Everything the report reads and every intent its controls can send. */
+interface ReportScreenProps {
   readonly report: RunReport;
   /** The run's Settings control, in the title row beside its actions; none for a run the host does not hold. */
   readonly settings?: ReactNode;
@@ -85,6 +77,8 @@ export function ReportScreen(props: {
   readonly retryStop: () => void;
   /** Open the run's Catch me up page; opening it makes no check-in. */
   readonly openCatchUp: () => void;
+  /** Leave an over run for a fresh New run. */
+  readonly runAgain: () => void;
   readonly goRuns: () => void;
   readonly openAgents: () => void;
   readonly openCost: () => void;
@@ -94,7 +88,36 @@ export function ReportScreen(props: {
   readonly reading: ReactNode;
   /** The check-in span the ideas are narrowed to on arrival (from Catch me up); null for the run's own. */
   readonly ideasWindow: IdeaWindow | null;
-}): JSX.Element {
+}
+
+/** Settings and state-changing controls in the report header, in their reading order. */
+function ReportHeaderActions(props: ReportScreenProps): JSX.Element {
+  const over = isOver(props.report.header.status);
+  return (
+    <>
+      {props.settings}
+      <ReportActions
+        stoppable={isStoppable(props.report.header.status)}
+        repeatable={over}
+        stopProgress={props.stopProgress}
+        stop={props.stop}
+        openCatchUp={props.openCatchUp}
+        runAgain={props.runAgain}
+      />
+    </>
+  );
+}
+
+/**
+ * A run's bird's-eye report, as the page a run opens on: who and how it stands (its title row and the
+ * facts line under it), what the lead says in one row, and then two columns. The main column is how
+ * each objective is doing over time and the run's ideas; the side column is the latest measurements,
+ * the workstreams, and the agents with their cost. The layout is one for every state: every panel is
+ * in its place from the first minute, an empty one shows its frame and says in a line what it waits
+ * for, and none moves as the run grows. It shows no agent's turns: the agents and the cost each open
+ * their own screen. A point of a chart links to the idea it measured and back.
+ */
+export function ReportScreen(props: ReportScreenProps): JSX.Element {
   const {report} = props;
   const over = isOver(report.header.status);
   const [picked, setPicked] = useState<string | null>(null);
@@ -123,17 +146,7 @@ export function ReportScreen(props: {
           <FactsLine facts={report.facts} over={over} />
         </Stack>
       }
-      actions={
-        <>
-          {props.settings}
-          <ReportActions
-            stoppable={isStoppable(report.header.status)}
-            stopProgress={props.stopProgress}
-            stop={props.stop}
-            openCatchUp={props.openCatchUp}
-          />
-        </>
-      }
+      actions={<ReportHeaderActions {...props} />}
     >
       <Stack gap="space-4">
         <CommandLine
