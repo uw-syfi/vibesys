@@ -6,7 +6,7 @@ import {useEntering} from './entering.js';
 import {Icon, type IconName} from './icon.js';
 import {ToolCall, type ToolState} from './message.js';
 import {Said, Thought} from './narrative.js';
-import {NewBelow} from './new-below.js';
+import {NewBelowSlot} from './new-below.js';
 import {ScrollArea} from './scroll-area.js';
 import {Chip, type StatusTone} from './status.js';
 import {Text} from './text.js';
@@ -263,11 +263,7 @@ export function Conversation(props: {
         })}
         <li aria-hidden="true" className="vs-conversation-gap" style={{height: win.after}} />
       </ScrollArea>
-      {win.behind ? (
-        <span className="vs-conversation-jump">
-          <NewBelow text="New below" press={win.jump} />
-        </span>
-      ) : null}
+      {win.behind ? <NewBelowSlot text="New below" press={win.jump} /> : null}
     </div>
   );
 }

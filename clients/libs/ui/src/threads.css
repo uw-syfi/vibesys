@@ -147,10 +147,15 @@
 .vs-thread {
   position: relative;
   min-width: 0;
+  height: var(--thread);
+  display: flex;
+  flex-direction: column;
 }
 .vs-thread-pane {
   box-sizing: border-box;
-  height: var(--thread);
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
   margin: 0;
   padding: 0 var(--space-4);
   list-style: none;
@@ -191,12 +196,6 @@
   gap: var(--space-3);
   padding: var(--space-3) 0 var(--space-1);
 }
-.vs-thread-jump {
-  position: absolute;
-  right: var(--space-4);
-  bottom: var(--space-4);
-}
-
 /* --- scrubber ---------------------------------------------------------------------------------- */
 
 .vs-scrubber {

@@ -6,7 +6,7 @@ import {
   ToolCall,
   type ToolState,
 } from './message.js';
-import {NewBelow} from './new-below.js';
+import {NewBelowSlot} from './new-below.js';
 import {ScrollArea} from './scroll-area.js';
 import {type ReplyField, StructuredReply} from './structured-reply.js';
 import {Text} from './text.js';
@@ -207,11 +207,7 @@ export function Thread(props: {
         })}
         <li aria-hidden="true" className="vs-thread-gap" style={{height: win.after}} />
       </ScrollArea>
-      {win.behind ? (
-        <span className="vs-thread-jump">
-          <NewBelow text="New below" press={win.jump} />
-        </span>
-      ) : null}
+      {win.behind ? <NewBelowSlot text="New below" press={win.jump} /> : null}
     </div>
   );
 }
