@@ -23,6 +23,13 @@ import {formatTokens} from './words.js';
 
 const NUMBER_WORDS = /NaN|undefined|Infinity|\[object/;
 
+/** Under half a cent, which the screen cannot write, is no spend left out of a bucket's models. */
+const HALF_A_CENT = 0.005;
+
+type Bucket = CostView['series']['buckets'][number];
+const leftOut = (bucket: Bucket): number =>
+  bucket.costUsd - bucket.byModel.reduce((sum, spend) => sum + spend.costUsd, 0);
+
 /** Every string the model says, so a property can read all of it. */
 function sayings(view: Parameters<typeof costScreenModel>[0]): string[] {
   const model = costScreenModel(view, COST_WORDS);
@@ -111,9 +118,8 @@ describe('the cost screen model', () => {
         expect(model.types.map(row => row.value)).toEqual(view.roles.map(r => r.usage.costUsd));
         expect(model.models.map(row => row.value)).toEqual(view.models.map(m => m.usage.costUsd));
         if (model.chart !== null) {
-          const hasOther = (bucket: CostView['series']['buckets'][number]): boolean =>
-            view.modelsTruncated &&
-            bucket.costUsd > bucket.byModel.reduce((sum, spend) => sum + spend.costUsd, 0);
+          const hasOther = (bucket: Bucket): boolean =>
+            view.modelsTruncated && leftOut(bucket) >= HALF_A_CENT;
           expect(model.chart.bars.map(bar => bar.total)).toEqual(
             view.series.buckets.map(bucket => bucket.costUsd),
           );
@@ -205,9 +211,7 @@ describe('the cost screen model', () => {
       fc.property(costViewArb, view => {
         const priced = view.series.buckets.some(
           bucket =>
-            bucket.byModel.length > 0 ||
-            (view.modelsTruncated &&
-              bucket.costUsd > bucket.byModel.reduce((sum, spend) => sum + spend.costUsd, 0)),
+            bucket.byModel.length > 0 || (view.modelsTruncated && leftOut(bucket) >= HALF_A_CENT),
         );
         expect(costScreenModel(view, COST_WORDS).chart === null).toBe(!priced);
       }),
@@ -238,24 +242,78 @@ describe('the cost screen model', () => {
     expect(costScreenModel(NO_PRICES, COST_WORDS).spend.figure).toBeNull();
   });
 
-  it('writes model ids as readable words, keeps raw ids in titles, and names a harness default', () => {
+  it('makes "Other models" of spend the split left out and never of floating-point noise from summing it', () => {
+    const base = PRICED_AND_UNPRICED;
+    const at = base.series.buckets.findIndex(bucket => bucket.byModel.length >= 2);
+    const bucket = base.series.buckets[at];
+    if (bucket === undefined) throw new Error('the priced case has a bucket with two models');
+    /** The view whose bucket `at` holds `byModel` and whose total is `total`, the models cut short. */
+    const viewOf = (costs: readonly number[], total: number): CostView =>
+      ({
+        ...base,
+        modelsTruncated: true,
+        series: {
+          ...base.series,
+          buckets: base.series.buckets.map((each, index) =>
+            index === at
+              ? {
+                  ...each,
+                  costUsd: total,
+                  byModel: costs.map((costUsd, i) => ({
+                    model: each.byModel[i % each.byModel.length]?.model ?? each.byModel[0]?.model,
+                    costUsd,
+                  })),
+                }
+              : {...each, costUsd: 0, byModel: []},
+          ),
+        },
+      }) as CostView;
+    const hasOther = (view: CostView): boolean =>
+      (costScreenModel(view, COST_WORDS).chart?.legend ?? []).some(
+        item => item.label === 'Other models',
+      );
+    fc.assert(
+      fc.property(
+        fc.array(fc.double({min: 0.001, max: 50, noNaN: true}), {minLength: 1, maxLength: 8}),
+        costs => {
+          // The total is the same models' sum taken in the other order: equal but for rounding.
+          const total = [...costs].reverse().reduce((sum, cost) => sum + cost, 0);
+          expect(hasOther(viewOf(costs, total))).toBe(false);
+        },
+      ),
+    );
+    fc.assert(
+      fc.property(
+        fc.array(fc.double({min: 0.001, max: 50, noNaN: true}), {minLength: 1, maxLength: 8}),
+        fc.double({min: 0.01, max: 50, noNaN: true}),
+        (costs, omitted) => {
+          const total = costs.reduce((sum, cost) => sum + cost, 0) + omitted;
+          const chart = costScreenModel(viewOf(costs, total), COST_WORDS).chart;
+          expect(hasOther(viewOf(costs, total))).toBe(true);
+          const bar = chart?.bars.find(each => each.startMs === bucket.startMs);
+          expect(bar?.title).toContain('Other models');
+        },
+      ),
+    );
+  });
+
+  it('names a model by the id the host served, and a default by its harness, every name in the code face', () => {
     expect(costScreenModel(PRICED_AND_UNPRICED, COST_WORDS).models.map(row => row.name)).toEqual([
-      'Model A',
-      'Model B',
+      'model-a',
+      'model-b',
       'Codex default',
     ]);
     const long = costScreenModel(LONG_NAMES, COST_WORDS);
     expect(long.models[0]?.name.length).toBeGreaterThan(60);
-    expect(long.models[0]?.title).toContain(LONG_NAMES.models[0]?.model.model ?? 'missing');
-    expect(long.chart?.legend[0]?.title).toContain(LONG_NAMES.models[0]?.model.model ?? 'missing');
-    expect(long.models[0]?.mono).toBeUndefined();
-    expect(long.chart?.legend[0]?.mono).toBeUndefined();
+    expect(long.models[0]?.mono).toBe(true);
+    expect(long.chart?.legend[0]?.mono).toBe(true);
+    // The harness's default is no id, but it stands in the same column and legend, so it reads alike.
     const own = costScreenModel(PRICED_AND_UNPRICED, COST_WORDS).models.at(-1);
     expect(own?.name).toBe('Codex default');
-    expect(own?.title).toBe('Codex default model');
+    expect(own?.mono).toBe(true);
     const all = costScreenModel(PRICED_AND_UNPRICED, COST_WORDS);
-    expect(all.models.every(row => row.mono === undefined)).toBe(true);
-    expect(all.chart?.legend.every(item => item.mono === undefined)).toBe(true);
+    expect(all.models.every(row => row.mono === true)).toBe(true);
+    expect(all.chart?.legend.every(item => item.mono === true)).toBe(true);
   });
 
   it('gives a model a color that is its own: the same in every view, whoever else is on the page', () => {

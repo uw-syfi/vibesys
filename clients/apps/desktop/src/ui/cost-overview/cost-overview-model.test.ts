@@ -164,16 +164,13 @@ describe('the screen model of a host', () => {
     expect(short.ranges).toEqual([]);
   });
 
-  it('writes model ids as readable words, keeps raw ids in titles, and names a harness default', () => {
+  it('names a model by the id the host served, and keeps the harness default in words, every legend name in the code face', () => {
     const week = model(views.week);
     const names = week.chart?.legend.map(item => item.label) ?? [];
-    expect(names).toEqual(expect.arrayContaining(['Claude Opus 5.5', 'GPT 5 Codex']));
+    expect(names).toEqual(expect.arrayContaining(['claude-opus-5-5', 'gpt-5-codex']));
     expect(names).toContain('Codex default');
-    expect(week.chart?.legend.every(item => item.mono === undefined)).toBe(true);
-    expect(week.chart?.legend.find(item => item.label === 'Claude Opus 5.5')?.title).toBe(
-      'claude-opus-5-5 on Claude Code',
-    );
-    const opus = week.models.find(line => line.name === 'Claude Opus 5.5');
+    expect(week.chart?.legend.every(item => item.mono === true)).toBe(true);
+    const opus = week.models.find(line => line.name === 'claude-opus-5-5');
     expect(opus?.title).toBe('claude-opus-5-5 on Claude Code');
     expect(week.models.find(line => line.name === 'Codex default')?.title).toBe(
       'Codex default model',

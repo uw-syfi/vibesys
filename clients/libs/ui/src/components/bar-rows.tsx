@@ -29,10 +29,8 @@ export type BarFigures<N extends number = number> = TupleOf<string | null, N>;
 /** One row of a table with `N` figure columns: a name, a bar and a figure for each column. */
 export interface BarRow<N extends number = number> {
   readonly key: string;
-  /** What the row is, cut with an ellipsis when the column is narrow. */
+  /** What the row is, cut with an ellipsis when the column is narrow; its whole text is the hover. */
   readonly name: string;
-  /** What the pointer shows for the name when it needs provenance beyond the readable label. */
-  readonly title?: string;
   /** The name is an identifier a person may copy (a model id), set in the code face. */
   readonly mono?: boolean;
   /** The row's swatch, and the color of its bar, is palette color number `series`. */
@@ -129,7 +127,7 @@ export function BarRows(props: BarRowsProps<readonly BarColumn[]>): JSX.Element 
                       <span
                         className="vs-bar-rows-label"
                         data-mono={row.mono === true || undefined}
-                        title={row.title ?? row.name}
+                        title={row.name}
                       >
                         {row.name}
                       </span>

@@ -216,13 +216,13 @@ function runColumns(words: CostOverviewWords): readonly TableColumn<RunLine>[] {
 
 const INPUT_HINT = 'Input tokens: fresh input, cache reads and cache writes';
 
-/** A model's readable name, after the swatch of its color on the chart. */
+/** A model's name, in the code face when it is an id, after the swatch of its color on the chart. */
 function ModelName(props: {readonly line: ModelLine}): JSX.Element {
   const {line} = props;
   return (
     <Row gap="space-2">
       {line.series === null ? <Swatch muted /> : <Swatch series={line.series} />}
-      <Text>{line.name}</Text>
+      <Text variant="code">{line.name}</Text>
     </Row>
   );
 }
