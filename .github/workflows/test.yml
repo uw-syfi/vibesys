@@ -574,7 +574,7 @@ jobs:
   cli-plain:
     needs: changes
     if: needs.changes.outputs.cli == 'true' || github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 7
 
     steps:

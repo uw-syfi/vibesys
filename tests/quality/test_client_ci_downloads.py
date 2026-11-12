@@ -175,7 +175,7 @@ def test_jobs_broken_by_the_ubuntu_latest_move_keep_the_proven_runner_and_budget
     workflow = _load(WORKFLOW)
     assert isinstance(workflow, dict)
     jobs = _mapping(workflow["jobs"])
-    for name in ("clients-e2e", "cli", "orchestrator"):
+    for name in ("clients-e2e", "cli", "cli-plain", "orchestrator"):
         assert _mapping(jobs[name])["runs-on"] == "ubuntu-24.04", name
     assert _mapping(jobs["orchestrator"])["timeout-minutes"] == 6
 

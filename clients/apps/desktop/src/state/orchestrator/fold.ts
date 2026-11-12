@@ -418,10 +418,19 @@ function costsOfRuns(
 
 /**
  * One whole cost view replaces the one held for its run: the host sends whole views, never parts.
- * A view older than the one held does not: it is current to an earlier log sequence, or to the
- * same one at an earlier instant (the rate of the last hour moves with the host's clock while the
- * log does not). An equal one is the later arrival, which is the newer.
+ * The initial view of a new stream is authoritative even when the host restarted at an earlier
+ * sequence. Later views older than one already held in that stream do not replace it: they are
+ * current to an earlier log sequence, or to the same one at an earlier instant (the rate of the
+ * last hour moves with the host's clock while the log does not). An equal one is the later arrival,
+ * which is the newer.
  */
+export type WholeViewPhase = 'initial' | 'update';
+
+/** The authoritative initial view of a new run-cost stream. */
+export function replaceCost(state: OrchestratorState, view: CostView): OrchestratorState {
+  return {...state, costs: {...state.costs, [view.runId]: view}};
+}
+
 export function applyCost(state: OrchestratorState, view: CostView): OrchestratorState {
   const held = state.costs[view.runId];
   if (
@@ -436,8 +445,9 @@ export function applyCost(state: OrchestratorState, view: CostView): Orchestrato
 
 /**
  * One whole host cost view replaces the one held for its window: the host sends whole views, never
- * parts. As with a run's, a view older than the one held does not replace it, and an equal one is the
- * later arrival, which is the newer. A window is held apart from every other.
+ * parts. As with a run's, a new stream's initial view is authoritative; a later view older than the
+ * one held does not replace it, and an equal one is the later arrival, which is the newer. A window
+ * is held apart from every other.
  */
 export function applyHostCost(
   state: OrchestratorState,
@@ -452,5 +462,14 @@ export function applyHostCost(
   ) {
     return state;
   }
+  return {...state, hostCosts: {...state.hostCosts, [window]: view}};
+}
+
+/** The authoritative initial view of a new host-cost stream. */
+export function replaceHostCost(
+  state: OrchestratorState,
+  window: HostCostWindow,
+  view: HostCostView,
+): OrchestratorState {
   return {...state, hostCosts: {...state.hostCosts, [window]: view}};
 }
