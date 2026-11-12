@@ -175,7 +175,7 @@ def test_jobs_broken_by_the_ubuntu_latest_move_pin_the_supported_runner() -> Non
     workflow = _load(WORKFLOW)
     assert isinstance(workflow, dict)
     jobs = _mapping(workflow["jobs"])
-    for name in ("clients-e2e", "cli"):
+    for name in ("clients-e2e", "cli", "orchestrator"):
         assert _mapping(jobs[name])["runs-on"] == "ubuntu-24.04", name
 
 

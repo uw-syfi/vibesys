@@ -590,11 +590,12 @@ jobs:
         run: ./support/repoctl/repoctl run-checks --group cli_plain_checks
 
   # Runs on every push to main for the same reason as `gateway`: a merge-queue run restores the
-  # Go caches a passing main run saved.
+  # Go caches a passing main run saved. Pin the runner because a cold Ubuntu 26 merge-queue run
+  # exceeded the orchestrator check's four-minute repoctl budget without a test failure.
   orchestrator:
     needs: changes
     if: needs.changes.outputs.orchestrator == 'true' || github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
 
     steps:
