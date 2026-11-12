@@ -1,0 +1,56 @@
+# Qwen3.5-397B-A17B-MXFP4 on one node of 4 AMD MI300A, the campaign's load-ramp workload: a task of
+# two images for vibesys-cli (schema 0.2). The candidate's server runs in the image its own
+# Dockerfile.rocm builds from the candidate's commit, with the node's four APUs; this directory is
+# the task image (Dockerfile here), which runs the checker and the benchmark against the server at
+# VIBESYS_SERVICE_URL. The legacy Python app refuses this file; the `default` task is its version.
+version = "0.2"
+backends = ["rocm"]
+
+[agent]
+domain = "llm-serving"
+interface = "service"
+
+# The operator provides the four AMD APUs, and the checkpoint amd/Qwen3.5-397B-A17B-MXFP4 as the
+# read-only mount named "qwen3-5-397b-a17b-mxfp4" (/vibesys/mounts/qwen3-5-397b-a17b-mxfp4).
+[environment]
+needs = ["rocm", "mounts"]
+
+# The candidate contract of OBJECTIVE.md: `python3 server.py` from the checkout's root.
+[candidate]
+dockerfile = "Dockerfile.rocm"
+context = "."
+serve = [
+  "python3", "server.py",
+  "--model-path", "/vibesys/mounts/qwen3-5-397b-a17b-mxfp4",
+  "--host", "127.0.0.1",
+  "--port", "${PORT}",
+]
+ready = "/health"
+# Loading about 230 GB of weights from the shared file system, and any kernel compilation and
+# tuning the engine does before it answers /health. The bound only guards against a hang.
+startup_timeout_seconds = 7200
+
+# The engine scan of the checkout, 13 behavioral probes, and the campaign's numerics gate
+# (teacher-forced top-1 >= 1,074/1,088 through /v1/score, 5/5 greedy reference completions).
+[accuracy]
+command = ["python", "-I", "/task/accuracy_checker/checker.py", "--workspace", "${PROJECT_ROOT}"]
+timeout_seconds = 7200
+
+# The load ramp, C16 then C96 (benchmark version 6). vibesys-cli appends --vs-output FILE; the
+# per-level table and the per-turn records go to the job's artifacts.
+[benchmark]
+command = ["python", "-I", "/task/benchmark/run.py"]
+timeout_seconds = 3600
+result_protocol = 2
+
+[catalogue]
+domain = "llm-serving"
+
+[catalogue.hardware]
+accelerator = "AMD MI300A"
+count = 4
+vendor = "amd"
+
+[catalogue.model]
+name = "Qwen3.5 397B A17B MXFP4"
+maker = "qwen"

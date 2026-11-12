@@ -172,6 +172,24 @@ def test_prefill_and_greedy_decode_match_hf(
     assert list(mine.generate(ids[0].tolist(), 8, 0.0, frozenset())) == seq[0, 11:].tolist()
 
 
+@pytest.mark.parametrize("continuation_start", [1, 300, 511, 512, 513, 529])
+def test_score_matches_hf_teacher_forced_logits(tmp_path: Path, continuation_start: int) -> None:
+    """`Model.score` row j is HF's logits at position continuation_start - 1 + j, across the
+    512-token prefill chunk boundary (the sequence is 530 tokens long)."""
+    hf = build_hf()
+    write_checkpoint(hf, tmp_path, mxfp4=False)
+    mine = seed_model.Model(tmp_path, ["cpu"], torch.float32, max_seq=600)
+    ids = torch.randint(2, VOCAB, (1, 530), generator=torch.Generator().manual_seed(1))
+    with torch.no_grad():
+        ref = hf(input_ids=ids).logits[0]
+    got = mine.score(ids[0].tolist(), continuation_start)
+    assert got.shape == (530 - continuation_start, VOCAB)
+    want = ref[continuation_start - 1 : -1]
+    # fp32 recurrent state over 530 tokens drifts ~5e-4 from HF's; the top-1 is what is scored.
+    assert torch.allclose(got, want, atol=2e-3, rtol=1e-3)
+    assert torch.equal(got.argmax(-1), want.argmax(-1))
+
+
 def test_http_smoke(tmp_path: Path) -> None:
     from tokenizers import Tokenizer, models, pre_tokenizers
     from transformers import PreTrainedTokenizerFast
@@ -239,16 +257,27 @@ def test_http_smoke(tmp_path: Path) -> None:
             "".join(c["choices"][0]["delta"]["content"] for c in content)
             == reply["choices"][0]["message"]["content"]
         )
+
+        status, data = post(
+            port,
+            {"prompt": [2, 3, 6, 7, 1, 2, 4], "continuation_start": 5, "top_k": 1},
+            "/v1/score",
+        )
+        rows = json.loads(data)["scores"]
+        assert status == 200
+        assert [r["token_id"] for r in rows] == [2, 4]
+        assert all(len(r["top_logprobs"]) == 1 for r in rows)
+        assert all(r["logprob"] <= r["top_logprobs"][0]["logprob"] for r in rows)
+        status, _ = post(port, {"prompt": [2, 3], "continuation_start": 2}, "/v1/score")
+        assert status == 400
     finally:
         proc.terminate()
         proc.wait(timeout=30)
 
 
-def post(port: int, body: dict) -> tuple[int, bytes]:
+def post(port: int, body: dict, path: str = "/v1/chat/completions") -> tuple[int, bytes]:
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=120)
-    conn.request(
-        "POST", "/v1/chat/completions", json.dumps(body), {"Content-Type": "application/json"}
-    )
+    conn.request("POST", path, json.dumps(body), {"Content-Type": "application/json"})
     r = conn.getresponse()
     return r.status, r.read()
 
