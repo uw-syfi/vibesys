@@ -718,13 +718,13 @@ describe('the report with a different amount of data', () => {
     screen.unmount();
   });
 
-  it('shows the outcome of a Stop while the run lives and drops it once the run is over', () => {
+  it('names the run in a stop outcome while it lives and drops the outcome once it is over', () => {
     const accepted: CommandProgress = {_tag: 'Accepted', receipt: create(ReceiptSchema, {})};
     const live = render({}, {stopProgress: accepted});
-    expect(live.screen.text()).toContain('Stop: accepted');
+    expect(live.screen.text()).toContain('Stop run: accepted');
     live.screen.unmount();
     const over = render({live: false}, {stopProgress: accepted});
-    expect(over.screen.text()).not.toContain('Stop: accepted');
+    expect(over.screen.text()).not.toContain('Stop run: accepted');
     over.screen.unmount();
   });
 
@@ -741,7 +741,7 @@ describe('the report with a different amount of data', () => {
     ];
     for (const progress of outcomes) {
       const over = render({live: false}, {stopProgress: progress});
-      expect(over.screen.text()).not.toContain('Stop:');
+      expect(over.screen.text()).not.toContain('Stop run:');
       over.screen.unmount();
     }
   });

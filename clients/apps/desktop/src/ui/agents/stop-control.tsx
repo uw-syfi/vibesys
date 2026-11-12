@@ -52,8 +52,8 @@ export function StopControl(props: {
       <>
         <Button text="Cancel" variant="secondary" press={() => setOpen(false)} />
         <Button
-          text={sending ? 'Stopping' : 'Stop'}
-          label="Stop this agent"
+          text={sending ? 'Stopping agent' : 'Stop agent'}
+          label="Stop agent"
           variant="danger"
           press={props.stop}
           {...(sending ? {disabledReason: 'Stopping', quietReason: true} : {})}
@@ -64,8 +64,8 @@ export function StopControl(props: {
     <>
       {stoppable ? (
         <Button
-          text="Stop"
-          label="Stop this agent"
+          text="Stop agent"
+          label="Stop agent"
           variant="danger"
           press={() => setOpen(true)}
           {...(sending ? {disabledReason: 'Stopping.', quietReason: true} : {})}
@@ -77,7 +77,7 @@ export function StopControl(props: {
             Its turn ends and its session closes. Anything it has not handed back is lost. The run
             keeps going.
           </Text>
-          <CommandLine progress={props.progress} done="Stop" retry={props.retry} />
+          <CommandLine progress={props.progress} done="Stop agent" retry={props.retry} />
         </Stack>
       </Dialog>
     </>
