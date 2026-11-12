@@ -3,10 +3,12 @@ package apptainer_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/quick"
 	"time"
@@ -227,4 +229,124 @@ func TestAnUnconfirmedReleaseCancelsTheAllocation(t *testing.T) {
 	exited(t, runMeasured(t, r, true, "exit", "0"), 0)
 	cluster.SetFaults(nil)
 	nothingLeft(t, cluster)
+}
+
+// startHeld starts a container of the scope on the rig's engine that runs until it is closed.
+func startHeld(t testing.TB, r *rig, image, name string) (docker.Container, error) {
+	t.Helper()
+	c, err := r.engine.Start(context.Background(), docker.ContainerSpec{
+		Name: name, Image: image, Dir: "/work", Limit: limit, Measured: true, Labels: docker.Labels{docker.LabelScope: scope},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := c.Start([]string{"hold", "forever"}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	return c, nil
+}
+
+// A container that asked for a new allocation and waits for it to run can find, once it runs, that
+// another container of the placement (of another process) found it running and claimed it first.
+// The allocation is then the other's: it is not cancelled under it, and the first container asks
+// for another of a name of its own, so that its own cancel never ends the other's either.
+func TestAnAllocationAnotherContainerClaimedFirstIsLeftToIt(t *testing.T) {
+	w := fakeworld.New()
+	cluster := clusterfake.New(w.MemoryGates)
+	first := newRig(t, w, cluster, setup{idle: idle})
+	second := newRig(t, w, cluster, setup{idle: idle, process: 1})
+	f, err := first.env.Fingerprint(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Each process's Docker builds the image of its own.
+	if _, err := second.env.Fingerprint(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// The first claim the cluster sees is the first container's, of the allocation it asked for,
+	// which runs: just before it, the second container starts, and claims that allocation.
+	var claims atomic.Int32
+	var c2 docker.Container
+	var err2 error
+	cluster.SetFaults(func(op string) error {
+		if op == "claim" && claims.Add(1) == 1 {
+			c2, err2 = startHeld(t, second, f.ImageDigest, "vibesys-cli-second")
+		}
+		return nil
+	})
+	c1, err := startHeld(t, first, f.ImageDigest, "vibesys-cli-first")
+	cluster.SetFaults(nil)
+	if err2 != nil {
+		t.Fatalf("the second container: %v", err2)
+	}
+	if err != nil {
+		t.Fatalf("the first container, whose allocation the second claimed: %v", err)
+	}
+	taken := apptainer.PoolPrefix + "vibesys-cli-first"
+	sub := cluster.Submitted()
+	if len(sub) != 2 || sub[0].Name != taken || sub[1].Name != taken+"+2" {
+		t.Fatalf("allocations asked for %+v, want the first's and another of a name of its own", sub)
+	}
+	if live := pools(cluster); !slices.Contains(live, taken) || !slices.Contains(live, taken+"+2") {
+		t.Fatalf("live allocations %v, want both", live)
+	}
+	if claimed := cluster.Claimed(); len(claimed) != 2 {
+		t.Fatalf("claims %v, want one for each container", claimed)
+	}
+	// A release of the first container that is not confirmed cancels its allocation, and only its.
+	cluster.SetFaults(func(op string) error {
+		if op == "release" {
+			return &core.Failure{Kind: core.FailureUnavailable, Message: "the claim's step was lost"}
+		}
+		return nil
+	})
+	c1.Close()
+	if err := first.engine.Remove(context.Background(), "vibesys-cli-first"); err != nil {
+		t.Fatal(err)
+	}
+	cluster.SetFaults(nil)
+	if live := pools(cluster); !slices.Equal(live, []string{taken}) {
+		t.Fatalf("after the first container's allocation was cancelled, live %v, want the second's", live)
+	}
+	if claimed := cluster.Claimed(); len(claimed) != 1 {
+		t.Fatalf("claims %v, want the second container's", claimed)
+	}
+	c2.Close()
+	if err := second.engine.Remove(context.Background(), "vibesys-cli-second"); err != nil {
+		t.Fatal(err)
+	}
+	cluster.Advance(idle)
+	nothingLeft(t, cluster)
+}
+
+// A new allocation that fails to run, or whose claim fails otherwise than by another's claim, is
+// cancelled, and the container fails.
+func TestANewAllocationThatCannotBeClaimedIsCancelled(t *testing.T) {
+	broken := &core.Failure{Kind: core.FailureInvalidInput, Message: "broken"}
+	for name, op := range map[string]string{"await": "state", "claim": "claim"} {
+		t.Run(name, func(t *testing.T) {
+			w := fakeworld.New()
+			cluster := clusterfake.New(w.MemoryGates)
+			r := newRig(t, w, cluster, setup{idle: idle})
+			f, err := r.env.Fingerprint(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			cluster.SetFaults(func(o string) error {
+				if o == op {
+					return broken
+				}
+				return nil
+			})
+			_, err = startHeld(t, r, f.ImageDigest, "vibesys-cli-box")
+			cluster.SetFaults(nil)
+			if !errors.Is(err, broken) {
+				t.Fatalf("the container: %v, want the failure of its %s", err, name)
+			}
+			if n := len(cluster.Submitted()); n != 1 {
+				t.Errorf("%d allocations asked for, want 1", n)
+			}
+			nothingLeft(t, cluster)
+		})
+	}
 }
