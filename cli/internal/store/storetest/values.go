@@ -39,7 +39,7 @@ func testValues(t *testing.T, newStore New) {
 			sub.Plan = plan.Number
 			job := e.submit(sub).Job
 			command := core.Submission{Spec: g.spec(), Note: ptr(g.note()), At: g.instant()}
-			command.Spec.Settings = core.CommandSettings{Argv: g.strs(), Service: &core.ServiceSpec{Argv: g.strs(), Probe: g.strs()}, Timeout: time.Duration(1 + g.r.Int64N(1<<40))}
+			command.Spec.Settings = core.CommandSettings{Image: core.ImageHarness, Argv: g.strs(), Service: &core.ServiceSpec{Argv: g.strs(), Probe: g.strs()}, Timeout: time.Duration(1 + g.r.Int64N(1<<40))}
 			if got := e.submit(command).Job; !reflect.DeepEqual(got.Spec, command.Spec) || got.Key != "" {
 				t.Fatalf("seed %d: the submitted command job = %+v, want what was asked for in %+v", seed, got, command)
 			}
@@ -144,7 +144,7 @@ func testValues(t *testing.T, newStore New) {
 	t.Run("an empty slice or map comes back nil", func(t *testing.T) {
 		e := newEnv(t, newStore)
 		sub := e.command(1)
-		sub.Spec.Settings = core.CommandSettings{Argv: []string{}, Service: &core.ServiceSpec{Argv: []string{}, Probe: []string{}}}
+		sub.Spec.Settings = core.CommandSettings{Image: core.ImageHarness, Argv: []string{}, Service: &core.ServiceSpec{Argv: []string{}, Probe: []string{}}}
 		job := e.submit(sub).Job
 		cs := job.Spec.Settings.(core.CommandSettings)
 		if cs.Argv != nil || cs.Service.Argv != nil || cs.Service.Probe != nil {

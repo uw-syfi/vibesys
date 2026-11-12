@@ -75,8 +75,8 @@ func TestReadsATaskOfTwoImages(t *testing.T) {
 	if got := strings.Join(serve.Argv, " "); got != "nsys profile python /work/serve/server.py --port ${PORT}" {
 		t.Fatalf("serve %q", got)
 	}
-	if got.Profile == nil || got.Profile.Timeout != 15*time.Minute || got.Benchmark.Timeout != time.Hour {
-		t.Fatalf("profile %+v, benchmark %+v", got.Profile, got.Benchmark)
+	if got.Benchmark.Timeout != time.Hour {
+		t.Fatalf("benchmark %+v", got.Benchmark)
 	}
 	if !got.Setup().TwoImages || len(got.Needs) != 1 || got.Needs[0] != core.ResourceGPU {
 		t.Fatalf("setup %+v, needs %v", got.Setup(), got.Needs)
@@ -108,8 +108,8 @@ func TestSchema02ReadsWithoutACandidate(t *testing.T) {
 	if got.Schema != task.Schema02 || got.Candidate != nil || got.Setup().TwoImages {
 		t.Fatalf("schema %s, candidate %+v, setup %+v", got.Schema, got.Candidate, got.Setup())
 	}
-	if got.Profile == nil || got.Profile.Timeout != 15*time.Minute || got.Benchmark.Timeout != time.Hour {
-		t.Fatalf("profile %+v, benchmark %+v", got.Profile, got.Benchmark)
+	if got.Benchmark.Timeout != time.Hour {
+		t.Fatalf("benchmark %+v", got.Benchmark)
 	}
 	if !reflect.DeepEqual(got.Check, with.Check) || !reflect.DeepEqual(got.Benchmark, with.Benchmark) || got.Metric != with.Metric {
 		t.Fatalf("without a candidate the commands read differently:\n%+v\n%+v", got, with)
@@ -175,6 +175,7 @@ func TestWhatSchema02RefusesIsNamed(t *testing.T) {
 		{"an unknown need", `needs = ["gpu"]`, `needs = ["fpga"]`, "environment.needs"},
 		{"a wrong type", `startup_timeout_seconds = 600`, `startup_timeout_seconds = "600"`, "startup_timeout_seconds"},
 		{"a result protocol other than 2", `result_protocol = 2`, `result_protocol = 1`, "result_protocol"},
+		{"an unknown key of the retired profile", `timeout_seconds = 900`, "timeout_seconds = 900\nwrap = [\"x\"]", `"profile.wrap"`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -188,6 +189,24 @@ func TestWhatSchema02RefusesIsNamed(t *testing.T) {
 				t.Fatalf("got %+v, want it to name %q", f, c.says)
 			}
 		})
+	}
+}
+
+// [profile] is retired with the profile job: a manifest that has it still reads, as the same task
+// as one without it, so a task written for it keeps loading.
+func TestSchema02AcceptsTheRetiredProfileAndDoesNotReadIt(t *testing.T) {
+	start, end := strings.Index(v02Manifest, "[profile]"), strings.Index(v02Manifest, "[environment]")
+	without := v02Manifest[:start] + v02Manifest[end:]
+	with, err := task.Read(repo(v02Files(v02Manifest)), "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := task.Read(repo(v02Files(without)), "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Check, with.Check) || !reflect.DeepEqual(got.Benchmark, with.Benchmark) || !reflect.DeepEqual(got.Candidate, with.Candidate) || !reflect.DeepEqual(got.Needs, with.Needs) {
+		t.Fatalf("[profile] changed what the task reads as:\n%+v\n%+v", got, with)
 	}
 }
 

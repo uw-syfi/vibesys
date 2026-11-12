@@ -526,7 +526,7 @@ func TestAJobInAnAllocationLaunchesWithTheWindowItMustEnterIn(t *testing.T) {
 	ends := running(t, r.await(t, a, al.ID, app.UntilRunning)).EndsAt
 	spec := command("mark", "in", ";", "exit", "0")
 	spec.Allocation = string(al.ID)
-	spec.Settings = core.CommandSettings{Argv: spec.Settings.(core.CommandSettings).Argv, Timeout: 55 * time.Minute}
+	spec.Settings = core.CommandSettings{Image: core.ImageHarness, Argv: spec.Settings.(core.CommandSettings).Argv, Timeout: 55 * time.Minute}
 	out, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: spec})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)

@@ -75,7 +75,7 @@ func (s *setup) connect(t *testing.T) *client.Client {
 func submit(t *testing.T, c *client.Client, argv ...string) *cliv1.Job {
 	t.Helper()
 	resp, err := c.Submit(ctxFor(t), &cliv1.SubmitRequest{Context: call, Spec: wire.JobSpec(core.JobSpec{
-		Commit: commit, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Argv: argv}})})
+		Commit: commit, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Image: core.ImageHarness, Argv: argv}})})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}

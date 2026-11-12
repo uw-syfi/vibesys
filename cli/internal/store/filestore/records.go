@@ -254,10 +254,13 @@ func settingsFromMessage(s *cliv1.JobSpec) (core.Settings, error) {
 			}
 			out.Timeout = timeout.AsDuration()
 		}
+		// A job stored before the profile job was retired holds its resolved command beside the
+		// request, which is not read.
 		var err error
-		if out.Profile, err = wire.ToProfileRequest("command.profile", settings.Command.GetProfile()); err != nil {
+		if out.Image, err = wire.ToCommandImage("command.image", settings.Command.GetImage()); err != nil {
 			return nil, err
 		}
+		out.Wrap = slices.Clone(settings.Command.GetWrap())
 		if out.Candidate, err = wire.ToCommandCandidate("command.candidate", settings.Command.GetCandidate()); err != nil {
 			return nil, err
 		}
