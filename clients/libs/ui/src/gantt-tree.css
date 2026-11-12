@@ -8,17 +8,13 @@
     1fr
     var(--gantt-figure);
 }
-/* A narrow window gives the bars the room of the machine column, which says the same on every row. */
-@media (max-width: 760px) {
-  .vs-gantt[data-tags] .vs-gantt-row {
-    grid-template-columns:
-      clamp(calc(var(--gantt-label) * 0.55), 30%, var(--gantt-label-max))
-      1fr
-      var(--gantt-figure);
-  }
-  .vs-gantt[data-tags] .vs-gantt-tag {
-    display: none;
-  }
+/* A primary tag is row identity, not a short place: give its words room before the track. */
+.vs-gantt[data-tags][data-tag-priority="primary"] .vs-gantt-row {
+  grid-template-columns:
+    clamp(var(--gantt-label), 20%, var(--gantt-label-max))
+    calc(var(--gantt-tag) + var(--space-8) * 2)
+    1fr
+    var(--gantt-figure);
 }
 .vs-gantt-seg[data-kind="err"] {
   background: var(--err);
@@ -65,6 +61,25 @@
 .vs-gantt-tag.vs-listheader {
   padding: 0;
   border-color: transparent;
+}
+/* A narrow window gives the bars the room of a secondary tag. A primary row identity stays. */
+@media (max-width: 760px) {
+  .vs-gantt[data-tags]:not([data-tag-priority="primary"]) .vs-gantt-row {
+    grid-template-columns:
+      clamp(calc(var(--gantt-label) * 0.55), 30%, var(--gantt-label-max))
+      1fr
+      var(--gantt-figure);
+  }
+  .vs-gantt[data-tags]:not([data-tag-priority="primary"]) .vs-gantt-tag {
+    display: none;
+  }
+  .vs-gantt[data-tags][data-tag-priority="primary"] .vs-gantt-row {
+    grid-template-columns:
+      calc(var(--gantt-label) * 0.55)
+      calc(var(--gantt-tag) + var(--space-8) * 2)
+      1fr
+      var(--gantt-figure);
+  }
 }
 /* The key to the bars: each sample is drawn with the shades the bars themselves use. */
 .vs-gantt-legend {

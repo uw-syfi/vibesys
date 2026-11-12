@@ -11,12 +11,15 @@ import {
   emptyState,
   itemIs,
   type OrchestratorState,
+  spawnTree,
 } from '../../state/index.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
+import {harnessWord} from '../orchestrator/words.js';
 import {AgentPage} from './agent-page.js';
 import {AgentTranscript, type HistoryAccess} from './agent-transcript.js';
 import {AgentsScreen} from './agents-screen.js';
+import {agentLabel} from './labels.js';
 
 installDom();
 
@@ -84,7 +87,7 @@ describe('the agents screen', () => {
       'Done',
       'Failed',
       'Result returned',
-      ' Machine',
+      ' Runtime',
       'Folded',
     ]);
     expect(screen.container.querySelector('h1')?.textContent).toBe('Agents');
@@ -125,6 +128,27 @@ describe('the agents screen', () => {
     screen.press(chevron);
     expect(opened).toHaveLength(1);
     expect(planner.getAttribute('aria-label')).toMatch(/folded$/);
+    screen.unmount();
+  });
+
+  it('shows the harness and model on every finished agent row', () => {
+    const screen = view();
+    const rows = spawnTree(state, scenario.runId, {
+      nowMs: scenario.endMs,
+      host: 'host-a',
+    }).rows.filter(row => row.kind === 'agent');
+    for (const row of rows) {
+      const option = options(screen.container).find(each =>
+        each.getAttribute('aria-label')?.startsWith(agentLabel(row.name)),
+      );
+      if (option === undefined) throw new Error(`${agentLabel(row.name)} is drawn`);
+      const runtime = option.querySelector('.vs-gantt-tag')?.textContent;
+      expect(runtime).toBe(
+        row.runtime.model === ''
+          ? `${harnessWord(row.runtime.harness)} default`
+          : `${row.runtime.model} on ${harnessWord(row.runtime.harness)}`,
+      );
+    }
     screen.unmount();
   });
 });
