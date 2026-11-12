@@ -48,6 +48,21 @@ function show(root: ReturnType<typeof createRoot>, rows: readonly GanttRow[]) {
   );
 }
 
+function showPrimary(root: ReturnType<typeof createRoot>, rows: readonly GanttRow[]) {
+  return act(async () =>
+    root.render(
+      <Gantt
+        label="Agents"
+        from={0}
+        to={10}
+        rows={rows}
+        tagLabel="Runtime"
+        tagPriority="primary"
+      />,
+    ),
+  );
+}
+
 async function mounted(rows: readonly GanttRow[]) {
   const container = document.createElement('div');
   document.body.append(container);
@@ -125,6 +140,17 @@ describe('a Gantt of nested rows', () => {
     expect(rows[1]?.querySelector('.vs-gantt-count')?.textContent).toBe('×12');
     expect(rows[1]?.querySelector('.vs-gantt-bar')?.hasAttribute('data-stacked')).toBe(true);
     expect(rows[0]?.querySelector('.vs-gantt-bar')?.hasAttribute('data-stacked')).toBe(false);
+  });
+
+  test('marks a primary tag so responsive layout keeps row identity visible', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await showPrimary(root, [row('lead', {tag: 'model-a on Codex'})]);
+    expect(container.querySelector('.vs-gantt')?.getAttribute('data-tag-priority')).toBe('primary');
+    expect(options(container)[0]?.querySelector('.vs-gantt-tag')?.textContent).toBe(
+      'model-a on Codex',
+    );
   });
 
   test('a count on an open row shows its number and no stack', async () => {

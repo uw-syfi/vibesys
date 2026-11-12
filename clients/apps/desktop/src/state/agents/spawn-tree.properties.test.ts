@@ -63,6 +63,8 @@ interface Spec {
   readonly handsBack: boolean;
   readonly settles: boolean;
   readonly cost: number | null;
+  readonly harness: number;
+  readonly model: string;
 }
 
 const spec = (count: number): fc.Arbitrary<Spec> =>
@@ -75,6 +77,8 @@ const spec = (count: number): fc.Arbitrary<Spec> =>
     handsBack: fc.boolean(),
     settles: fc.boolean(),
     cost: fc.option(fc.integer({min: 0, max: 900}), {nil: null}),
+    harness: fc.integer({min: 0, max: 1}),
+    model: fc.string({maxLength: 32}),
   });
 
 /** A tree whose parents always come earlier: no cycles. */
@@ -105,7 +109,8 @@ function agentOf(one: Spec, index: number, specs: readonly Spec[]): Agent {
     runId: RUN,
     parentAgentId: one.parent === -1 ? '' : idOf(one.parent),
     role,
-    harness: Harness.CODEX,
+    harness: one.harness === 0 ? Harness.CLAUDE_CODE : Harness.CODEX,
+    model: one.model,
     status,
     stopStage: AgentStopStage.NONE,
     session: 1,
@@ -250,6 +255,8 @@ function expectSpanned(state: OrchestratorState, result: SpawnTree, row: SpawnRo
   expect(row.endMs).toBeLessThanOrEqual(result.endMs);
   expect(row.host).toBe('host-a');
   if (row.kind === 'agent') {
+    const agent = state.agents[row.agentId];
+    expect(row.runtime).toEqual({harness: agent?.harness, model: agent?.model});
     for (const tick of row.ticks) {
       expect(tick.atMs).toBeGreaterThanOrEqual(row.startMs);
       expect(tick.atMs).toBeLessThanOrEqual(row.endMs);
@@ -393,6 +400,8 @@ describe('a spawn tree like the mockup', () => {
       handsBack: false,
       settles: false,
       cost: 6600,
+      harness: 1,
+      model: '',
     },
     {
       parent: 0,
@@ -403,6 +412,8 @@ describe('a spawn tree like the mockup', () => {
       handsBack: true,
       settles: false,
       cost: 1500,
+      harness: 0,
+      model: 'model-a',
     },
     ...Array.from(
       {length: 12},
@@ -415,6 +426,8 @@ describe('a spawn tree like the mockup', () => {
         handsBack: true,
         settles: false,
         cost: 700,
+        harness: i % 2,
+        model: `model-${i % 2}`,
       }),
     ),
     {
@@ -426,6 +439,8 @@ describe('a spawn tree like the mockup', () => {
       handsBack: false,
       settles: false,
       cost: 2200,
+      harness: 1,
+      model: 'model-b',
     },
   ];
   const state = stateOf(specs);
@@ -437,6 +452,10 @@ describe('a spawn tree like the mockup', () => {
     expect(group?.agentIds).toHaveLength(12);
     expect(group?.failed).toBe(1);
     expect(group?.state).toBe('failed');
+    expect(group?.runtimes).toEqual([
+      {harness: Harness.CLAUDE_CODE, model: 'model-0'},
+      {harness: Harness.CODEX, model: 'model-1'},
+    ]);
     const planner = rows.find(
       (row): row is AgentRow => row.kind === 'agent' && row.agentId === 'a1',
     );

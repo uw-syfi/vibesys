@@ -2,6 +2,7 @@
 export {type AgentName, agentNames, startOrder} from './names.js';
 export {
   type AgentRow,
+  type AgentRuntime,
   agentKey,
   type Branch,
   type FoldChoices,

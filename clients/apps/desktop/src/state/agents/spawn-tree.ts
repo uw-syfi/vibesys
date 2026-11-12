@@ -19,6 +19,7 @@ import {
   type Agent,
   type AgentRole,
   AgentStatus,
+  type Harness,
   type Message,
   RunStatus,
 } from '@vibesys/orchestrator-proto';
@@ -56,12 +57,19 @@ interface RowBase {
   readonly host: string;
 }
 
+/** The tool and model an agent runs on. An empty model is the tool's own default. */
+export interface AgentRuntime {
+  readonly harness: Harness;
+  readonly model: string;
+}
+
 /** One agent. */
 export interface AgentRow extends RowBase {
   readonly kind: 'agent';
   readonly agentId: string;
   readonly parentId: string | null;
   readonly name: AgentName;
+  readonly runtime: AgentRuntime;
   /** What the host says the agent's finished turns cost; null when it says nothing. */
   readonly costUsd: number | null;
   readonly ticks: readonly Tick[];
@@ -82,6 +90,8 @@ export interface GroupRow extends RowBase {
   readonly folded: boolean;
   /** How many of those agents failed. */
   readonly failed: number;
+  /** The distinct runtimes among every agent this folded row stands for, in first-use order. */
+  readonly runtimes: readonly AgentRuntime[];
 }
 
 export type SpawnRow = AgentRow | GroupRow;
@@ -323,6 +333,24 @@ interface Context {
   readonly spans: ReadonlyMap<string, Span>;
   readonly children: ReadonlyMap<string, readonly Agent[]>;
   readonly ticks: ReadonlyMap<string, readonly Tick[]>;
+  readonly agents: ReadonlyMap<string, Agent>;
+}
+
+const runtimeOf = (agent: Agent): AgentRuntime => ({harness: agent.harness, model: agent.model});
+
+/** Distinct runtimes in first-use order; equality is the contract's harness and model pair. */
+function runtimesOf(agents: readonly Agent[]): AgentRuntime[] {
+  const found: AgentRuntime[] = [];
+  const seen = new Map<Harness, Set<string>>();
+  for (const agent of agents) {
+    const runtime = runtimeOf(agent);
+    const models = seen.get(runtime.harness) ?? new Set<string>();
+    if (models.has(runtime.model)) continue;
+    models.add(runtime.model);
+    seen.set(runtime.harness, models);
+    found.push(runtime);
+  }
+  return found;
 }
 
 const lastOrMore = (index: number, count: number): Branch =>
@@ -369,6 +397,7 @@ class Walk {
       agentId: agent.id,
       parentId,
       name: context.names.get(agent.id) ?? {role: agent.role, number: null},
+      runtime: runtimeOf(agent),
       costUsd: agent.usage?.costUsd ?? null,
       ticks: (context.ticks.get(agent.id) ?? []).map(tick => ({
         ...tick,
@@ -412,6 +441,12 @@ class Walk {
       agentIds,
       folded: context.folds[key] ?? true,
       failed: covered.filter(span => span.state === 'failed').length,
+      runtimes: runtimesOf(
+        agentIds.flatMap(id => {
+          const agent = context.agents.get(id);
+          return agent === undefined ? [] : [agent];
+        }),
+      ),
     };
   }
 
@@ -458,6 +493,7 @@ export function spawnTree(
     spans,
     children,
     ticks: ticksByParent(state, runId, spans),
+    agents: new Map(agents.map(agent => [agent.id, agent] as const)),
   });
   for (const agent of roots(agents, children)) {
     if (!walk.seen.has(agent.id)) walk.agent(agent, 0, [], null);

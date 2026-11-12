@@ -25,7 +25,7 @@ import {
   toggled,
 } from '../../state/index.js';
 import {useDisplayClock} from '../display-clock.js';
-import {agentLabel, groupLabel} from './labels.js';
+import {agentLabel, groupLabel, runtimeLabel} from './labels.js';
 import {formatSpan, formatUsd} from './time.js';
 
 /** What the bars of the tree say, in the words the page's own chips and column use. */
@@ -34,7 +34,7 @@ const LEGEND: GanttLegend = {
   done: 'Done',
   failed: 'Failed',
   returned: 'Result returned',
-  tag: 'Machine',
+  tag: 'Runtime',
   folded: 'Folded',
 };
 
@@ -62,7 +62,6 @@ function shared(row: SpawnRow, label: string): GanttRow {
     start: row.startMs,
     end: row.endMs,
     outcome: row.state === 'failed' ? 'err' : 'muted',
-    tag: row.host,
     segments: [
       {
         id: row.key,
@@ -81,6 +80,7 @@ function agentRow(row: AgentRow, labels: ReadonlyMap<string, string>, actions: A
   const count = foldedCount(row);
   return {
     ...shared(row, labels.get(row.agentId) ?? ''),
+    tag: runtimeLabel(row.runtime),
     ...(row.costUsd === null ? {} : {figure: formatUsd(row.costUsd)}),
     ...(row.children > 0 ? {fold: {open: !isFolded(row), toggle: fold}} : {}),
     ...(count > 0 ? {count} : {}),
@@ -95,8 +95,10 @@ function agentRow(row: AgentRow, labels: ReadonlyMap<string, string>, actions: A
 
 function groupRow(row: GroupRow, actions: Actions): GanttRow {
   const fold = () => actions.fold(row);
+  const [only] = row.runtimes;
   return {
     ...shared(row, groupLabel(row.role)),
+    tag: only !== undefined && row.runtimes.length === 1 ? runtimeLabel(only) : 'Mixed runtimes',
     fold: {open: !row.folded, toggle: fold},
     count: row.agentIds.length,
     press: fold,
@@ -160,6 +162,7 @@ export function AgentsScreen(props: {
       title="Agents"
       meta={
         <>
+          <Chip label={props.host} mono clip />
           <Stats tree={tree} />
           {props.reading}
         </>
@@ -173,7 +176,8 @@ export function AgentsScreen(props: {
           axis={{label: clock.axisLabel, zone: clock.offsetMs}}
           rows={rows}
           nameLabel="Agent"
-          tagLabel="Machine"
+          tagLabel="Runtime"
+          tagPriority="primary"
           figureLabel="Cost"
           detail="full"
           legend={LEGEND}

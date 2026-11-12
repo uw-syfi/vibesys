@@ -3,8 +3,8 @@
  * (`Planner 2`), as the tree, the transcript, the report and every other screen say it.
  */
 import type {AgentRole} from '@vibesys/orchestrator-proto';
-import type {AgentName} from '../../state/index.js';
-import {roleWord} from '../orchestrator/words.js';
+import type {AgentName, AgentRuntime} from '../../state/index.js';
+import {harnessWord, roleWord} from '../orchestrator/words.js';
 
 const roleLabel = (role: AgentRole): string => roleWord(role);
 
@@ -14,3 +14,9 @@ export const agentLabel = (name: AgentName): string =>
 
 /** A group of agents of one role, as its row says it. */
 export const groupLabel = roleLabel;
+
+/** The runtime beside an agent: a named model on its tool, or that tool's own default. */
+export const runtimeLabel = (runtime: AgentRuntime): string =>
+  runtime.model === ''
+    ? `${harnessWord(runtime.harness)} default`
+    : `${runtime.model} on ${harnessWord(runtime.harness)}`;

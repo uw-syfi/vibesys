@@ -356,15 +356,24 @@ describe('Gantt columns', () => {
     );
   });
 
-  test('drops the machine column in a narrow window, so the bars keep a track', () => {
+  test('drops a secondary tag in a narrow window but keeps a primary row identity', () => {
     const tree = css('gantt-tree.css');
-    expect(tree).toMatch(/@media \(max-width: 760px\)[^@]*\.vs-gantt-tag\s*\{\s*display:\s*none/);
+    expect(tree).toMatch(
+      /@media \(max-width: 760px\)[^@]*:not\(\[data-tag-priority="primary"\]\)[^@]*\.vs-gantt-tag\s*\{\s*display:\s*none/,
+    );
   });
 
   test('gives the track the room a tag and a name do not need', () => {
     const tree = css('gantt-tree.css');
     expect(tree).toMatch(
       /clamp\(var\(--gantt-label\), 20%, var\(--gantt-label-max\)\)\s*var\(--gantt-tag\)/,
+    );
+  });
+
+  test('gives a primary row-identity tag more room without hiding it at a narrow width', () => {
+    const tree = css('gantt-tree.css');
+    expect(tree).toMatch(
+      /\[data-tag-priority="primary"\][^}]*grid-template-columns:[^}]*calc\(var\(--gantt-tag\) \+ var\(--space-8\) \* 2\)/,
     );
   });
 });

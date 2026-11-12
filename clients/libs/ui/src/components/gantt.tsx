@@ -513,6 +513,8 @@ export function Gantt(props: {
   /** Column names on the tick row: over the names, the tags and the figures. */
   readonly nameLabel?: string;
   readonly tagLabel?: string;
+  /** Keep a tag that carries primary row identity visible at narrow widths; secondary tags yield to the chart. */
+  readonly tagPriority?: 'secondary' | 'primary';
   readonly figureLabel?: string;
   readonly view?: GanttView;
   readonly changeView?: (view: GanttView) => void;
@@ -562,6 +564,7 @@ export function Gantt(props: {
       className="vs-gantt"
       data-strip={strip || undefined}
       data-tags={tagged || undefined}
+      data-tag-priority={props.tagPriority ?? 'secondary'}
       data-size={props.size ?? 'default'}
     >
       {props.legend === undefined ? null : <LegendKey words={props.legend} />}
