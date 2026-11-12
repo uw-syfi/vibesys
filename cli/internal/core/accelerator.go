@@ -76,8 +76,8 @@ type AcceleratorIdentity struct {
 var accelerators = []AcceleratorIdentity{
 	{VendorCPU, "", "CPU", nil},
 	{VendorAMD, ModelMI210, "AMD MI210", []string{"mi210"}},
-	// ROCm names the device "AMD Instinct MI250X / MI250".
-	{VendorAMD, ModelMI250, "AMD MI250", []string{"mi250", "mi250x"}},
+	// ROCm names the device "AMD Instinct MI250X / MI250"; its "MI250" token names it.
+	{VendorAMD, ModelMI250, "AMD MI250", []string{"mi250"}},
 	{VendorAMD, ModelMI300A, "AMD MI300A", []string{"mi300a"}},
 	{VendorAMD, ModelMI300X, "AMD MI300X", []string{"mi300x"}},
 	{VendorAMD, ModelMI325X, "AMD MI325X", []string{"mi325x"}},
