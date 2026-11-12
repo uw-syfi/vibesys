@@ -19,6 +19,7 @@ import {
   freshnessOf,
   type HostFrame,
   readCost,
+  type WholeViewPhase,
 } from '../state/index.js';
 import {InvalidMessage} from './errors.js';
 import {type FeedSpec, runFeed} from './feeds.js';
@@ -39,18 +40,27 @@ type Statuses = Readonly<Record<string, FeedStatus>>;
 const OPENING: FeedStatus = {_tag: 'Opening'};
 
 /** A frame of the view the message carries, or the failure that names what it lacks. */
-function costFrame(response: WatchRunCostResponse): Effect.Effect<HostFrame, InvalidMessage> {
+function costFrame(
+  response: WatchRunCostResponse,
+  phase: WholeViewPhase,
+): Effect.Effect<HostFrame, InvalidMessage> {
   const invalid = (detail: string) =>
     Effect.fail(new InvalidMessage({direction: 'response', type: RunCostSchema.typeName, detail}));
   if (response.cost === undefined) return invalid('cost is absent');
   const read = readCost(response.cost);
   return read._tag === 'Missing'
     ? invalid(`${read.field} is absent`)
-    : Effect.succeed({from: 'cost', view: read.view});
+    : Effect.succeed({from: 'cost', phase, view: read.view});
 }
 
 const costSpec = ({client}: HostParts, runId: string): FeedSpec<HostFrame> => ({
-  open: () => client.watchRunCost({runId}).pipe(Stream.mapEffect(costFrame)),
+  open: () =>
+    client.watchRunCost({runId}).pipe(
+      Stream.zipWithIndex,
+      Stream.mapEffect(([response, index]) =>
+        costFrame(response, index === 0 ? 'initial' : 'update'),
+      ),
+    ),
   apply: applyHostFrame,
   gapped: () => false,
 });
