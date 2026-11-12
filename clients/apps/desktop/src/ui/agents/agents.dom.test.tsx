@@ -3,7 +3,7 @@
  * a folded thought and a call, and ask for the body a page left out.
  */
 import {describe, expect, it} from '@effect/vitest';
-import type {Agent} from '@vibesys/orchestrator-proto';
+import {type Agent, AgentStatus} from '@vibesys/orchestrator-proto';
 import {applyChange, emptyState, itemIs, type OrchestratorState} from '../../state/index.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
@@ -15,6 +15,14 @@ installDom();
 
 const scenario = generateScenario({seed: 5, subagents: 20, live: false, tree: true, depth: 2});
 const state: OrchestratorState = scenario.changes.reduce(applyChange, emptyState);
+const MESSAGEABLE = [
+  AgentStatus.UNSPECIFIED,
+  AgentStatus.LAUNCHING,
+  AgentStatus.ACTIVE,
+  AgentStatus.WAITING,
+  AgentStatus.IDLE,
+];
+const OVER = [AgentStatus.ENDED, AgentStatus.FAILED, AgentStatus.LOST];
 
 const options = (container: HTMLElement): HTMLElement[] => [
   ...container.querySelectorAll<HTMLElement>('[role="option"]'),
@@ -137,7 +145,7 @@ describe('an agent page', () => {
     );
 
   it('reads in one scroll: where the agent sits and ran, its conversation filling the page, then the box to write in', () => {
-    for (const agent of Object.values(state.agents).slice(0, 6)) {
+    for (const agent of Object.values(state.agents).filter(one => !OVER.includes(one.status))) {
       const screen = page(agent);
       // The page's body does not scroll; the conversation takes what the cards leave and scrolls itself.
       const body = screen.container.querySelector('.vs-page-scroll[data-fill] > .vs-page-body');
@@ -155,6 +163,18 @@ describe('an agent page', () => {
       // One conversation, drawn as a direct child of the body: no column of its own around it.
       expect(screen.container.querySelectorAll('.vs-conversation')).toHaveLength(1);
       expect(body?.textContent).toContain('host-a');
+      screen.unmount();
+    }
+  });
+
+  it('offers a message only while the host can accept one, across every agent status', () => {
+    const agent = Object.values(state.agents)[0];
+    if (agent === undefined) throw new Error('the run has an agent');
+    for (const status of [...MESSAGEABLE, ...OVER]) {
+      const screen = page({...agent, status});
+      const expected = MESSAGEABLE.includes(status) ? 1 : 0;
+      expect(screen.controls('Send message')).toHaveLength(expected);
+      expect(screen.text().includes('Message Lead')).toBe(expected === 1);
       screen.unmount();
     }
   });

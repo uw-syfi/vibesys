@@ -1,4 +1,10 @@
-import {type Agent, Delivery, type Message, type Receipt} from '@vibesys/orchestrator-proto';
+import {
+  type Agent,
+  AgentStatus,
+  Delivery,
+  type Message,
+  type Receipt,
+} from '@vibesys/orchestrator-proto';
 import {Button, Card, Chip, Field, Row, Stack, Text, TextInput} from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import {type CommandProgress, messageIs, ms} from '../../state/index.js';
@@ -12,6 +18,13 @@ import {
   roleWord,
   type Word,
 } from '../orchestrator/words.js';
+
+/** An agent session the host will refuse a new message for. */
+const FINAL: ReadonlySet<AgentStatus> = new Set([
+  AgentStatus.ENDED,
+  AgentStatus.FAILED,
+  AgentStatus.LOST,
+]);
 
 /** What this agent's tool lets a message do, as a label. */
 function capabilityLine(agent: Agent): string {
@@ -88,43 +101,54 @@ export function MessageBox(props: {
   readonly sent: readonly Message[];
   readonly send: (text: string) => void;
   readonly retry: () => void;
-}): JSX.Element {
+}): JSX.Element | null {
   const [draft, setDraft] = useState('');
   const [sentAtMs, setSentAtMs] = useState<number | null>(null);
   const [sentText, setSentText] = useState<string | null>(null);
   const {progress} = props;
+  const canSend = !FINAL.has(props.agent.status);
   const sending = progress?._tag === 'Sending';
   // The text stays until the host has taken the message; only then is the box empty again.
   const taken = progress?._tag === 'Accepted' && sentText === draft;
   const shown = taken ? '' : draft;
+  // Keep past messages and an in-flight result visible after the session ends. With neither, an
+  // empty card would only advertise an action the host is guaranteed to refuse.
+  if (!canSend && props.sent.length === 0 && progress === undefined) return null;
   return (
-    <Card section={`Message ${roleWord(props.agent.role)}`}>
+    <Card section={`${canSend ? 'Message' : 'Messages to'} ${roleWord(props.agent.role)}`}>
       <Stack gap="space-3">
-        <Field label="Your message">
-          <TextInput
-            value={shown}
-            change={setDraft}
-            placeholder="Write a message to this agent"
-            rows={2}
-          />
-        </Field>
-        <Row>
-          <Button
-            text={sending ? 'Sending' : 'Send'}
-            label="Send message"
-            hint={capabilityLine(props.agent)}
-            variant="primary"
-            press={() => {
-              setDraft(shown);
-              setSentText(shown);
-              setSentAtMs(props.nowMs);
-              props.send(shown);
-            }}
-            {...(shown.trim() === '' || sending
-              ? {disabledReason: sending ? 'Sending' : 'Write a message first', quietReason: true}
-              : {})}
-          />
-        </Row>
+        {canSend ? (
+          <>
+            <Field label="Your message">
+              <TextInput
+                value={shown}
+                change={setDraft}
+                placeholder="Write a message to this agent"
+                rows={2}
+              />
+            </Field>
+            <Row>
+              <Button
+                text={sending ? 'Sending' : 'Send'}
+                label="Send message"
+                hint={capabilityLine(props.agent)}
+                variant="primary"
+                press={() => {
+                  setDraft(shown);
+                  setSentText(shown);
+                  setSentAtMs(props.nowMs);
+                  props.send(shown);
+                }}
+                {...(shown.trim() === '' || sending
+                  ? {
+                      disabledReason: sending ? 'Sending' : 'Write a message first',
+                      quietReason: true,
+                    }
+                  : {})}
+              />
+            </Row>
+          </>
+        ) : null}
         <CommandLine progress={progress} done="Send" retry={props.retry} />
         <SentMessages pendingAtMs={sentAtMs} sent={props.sent} progress={progress} />
       </Stack>
