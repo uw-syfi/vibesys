@@ -23,7 +23,7 @@
     "selection_rule": "first_n_in_emitted_session_order",
     "session_order": "source",
     "source_bytes": 1404272,
-    "source_path": "/mnt/data/shli/tracelab-data/trace-dev-v2/session_rounds_v2.csv",
+    "source_path": "<data>/trace-dev-v2/session_rounds_v2.csv",
     "source_schema": "session-rounds-v2",
     "source_sha256": "78a815aedbbe28d32f0e12c87d5614e6729a60a8e8b2e97ee19e3f5ff622a796"
   }
