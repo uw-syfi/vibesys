@@ -10,8 +10,9 @@ One candidate project supports these hardware and workload tasks:
 | `mi300x-tracelab` | 1 AMD MI300X GPU | TraceLab recorded sessions |
 | `mi2508x-tracelab-scale` | 1 AMD MI250 node (8 GCDs) | TraceLab concurrency sweep |
 
-Use `examples/model-serving/qwen3.6-35b-a3b` as the input project and select
-the task when creating a run.
+Every task is a two-image task (`version = "0.2"`) that only vibesys-cli runs,
+with `examples/model-serving/qwen3.6-35b-a3b` as the project; name the task
+when submitting a job.
 
 ## Baseline engine
 
@@ -60,7 +61,7 @@ UV_PROJECT_ENVIRONMENT="${XDG_CACHE_HOME:-$HOME/.cache}/vibesys/qwen36-cpu-check
 
 ## AMD AgentX tasks
 
-This project also offers two tasks over the same candidate codebase:
+Two tasks replay AgentX over the same candidate codebase:
 
 - [`mi300x-agentx`](.vibesys/tasks/mi300x-agentx/OBJECTIVE.md): one AMD MI300X,
   192 GB HBM. Start here for a single-device BF16 serving path with room for
@@ -82,7 +83,7 @@ the project root, which the root `.dockerignore` filters to
 load. Each task's own `Dockerfile` is the task image: the
 `vibesys-evaluator-llm-serving` image (release 0.2.0rc1, pinned by digest, with
 `agentx-harness==1.0.7`) plus the task directory, where `checker.py` is a copy
-of the shared service checker and `bench.py` runs the replay against
+of [the shared service checker](.vibesys/shared/accuracy_checker/) and `bench.py` runs the replay against
 `VIBESYS_SERVICE_URL`. Both images read the operator's Hugging Face cache,
 mounted read-only as `hf` (`HF_HOME=/vibesys/mounts/hf`, `HF_HUB_OFFLINE=1`);
 it must already hold `Qwen/Qwen3.6-35B-A3B` at the pinned revision and the
@@ -138,8 +139,16 @@ Select `mi2104x-tracelab` or `mi300x-tracelab` for the same model/hardware
 contracts with a different workload. These replay all 48 sessions / 303 rounds
 of the pinned recorded TraceLab sample through Request Factory, with eight
 active sessions, prefix reuse and tool waits. They use the same five objectives
-and 3% noise tolerance. See [the adapter's provenance and measurement policy](.vibesys/shared/tracelab/README.md).
+and 3% noise tolerance. See [the adapter's provenance and measurement policy](.vibesys/tasks/mi2104x-tracelab/tracelab/README.md).
+
+Like the AgentX tasks, they are two-image tasks that only vibesys-cli runs, with
+the same candidate image. Each task's `Dockerfile` is the task image: Request
+Factory's `session_runner`, built from the revision the earlier
+`vibesys-evaluator-request-factory` evaluator pinned, the shared service checker
+(`checker.py`) and the adapter (`tracelab/`), which reads the pinned tokenizer
+from the same read-only Hugging Face mount. The two task directories differ
+only in `OBJECTIVE.md` and the hardware in `vibesys.input.toml`.
 
 The sample is recorded, not statistically resampled, but it is much smaller
-than the full TraceLab corpus. Keep its frontier separate from AgentX. Its behavioral accuracy gate has the same limits
-as the AMD AgentX tasks.
+than the full TraceLab corpus. Keep its frontier separate from AgentX. Its
+behavioral accuracy gate has the same limits as the AMD AgentX tasks.

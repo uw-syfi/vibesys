@@ -34,8 +34,7 @@ they do in the baseline; the candidate must own its serving path rather than
 proxy an existing server.
 Do not use extra GPUs, another machine, or a hosted model. Host-side cache
 offload is allowed within the allocation, with its costs inside measurement.
-See [the project README](../../../README.md) for AMD environment setup. The
-ROCm 6.4 build of torch 2.9.1 cannot run `torch._grouped_mm` ("grouped gemm is
+The ROCm 6.4 build of torch 2.9.1 cannot run `torch._grouped_mm` ("grouped gemm is
 not supported on ROCM"), so on ROCm the baseline loads its own experts
 implementation built from ordinary matmuls (`engine/experts.py`); a grouped
 expert GEMM needs a kernel of your own or another library.
@@ -49,12 +48,19 @@ checker's short chat probes, using a non-thinking default so answers fit their
 small output budgets. Honor explicit template options, preserve supplied
 reasoning/tool history, and make temperature-zero completions repeatable.
 
-Run the configured service checker before benchmarking. Every task of this
-project shares it; it checks sentinel echo, known answers, and greedy
-repeatability. These are behavioral probes, **not numerical parity or proof of
-checkpoint identity**. Correct hybrid state and routing remain requirements;
-a passing behavioral probe does not authorize altered model execution.
-No full-size AMD run has validated this example yet.
+The configured service checker is shared by every task of this project and
+checks sentinel echo, known answers, and greedy repeatability. These are
+behavioral probes, **not numerical parity or proof of checkpoint identity**.
+Correct hybrid state and routing remain requirements; a passing behavioral probe
+does not authorize altered model execution. No full-size AMD run has validated
+this example yet.
+
+The server runs on the one MI300X GPU, reads the pinned checkpoint from the
+operator's read-only Hugging Face cache offline, listens on `127.0.0.1`, keeps
+the full 262,144-token context, and answers `GET /health` with a 2xx status once
+it can serve requests, within 30 minutes of starting. The image it runs in and
+everything it builds from are candidate code. The checker and the replay reach
+the server only over HTTP.
 
 ## TraceLab recorded workload and objectives
 
@@ -78,4 +84,4 @@ kernels; it is a separate frontier from the 15-minute AgentX task.
 Optimize output tokens/s (maximize), TTFT p50/p90 and TPOT p50/p90 in milliseconds
 (minimize), with 3% relative noise tolerance. A failed round, missing metric,
 wrong token count or incomplete replay fails measurement. No dry-run result is
-accepted. See [the TraceLab adapter](../../shared/tracelab/README.md).
+accepted. See [the TraceLab adapter](tracelab/README.md).
