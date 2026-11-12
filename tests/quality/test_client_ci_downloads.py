@@ -171,6 +171,13 @@ def test_only_the_e2e_job_asks_setup_clients_for_playwright() -> None:
     assert seen
 
 
+def test_browser_job_pins_a_playwright_supported_runner() -> None:
+    workflow = _load(WORKFLOW)
+    assert isinstance(workflow, dict)
+    jobs = _mapping(workflow["jobs"])
+    assert _mapping(jobs["clients-e2e"])["runs-on"] == "ubuntu-24.04"
+
+
 def test_browser_download_attempts_are_bounded() -> None:
     runs = [step.get("run", "") for step in _steps(_load(SETUP_ACTION))]
     install = next(

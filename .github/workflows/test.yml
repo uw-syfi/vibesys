@@ -476,11 +476,12 @@ jobs:
 
   # The UI gallery's measuring and accessibility suite (Playwright, Chromium on Linux; no pixel snapshots), the one
   # browser suite of the clients. The desktop app's own screens are checked by the vitest suites of
-  # `clients-tests`.
+  # `clients-tests`. Pin the OS because Playwright 1.55 refuses Ubuntu 26.04 before it can install
+  # Chromium; `ubuntu-latest` moved underneath this required check on 2026-11-12.
   clients-e2e:
     needs: changes
     if: needs.changes.outputs.clients == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
