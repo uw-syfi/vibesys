@@ -23,6 +23,7 @@ TOKENIZER_REVISION = "995ad96eacd98c81ed38be0c5b274b04031597b0"
 
 
 def replay(run: Run, mode: Literal["full", "smoke"]) -> dict[str, float]:
+    # Inside the benchmark's 10,800 s budget, leaving 300 s for the rest of the step.
     return agentx.replay(
         model=MODEL,
         tokenizer=MODEL,
@@ -31,6 +32,7 @@ def replay(run: Run, mode: Literal["full", "smoke"]) -> dict[str, float]:
         max_context_length=262144,
         artifacts=run.phase("agentx"),
         mode=mode,
+        timeout_secs=10500.0,
     )
 
 
