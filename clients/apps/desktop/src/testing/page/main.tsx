@@ -10,6 +10,8 @@
  * long, `down=<n>` has the host at that position lose its link after its first snapshot,
  * `leftOut=<n>` has each host say its snapshot left that many older runs out);
  * `generic` adds one generic-only run to the host's independent typed run index;
+ * `turnWindow=<n>` limits run history to its earliest n turns while agent streams still serve
+ * their items, as a run beyond the host's bounded timeline does;
  * Every host serves the cost its own runs add up to (`served-host-cost.ts`), so the Cost page and the Runs
  * page agree; `fleet=0-0` is a host with no runs.
  * `report` has the lead post a report about the whole run, which the report screen sums the run up by
@@ -286,6 +288,13 @@ const daemon = new FakeDaemon({
         ],
       }),
 });
+const turnWindow = query.get('turnWindow');
+if (turnWindow !== null) {
+  const limit = Number(turnWindow);
+  if (!Number.isSafeInteger(limit) || limit < 0)
+    throw new Error('turnWindow must be a non-negative integer');
+  daemon.historyTurnLimit = limit;
+}
 const world = new FakeSetup(daemon.ledger(), setupFlavor ?? 'ticks');
 daemon.setup = world;
 if (setupFlavor !== undefined) world.adopt(scenario.runId);

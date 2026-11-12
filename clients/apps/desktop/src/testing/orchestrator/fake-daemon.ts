@@ -254,6 +254,12 @@ export class FakeDaemon {
   /** How many runs the host says its snapshot left out, for a test of a host with more runs than it lists. */
   runsLeftOut = 0;
 
+  /**
+   * How many turns a run-history page may hold, earliest first, or null for all. This models the
+   * real host's bounded timeline independently of the per-agent item pages.
+   */
+  historyTurnLimit: number | null = null;
+
   /** The summary the host serves of each run it lists, as it stands now. */
   summaries(): RunSummary[] {
     return [...this.snapshot().summaries];
@@ -333,6 +339,12 @@ export class FakeDaemon {
   history(runId: string, cursor: bigint, pageMessages = 200): GetRunHistoryResponse {
     const state = this.#state(this.#visible);
     const all = Object.values(state.messages).filter(message => message.runId === runId);
+    const allTurns = Object.values(state.turns).filter(
+      turn => state.agents[turn.agentId]?.runId === runId,
+    );
+    const turnLimit = Math.max(0, this.historyTurnLimit ?? allTurns.length);
+    const turns = allTurns.slice(0, turnLimit);
+    const turnsLeftOutCount = allTurns.length - turns.length;
     const from = Number(cursor);
     const messages = all.slice(from, from + pageMessages);
     const next = from + messages.length;
@@ -340,9 +352,9 @@ export class FakeDaemon {
     return create(GetRunHistoryResponseSchema, {
       sequence: state.sequence,
       agents: first ? Object.values(state.agents).filter(agent => agent.runId === runId) : [],
-      turns: first
-        ? Object.values(state.turns).filter(turn => state.agents[turn.agentId]?.runId === runId)
-        : [],
+      turns: first ? turns : [],
+      turnsLeftOut: first && turnsLeftOutCount > 0,
+      turnsLeftOutCount: first ? turnsLeftOutCount : 0,
       checkIns: first ? Object.values(state.checkIns).filter(each => each.runId === runId) : [],
       messages,
       nextCursor: next < all.length ? BigInt(next) : 0n,

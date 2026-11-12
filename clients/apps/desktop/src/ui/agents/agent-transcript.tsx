@@ -127,6 +127,14 @@ function turnItem(entry: Of<'turn'>, clock: DisplayClock): ConversationItem {
   };
 }
 
+function unavailableTurnItem(entry: Of<'turn-unavailable'>): ConversationItem {
+  return {
+    kind: 'rule',
+    id: entry.key,
+    label: `Turn details not loaded · ${entry.items} ${entry.items === 1 ? 'item' : 'items'}`,
+  };
+}
+
 function thoughtItem(entry: Of<'thought'>, context: Context): ConversationItem {
   const span = entry.spanMs === null ? 'Thought' : `Thought for ${formatSpan(entry.spanMs)}`;
   const waiting = notice(entry.elidedBytes, entry.ordinal, context);
@@ -182,6 +190,8 @@ function itemOf(entry: Entry, context: Context): ConversationItem[] {
   switch (entry.kind) {
     case 'turn':
       return [turnItem(entry, context.clock)];
+    case 'turn-unavailable':
+      return [unavailableTurnItem(entry)];
     case 'incoming':
       return [
         {
