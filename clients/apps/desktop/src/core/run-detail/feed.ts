@@ -30,7 +30,7 @@ import {makeRetryGate, type RetryGate} from '../retry-gate.js';
 
 type HostClient = EffectClient<typeof HostService.method>;
 
-export type RunDetailStaleReason =
+type RunDetailStaleReason =
   | 'catching-up'
   | 'refreshing'
   | 'gap'
@@ -41,7 +41,7 @@ export type RunDetailStaleReason =
   | 'disconnected';
 
 /** What a consumer knows about delivery, apart from freshness inside the projection itself. */
-export type RunDetailDelivery =
+type RunDetailDelivery =
   | {readonly _tag: 'Loading'}
   | {readonly _tag: 'Live'; readonly projection: RunDetailProjection}
   | {
