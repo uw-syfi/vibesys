@@ -97,6 +97,49 @@ describe('the machine stats feed', () => {
     }),
   );
 
+  it.effect.prop(
+    'keeps the newest host reading when a screen leaves and rejoins before its stream ends',
+    {
+      before: Schema.Int.check(Schema.isBetween({minimum: 0, maximum: 49})),
+      after: Schema.Int.check(Schema.isBetween({minimum: 50, maximum: 100})),
+    },
+    ({before, after}) =>
+      Effect.gen(function* () {
+        const endings: readonly Step[] = [
+          refusedFrame(TopicFailureCode.UNSUPPORTED),
+          {end: {status: RpcStatus.UNIMPLEMENTED}},
+        ];
+        for (const ending of endings) {
+          const h = yield* harness(
+            always([
+              statsFrame({...TWO_GPUS, cpuPercent: before}),
+              SYNCED_FRAME,
+              {sleep: 1000},
+              statsFrame({...TWO_GPUS, cpuPercent: after}),
+              ending,
+            ]),
+          );
+          const leave = h.mount(h.session.machine.watch);
+          yield* h.elapse(0);
+          expect(yield* view(h)).toMatchObject({sample: {cpuPercent: {value: before}}});
+
+          // React can replace one reader with another before the shared atom's interruption runs.
+          // The stream is still the source of truth: a value it accepts in between is not stale UI.
+          leave();
+          h.mount(h.session.machine.watch);
+          yield* h.elapse(1);
+
+          expect(topicCalls(h)).toHaveLength(1);
+          expect(yield* view(h)).toEqual({
+            _tag: 'Shown',
+            sample: expect.objectContaining({cpuPercent: {_tag: 'Read', value: after}}),
+            stale: 'unsupported',
+          });
+        }
+      }),
+    {arbitrary: {runs: 10}},
+  );
+
   it.effect('says why a section has no reading, and keeps an empty GPU list apart from that', () =>
     Effect.gen(function* () {
       const none: MachineFigures = {...TWO_GPUS, gpus: []};
