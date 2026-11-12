@@ -154,18 +154,23 @@ function placeRows(entry: MachineEntry, dim: boolean): MachineTableRow[] {
   const {places, row} = entry;
   if (places === null) return [];
   const host = row.key;
+  const occurrences = new Map<string, number>();
   return [
-    ...placesOf(entry).map(
-      (place): MachineTableRow => ({
+    ...placesOf(entry).map((place): MachineTableRow => {
+      // A place name is not an identifier: valid host answers may repeat it. Its occurrence among
+      // places with the same name is render identity only, derived from the host's stable order.
+      const occurrence = occurrences.get(place.name) ?? 0;
+      occurrences.set(place.name, occurrence + 1);
+      return {
         kind: 'place',
-        key: `place:${host}:${place.name}`,
+        key: `place:${JSON.stringify([host, place.name, occurrence])}`,
         host,
         place,
         reach: reachOf(place),
         detail: unreadableDetail(place),
         dim,
-      }),
-    ),
+      };
+    }),
     ...noteRows(host, places),
   ];
 }
