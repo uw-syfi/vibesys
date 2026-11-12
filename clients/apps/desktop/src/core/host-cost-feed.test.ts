@@ -1,4 +1,4 @@
-import {create, fromBinary} from '@bufbuild/protobuf';
+import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {timestampFromMs, timestampMs} from '@bufbuild/protobuf/wkt';
 import {describe, expect, it} from '@effect/vitest';
 import {
@@ -11,6 +11,7 @@ import {
   SpendBucketSchema,
   UsageSchema,
   WatchHostCostRequestSchema,
+  WatchHostCostResponseSchema,
 } from '@vibesys/orchestrator-proto';
 import * as Effect from 'effect/Effect';
 import {type FeedStatus, readHostCost, sinceWindow} from '../state/index.js';
@@ -241,6 +242,42 @@ describe('the host cost stream', () => {
       yield* h.elapse(60);
       expect(hostCostCalls(h).length).toBeGreaterThan(1);
       expect((yield* h.model).data.hostCosts.all?.total.costUsd).toBe(7);
+      expect(yield* h.read(h.session.hostCosts.freshness('all'))).toBe('live');
+    }),
+  );
+
+  it.effect('takes the first whole view after restart, then rejects an older update', () =>
+    Effect.gen(function* () {
+      const daemon = new FakeDaemon(scenario);
+      daemon.publishHostCost(hostCost(1, 9n));
+      const h = yield* hostHarness(daemon, {
+        wrap: base => ({
+          respond: (target, nth) => {
+            const steps = base.respond(target, nth);
+            if (target.method !== methodPathOf('WatchHostCost')) return steps;
+            if (nth === 0) {
+              daemon.publishHostCost(hostCost(2, 1n));
+              return [
+                ...steps.filter(step => 'frame' in step),
+                {end: {message: 'the host restarted', status: RpcStatus.UNAVAILABLE}},
+              ];
+            }
+            if (nth === 1) {
+              const stale = create(WatchHostCostResponseSchema, {cost: hostCost(3, 0n)});
+              return [
+                ...steps.filter(step => 'frame' in step),
+                {frame: toBinary(WatchHostCostResponseSchema, stale)},
+                {hang: true},
+              ];
+            }
+            return steps;
+          },
+        }),
+      });
+      h.mount(h.session.hostCosts.watch('all'));
+      yield* h.elapse(60);
+      expect(hostCostCalls(h).length).toBeGreaterThan(1);
+      expect((yield* h.model).data.hostCosts.all?.total.costUsd).toBe(2);
       expect(yield* h.read(h.session.hostCosts.freshness('all'))).toBe('live');
     }),
   );
