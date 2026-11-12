@@ -2,9 +2,9 @@
 
 The sweep replays a 2,000-session TraceLab trace at rising session concurrency, one
 fixed-time window per step. It climbs while a step meets the latency cap and keeps gaining
-throughput, always measures the fixed levels 4 and 16, and may add one refinement step. The
-score is five VibeSys objectives: the peak throughput over the steps that meet the cap, and
-TTFT p50 / TPOT p50 at the fixed levels 4 and 16.
+throughput, always measures the fixed level 4, and may add one refinement step. The score is
+three VibeSys objectives: the peak throughput over the steps that meet the cap, and TTFT p50 /
+TPOT p50 at the fixed level 4.
 
 Public API (pure, unit-tested in ``test_replay.py``): ``step_metrics`` validates one
 window's summary and extracts its metrics, ``passes_cap`` / ``climb_stopped`` /
@@ -41,9 +41,8 @@ TRACE_SHA256 = "a2546a138e9fcb48e583faeb696b2fe1e748b6a5524b7c1bcae1183f859d66bc
 # ---- Sweep parameters. These are the task's fixed policy; only the hidden --test-* flags
 # (which the benchmark command never passes, and which need an environment opt-in) change them.
 CONCURRENCIES = (4, 8, 16, 32, 64, 128, 256)
-# Scored fixed-load levels: always measured, whatever the climb does. Levels up to the highest
-# of them (4, 8, 16) always run, so the climb can only stop above 16.
-FIXED_LEVELS = (4, 16)
+# Scored fixed-load level: always measured, whatever the climb does; the climb starts there.
+FIXED_LEVELS = (4,)
 # The timing of every step: one place to change it later.
 WARMUP_SECS = 60
 DURATION_SECS = 180  # the measured window
@@ -116,7 +115,7 @@ def _refine(p: int) -> int:
     return math.floor(p * REFINE_FACTOR + 0.5)
 
 
-# The five objectives are required; everything else is reported and may be absent.
+# The three objectives are required; everything else is reported and may be absent.
 OBJECTIVES = ["output_tokens_per_s"] + [
     f"{m}_c{c}" for c in FIXED_LEVELS for m in ("ttft_p50_ms", "tpot_p50_ms")
 ]
@@ -287,7 +286,7 @@ def plan_next(
 ) -> int | None:
     """The next concurrency to measure, or None when the sweep is complete.
 
-    Rule: levels up to max(FIXED_LEVELS) (4, 8, 16) always run, in order. Above that the climb
+    Rule: levels up to max(FIXED_LEVELS) (4) always run, in order. Above that the climb
     goes on only while it has not stopped (see ``climb_stopped``). When the climb ends, one
     refinement step may follow. ``history`` maps measured concurrency to its row; ``skipped``
     holds levels the time budget dropped.
@@ -337,7 +336,7 @@ def next_step_fits(
 
 
 def build_result(history: dict[int, Row]) -> dict[str, float]:
-    """Protocol-2 values: the five objectives plus the reported diagnostics."""
+    """Protocol-2 values: the three objectives plus the reported diagnostics."""
     missing = [c for c in FIXED_LEVELS if c not in history]
     if missing:
         raise ValueError(f"fixed level(s) {missing} were not measured")
@@ -499,8 +498,8 @@ def sweep(args: argparse.Namespace, plan: argparse.Namespace, temporary: Path) -
     while (concurrency := plan_next(plan.concurrencies, history, frozenset(skipped))) is not None:
         elapsed = time.monotonic() - started
         # Fixed levels have priority: the step must leave room for the fixed levels still to
-        # run after it. A fixed level that cannot fit is an error; level 8 (not fixed) is
-        # dropped instead; steps above 16 and the refinement just end the sweep.
+        # run after it. A fixed level that cannot fit is an error; a lower unfixed level is
+        # dropped instead; steps above them and the refinement just end the sweep.
         later_fixed = [c for c in FIXED_LEVELS if c not in history and c != concurrency]
         steps = 1 + (len(later_fixed) if concurrency <= fixed_top else 0)
         if not next_step_fits(
@@ -518,7 +517,7 @@ def sweep(args: argparse.Namespace, plan: argparse.Namespace, temporary: Path) -
                     f"{plan.deadline:.0f} s deadline ({elapsed:.0f} s used before c={concurrency})"
                 )
             if concurrency <= fixed_top:
-                sys.stderr.write(f"skipping concurrency {concurrency} to leave time for 16\n")
+                sys.stderr.write(f"skipping concurrency {concurrency} to leave time for the fixed levels\n")
                 skipped.add(concurrency)
                 continue
             sys.stderr.write(

@@ -2,8 +2,8 @@
 
 This task measures how the engine scales with load on real TraceLab coding-agent
 traffic. `replay.py` replays one trace at rising session concurrency, one
-fixed-time window per step, and scores five objectives: the peak throughput over the steps
-that meet a latency cap, and TTFT p50 / TPOT p50 at the fixed levels 4 and 16. The image's trusted `session_runner` is
+fixed-time window per step, and scores three objectives: the peak throughput over the steps
+that meet a latency cap, and TTFT p50 / TPOT p50 at the fixed level 4. The image's trusted `session_runner` is
 Request Factory revision `89dce4a64ae12e7084fbe464ddda882fa0a4c482` plus
 `../request-factory/windowed.patch` (two commits adding `--warmup-secs` /
 `--duration-secs`, see `../Dockerfile`).
@@ -69,9 +69,7 @@ needs. The 17 MB generation plan is not included.
 * Latency cap: a step passes if TPOT p50 <= 100 ms and TTFT p50 <= 10,000 ms.
 * Climb: ascending; continue while a step passes the cap and its tok/s is at least 1.03 times
   the best tok/s of the earlier passing steps. The first step that fails either ends it.
-* Fixed levels: 4 and 16 always run. The simple rule implemented: levels 4, 8 and 16 always
-  run, in order, so a climb that would have stopped at 4 or 8 still reaches 16 (and 8 is
-  measured on the way); the climb can only stop above 16, and then nothing above it runs.
+* Fixed level: 4 always runs, and the climb starts there.
 * Refinement: with p the best passing step, if both p and 2p ran, one more step runs at
   round(p x sqrt(2)): 6, 11, 23, 45, 91 or 181 for p = 4, 8, 16, 32, 64, 128. It is under the
   same cap and is a peak candidate.
@@ -79,22 +77,21 @@ needs. The 17 MB generation plan is not included.
   included). `peak_concurrency` is the lowest-concurrency passing step whose tok/s is at least
   97% of that maximum. If no step passes the cap, the objective is the tok/s of the lowest
   step run, `peak_concurrency` is that step, and `latency_cap_met` is 0 (otherwise 1).
-* Objectives (exactly five): `output_tokens_per_s` (the peak) and `ttft_p50_ms_c4`,
-  `tpot_p50_ms_c4`, `ttft_p50_ms_c16`, `tpot_p50_ms_c16`, from the steps at 4 and 16.
-  Promotion is decided on these five; tail percentiles are reported but not scored at this
-  tier. `objectives.toml` carries per-objective placeholder `relative_noise` floors.
+* Objectives (exactly three): `output_tokens_per_s` (the peak) and `ttft_p50_ms_c4`,
+  `tpot_p50_ms_c4`, from the step at 4. Latency under heavy load is held by the cap.
+  Promotion is decided on these three; tail percentiles are reported but not scored at this
+  tier. `objectives.toml` carries the per-objective `relative_noise` floors.
 * Reported, not objectives (declared `required: false` in the hello): `peak_concurrency`,
   `latency_cap_met`, `tok_s_at_c<N>` for every step that ran, and `ttft_p90_ms_c4`,
-  `tpot_p90_ms_c4`, `ttft_p90_ms_c16`, `tpot_p90_ms_c16`. A per-step table is written to
+  `tpot_p90_ms_c4`. A per-step table is written to
   stderr.
 * Validation: any failed request (in or before the window), any output-length
   mismatch, any request whose server streamed no token ids, an empty window, a
   nonzero runner exit, window parameters that differ from the request, or a missing or
   non-finite metric fails the whole measurement with a protocol error.
-* Time: the overall deadline is 3,300 s of the 3,600 s benchmark timeout. The fixed levels
-  have priority: steps 4 -> 8 -> 16 run first, 8 is dropped only if keeping it would leave no
-  room for 16, and the deadline otherwise cuts only the climb above 16 and the refinement.
-  If 4 and 16 cannot both finish, the result is a protocol error. Each runner process is
+* Time: the overall deadline is 3,300 s of the 3,600 s benchmark timeout. The step at 4 runs
+  first; the deadline cuts only the climb above it and the refinement. If 4 cannot finish,
+  the result is a protocol error. Each runner process is
   limited to window length plus 300 s.
 
 ## Sweep mode (development, unscored)

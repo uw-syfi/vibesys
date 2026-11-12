@@ -77,8 +77,7 @@ synthetic text, so no step benefits from the server's cache of an earlier one.
 * **Climb.** Steps run in ascending order. The climb continues while a step passes
   the cap and its output throughput is at least 1.03 times the best throughput of
   the earlier passing steps; the first step that fails either condition ends it.
-* **Fixed levels.** Concurrency 4 and 16 are always measured, and so is 8 on the way
-  to 16, whatever the climb would have done; the climb can only end above 16.
+* **Fixed level.** Concurrency 4 is always measured, whatever its result.
 * **Refinement.** After the climb, let p be the best passing step. If steps p and
   2p both ran, one more step runs at round(p x sqrt(2)) (23 for 16, 45 for 32). The
   same cap applies, and it counts as a candidate for the peak.
@@ -87,15 +86,15 @@ synthetic text, so no step benefits from the server's cache of an earlier one.
   step whose throughput is within 3% of that maximum. If no step passes the cap,
   the throughput of the lowest step run is used and `latency_cap_met` is 0.
 
-The score has exactly five objectives:
+The score has exactly three objectives:
 
 * output tokens per second (maximize): the peak above. Output tokens that arrive in
   the window, divided by the window length;
-* TTFT p50 in milliseconds at 4 concurrent sessions, and at 16 (minimize): time to
+* TTFT p50 in milliseconds at 4 concurrent sessions (minimize): time to
   first token over requests sent inside the window. A request still waiting for its
   first token at the end of the window counts with the time it has waited so far as
   a lower bound, so leaving long prompts waiting does not help;
-* TPOT p50 in milliseconds at 4 concurrent sessions, and at 16 (minimize):
+* TPOT p50 in milliseconds at 4 concurrent sessions (minimize):
   per-request time between output tokens, from the tokens that arrive inside the
   window.
 
@@ -107,14 +106,13 @@ measurement fails. The token pool is synthetic coding text because the trace
 describes lengths and topology rather than private prompt content. Setup occurs
 before measurement; the window is the runner's native one. The sweep must finish
 inside the benchmark's 3,600-second budget (it keeps a 3,300-second deadline). The
-fixed levels have priority: steps 4, 8 and 16 run first, and the deadline only cuts
-the climb above 16 and the refinement. If 4 and 16 cannot both finish, the
-measurement fails. Results are also evaluated on held-out TraceLab traffic, drawn the same way from different sessions and users. Do not special-case this trace's sessions, their order or their lengths; a change must improve serving of coding-agent traffic in general.
+step at 4 runs first, and the deadline only cuts the climb above it and the
+refinement. If 4 cannot finish, the measurement fails. Results are also evaluated on held-out TraceLab traffic, drawn the same way from different sessions and users. Do not special-case this trace's sessions, their order or their lengths; a change must improve serving of coding-agent traffic in general.
 
 Any failed request in or before a window, any output of the wrong length, a
 missing or non-finite metric, or a runner failure fails the measurement. No
-dry-run result is accepted. Promotion is decided on these five objectives, judged
+dry-run result is accepted. Promotion is decided on these three objectives, judged
 on their Pareto frontier with a per-objective relative noise tolerance. The following are reported for reference and are **not**
-scored: TTFT and TPOT p90 at 4 and 16, the peak concurrency, `latency_cap_met`,
+scored: TTFT and TPOT p90 at 4, the peak concurrency, `latency_cap_met`,
 and the throughput of every step that ran (`tok_s_at_c<N>`). Tail percentiles are
 not scored at this tier.

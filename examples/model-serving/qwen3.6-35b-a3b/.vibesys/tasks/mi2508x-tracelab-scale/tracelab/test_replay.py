@@ -193,23 +193,20 @@ class Climb(unittest.TestCase):
 
 
 class FixedLevels(unittest.TestCase):
-    def test_stop_at_4_still_runs_8_and_16(self) -> None:
-        # Rule: levels up to 16 always run in order; only the climb above 16 can stop.
-        self.assertEqual(drive({4: row(100, tpot=500.0), 8: 90, 16: 95}), [4, 8, 16])
+    def test_level_4_always_runs_and_starts_the_climb(self) -> None:
+        # 4 fails the cap: the climb stops there and nothing else runs.
+        self.assertEqual(drive({4: row(100, tpot=500.0)}), [4])
 
-    def test_stop_at_8_still_runs_16(self) -> None:
-        self.assertEqual(drive({4: 100, 8: 101, 16: 300, 6: 50}), [4, 8, 16])
-
-    def test_stop_at_8_never_climbs_past_16(self) -> None:
-        # Stopped at 8, so 16 runs because it is fixed, but 32 does not even if 16 gains.
-        self.assertNotIn(32, drive({4: 100, 8: 101, 16: 300, 6: 50}))
+    def test_climb_can_stop_at_8(self) -> None:
+        # 8 gains under 3%: the climb stops; p=8 is best and 2p=16 never ran: no refinement.
+        self.assertEqual(drive({4: 100, 8: 101}), [4, 8])
 
     def test_climb_stopped_at_16_runs_nothing_above(self) -> None:
         self.assertEqual(drive({4: 100, 8: 200, 16: 201}), [4, 8, 16])
 
     def test_all_failing_runs_exactly_the_fixed_prefix(self) -> None:
         bad = row(10, tpot=999.0)
-        self.assertEqual(drive({4: bad, 8: bad, 16: bad}), [4, 8, 16])
+        self.assertEqual(drive({4: bad, 8: bad, 16: bad}), [4])
 
 
 class Refinement(unittest.TestCase):
@@ -294,8 +291,7 @@ class Result(unittest.TestCase):
         self.assertEqual(values["peak_concurrency"], 16)  # 190 < 0.97*205, 200 >= 198.85
         self.assertEqual(values["latency_cap_met"], 1)
         self.assertEqual((values["ttft_p50_ms_c4"], values["tpot_p50_ms_c4"]), (1, 5))
-        self.assertEqual((values["ttft_p50_ms_c16"], values["tpot_p50_ms_c16"]), (3, 7))
-        self.assertEqual(values["ttft_p90_ms_c16"], 6)
+        self.assertNotIn("ttft_p50_ms_c16", values)
         self.assertEqual(values["tpot_p90_ms_c4"], 10)
         self.assertEqual(
             {k: v for k, v in values.items() if k.startswith("tok_s_at_c")},
@@ -312,9 +308,9 @@ class Result(unittest.TestCase):
 
     def test_fixed_levels_are_required(self) -> None:
         with self.assertRaises(ValueError):
-            replay.build_result({4: row(1), 8: row(2)})
+            replay.build_result({8: row(2), 16: row(3)})
 
-    def test_hello_declares_exactly_five_objectives(self) -> None:
+    def test_hello_declares_exactly_three_objectives(self) -> None:
         metrics = replay.HELLO["metrics"]
         required = {n for n, spec in metrics.items() if spec.get("required", True)}
         self.assertEqual(
@@ -323,8 +319,6 @@ class Result(unittest.TestCase):
                 "output_tokens_per_s",
                 "ttft_p50_ms_c4",
                 "tpot_p50_ms_c4",
-                "ttft_p50_ms_c16",
-                "tpot_p50_ms_c16",
             },
         )
         optional = set(metrics) - required
@@ -334,8 +328,6 @@ class Result(unittest.TestCase):
                 "latency_cap_met",
                 "ttft_p90_ms_c4",
                 "tpot_p90_ms_c4",
-                "ttft_p90_ms_c16",
-                "tpot_p90_ms_c16",
             },
             optional,
         )
@@ -432,7 +424,7 @@ class DeadlinePriority(unittest.TestCase):
 
     STEP = 90 + 240 + 15  # per step, incl. cooldown; the first step has no real cooldown
 
-    def test_deadline_cuts_the_climb_above_16(self) -> None:
+    def test_deadline_cuts_the_climb(self) -> None:
         tputs = {c: 100.0 * (i + 1) for i, c in enumerate(replay.CONCURRENCIES)}
         calls, result = self.run_sweep(4 * self.STEP + 10, tputs)
         self.assertEqual(calls[:3], [4, 8, 16])
@@ -447,15 +439,8 @@ class DeadlinePriority(unittest.TestCase):
         self.assertEqual(calls, [4, 8, 16])
         self.assertIsInstance(result, dict)
 
-    def test_level_8_is_dropped_to_keep_16(self) -> None:
-        tputs = {4: 100, 8: 200, 16: 400}
-        calls, result = self.run_sweep(2 * self.STEP, tputs)
-        self.assertEqual(calls, [4, 16])
-        self.assertIsInstance(result, dict)
-        self.assertNotIn("tok_s_at_c8", result)
-
     def test_unfinishable_fixed_levels_are_an_error(self) -> None:
-        calls, result = self.run_sweep(2 * self.STEP - 1, {4: 100, 8: 200, 16: 400})
+        calls, result = self.run_sweep(self.STEP - 1, {4: 100, 8: 200, 16: 400})
         self.assertEqual(calls, [])
         self.assertIn("fixed levels", result)
 
@@ -933,7 +918,7 @@ class Defaults(unittest.TestCase):
 
     def test_sweep_parameters(self) -> None:
         self.assertEqual(replay.CONCURRENCIES, (4, 8, 16, 32, 64, 128, 256))
-        self.assertEqual(replay.FIXED_LEVELS, (4, 16))
+        self.assertEqual(replay.FIXED_LEVELS, (4,))
         self.assertEqual(
             (replay.WARMUP_SECS, replay.DURATION_SECS, replay.COOLDOWN_SECS), (60, 180, 15)
         )
