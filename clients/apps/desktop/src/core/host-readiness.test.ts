@@ -78,7 +78,12 @@ const unserved = (reason: UnservedReason, stateRefusal = StateRefusal.UNSPECIFIE
 
 const start: Intent = {
   case: 'startRun',
-  value: create(StartRunSchema, {repository: '/repo', task: 'demo', lead: {harness: 1}}),
+  value: create(StartRunSchema, {
+    repository: '/repo',
+    task: 'demo',
+    fanoutLimit: 1,
+    lead: {harness: 1},
+  }),
 };
 
 const dispatches = (h: {fake: {calls: () => readonly {target: {method: string}}[]}}) =>
