@@ -33,7 +33,7 @@ timeout_seconds = 300
 # per lane and 900 s of measurement. `python /task/bench.py profile` is its unscored smoke replay.
 [benchmark]
 command = ["python", "/task/bench.py", "benchmark"]
-timeout_seconds = 3600
+timeout_seconds = 10800
 result_protocol = 2
 
 [catalogue]
