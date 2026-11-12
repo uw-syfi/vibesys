@@ -1,5 +1,6 @@
 export {
   rawSkeleton,
+  representativeRun,
   runHeader,
   runMetric,
   SKELETON,
