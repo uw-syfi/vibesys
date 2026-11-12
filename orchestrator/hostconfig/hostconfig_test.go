@@ -10,6 +10,7 @@ import (
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/hostconfig"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/propcheck"
 )
 
 // What a host's environment is depends on its home, its configuration and the session facts alone.
@@ -26,7 +27,7 @@ func TestAHostsEnvironmentIsNotInherited(t *testing.T) {
 		}
 		env := hostconfig.Environ(config, "/home/me", func(name string) string { return junk[name] })
 		return slices.Equal(env, []string{"HOME=/home/me", "PATH=/tools/bin:/usr/bin"})
-	}, nil); err != nil {
+	}, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 	got := hostconfig.Environ(nil, "/home/me", func(name string) string {

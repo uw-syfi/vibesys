@@ -3,11 +3,14 @@ package daemon_test
 import (
 	"context"
 	"fmt"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
-	"math/rand"
 	"strings"
 	"testing"
 	"testing/quick"
+
+	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/propcheck"
+
+	"google.golang.org/protobuf/proto"
 
 	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
@@ -15,7 +18,6 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
-	"google.golang.org/protobuf/proto"
 )
 
 func startNamedRun(t *testing.T, r *daemontest.Rig, id string) core.RunID {
@@ -77,7 +79,7 @@ func TestEverySearchFrameFitsForGeneratedRunsAndViews(t *testing.T) {
 		defer re.Close()
 		return check(frames)
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 20, Rand: rand.New(rand.NewSource(8))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 20})); err != nil {
 		t.Fatal(err)
 	}
 }

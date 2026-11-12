@@ -13,6 +13,7 @@ import (
 	"testing/quick"
 
 	"github.com/uw-syfi/vibesys/cli/internal/archcheck"
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 )
 
 func goFile(imports ...string) string {
@@ -106,7 +107,7 @@ func TestLayoutNamesStayInsideFilestore(t *testing.T) {
 		inside := archcheck.Violations(map[string]string{"cli/internal/store/filestore/a.go": source})
 		return hasLayout(outside) && !hasLayout(inside)
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 	proto := archcheck.Violations(map[string]string{"proto/vibesys/cli/v1/a.proto": "// stored in events.jsonl\n"})
@@ -136,7 +137,7 @@ func TestStorePackagesImportNoHandEncoding(t *testing.T) {
 		outside := archcheck.Violations(map[string]string{"cli/internal/reading/a.go": goFile(encoding)})
 		return flagged == 1 && !slices.ContainsFunc(outside, func(line string) bool { return strings.Contains(line, "protojson of a message") })
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 	for _, file := range stores {
@@ -268,7 +269,7 @@ func TestRealClockStaysInsideTheClockPackage(t *testing.T) {
 		inside := archcheck.Violations(map[string]string{"cli/internal/clock/a.go": source})
 		return hasLine(outside, "the real clock is reached only through internal/clock") && !hasLine(inside, "real clock")
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -486,7 +487,7 @@ func TestApprovalWithoutADecisionStaysInTests(t *testing.T) {
 			!flagged(map[string]string{dir + "/a_test.go": source}, mint.name) &&
 			!flagged(map[string]string{"cli/internal/store/storetest/a.go": source}, mint.name)
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -579,7 +580,7 @@ func TestAScopeIsMadeOnlyByResolution(t *testing.T) {
 			!flagged(map[string]string{"cli/internal/app/scope.go": source}) &&
 			!flagged(map[string]string{"cli/internal/core/a.go": source})
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -740,7 +741,7 @@ func TestAnyProcPathInATestIsHeldToTheLinuxOnlyRule(t *testing.T) {
 		linuxOnly := archcheck.Violations(map[string]string{"cli/internal/x/a_test.go": "//go:build linux\n\n" + body})
 		named := archcheck.Violations(map[string]string{"cli/internal/x/a_linux_test.go": body})
 		return hasLine(everywhere, "names a path under /proc") && !hasLine(linuxOnly, "/proc") && !hasLine(named, "/proc")
-	}, nil)
+	}, propcheck.Config(t, nil))
 	if err != nil {
 		t.Fatal(err)
 	}

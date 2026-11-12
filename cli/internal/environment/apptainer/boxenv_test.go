@@ -9,6 +9,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer/clusterfake"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker/dockerfake"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv/fakeworld"
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 )
 
 // A process on a node runs with the image's own environment, as a container of the docker
@@ -72,7 +73,7 @@ func TestABoxEnvironmentIsTheImagesWithTheJobsOverIt(t *testing.T) {
 		}
 		return len(got) == len(want)
 	}
-	if err := quick.Check(prop, nil); err != nil {
+	if err := quick.Check(prop, propcheck.Config(t, nil)); err != nil {
 		t.Error(err)
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 	"github.com/uw-syfi/vibesys/cli/internal/upgrade"
 	"github.com/uw-syfi/vibesys/cli/internal/upgrade/upgradetest"
 )
@@ -315,7 +316,7 @@ func TestInstallRefusesAnyDamagedDownload(t *testing.T) {
 		}
 		return !t.Failed()
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 10}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 10})); err != nil {
 		t.Fatal(err)
 	}
 	damaged(t, nil)
@@ -446,7 +447,7 @@ func TestAScriptCutShortInstallsNothing(t *testing.T) {
 		_, err := os.Stat(dir)
 		return err != nil
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 25}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 25})); err != nil {
 		t.Fatal(err)
 	}
 }

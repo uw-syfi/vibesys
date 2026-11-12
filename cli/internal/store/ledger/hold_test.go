@@ -11,6 +11,7 @@ import (
 
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 	"github.com/uw-syfi/vibesys/cli/internal/store/ledger"
 )
 
@@ -116,7 +117,7 @@ func TestHoldCanonicalForm(t *testing.T) {
 			second, err := ledger.Hold("v", first)
 			return err == nil && reflect.DeepEqual(first, second)
 		}
-		if err := quick.Check(property, nil); err != nil {
+		if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 			t.Error(err)
 		}
 	})
@@ -183,7 +184,7 @@ func TestCheckName(t *testing.T) {
 		}
 		return s != "" && s != "." && s != ".." && !strings.ContainsAny(s, "/\\\x00:") && !strings.HasPrefix(s, ".") && len(s) <= 128
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Error(err)
 	}
 }
@@ -197,7 +198,7 @@ func TestJobIDsRoundTrip(t *testing.T) {
 		got, ok := ledger.JobNumber(ledger.JobIDFor(n))
 		return ok && got == n
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Error(err)
 	}
 	for _, bad := range []core.JobID{"", "j", "j0", "j01", "j-1", "J1", "1", "j1 ", "j+1", "jx", "j18446744073709551616"} {

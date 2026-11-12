@@ -17,14 +17,16 @@ import (
 	"time"
 
 	"buf.build/go/protovalidate"
+	"google.golang.org/protobuf/proto"
+
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/clock"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
 	"github.com/uw-syfi/vibesys/gateway/internal/machinestats"
 	"github.com/uw-syfi/vibesys/gateway/internal/machinestats/machinestatstest"
+	"github.com/uw-syfi/vibesys/gateway/internal/propcheck"
 	"github.com/uw-syfi/vibesys/gateway/internal/subscription"
 	"github.com/uw-syfi/vibesys/gateway/internal/subscription/subscriptiontest"
-	"google.golang.org/protobuf/proto"
 )
 
 var request = &apiv1.SubscribeRequest{Topic: &apiv1.SubscribeRequest_MachineStats{MachineStats: &apiv1.MachineStatsTopic{}}}
@@ -302,7 +304,7 @@ func TestAHostCallThatNeverReturnsIsBoundedToItsSectionAndOneCall(t *testing.T) 
 		})
 		return ok
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 200}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 200})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -518,7 +520,7 @@ func TestAnyToolOutputYieldsAValidSample(t *testing.T) {
 		})
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 3000}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 3000})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -549,7 +551,7 @@ func TestAnyToolOutputYieldsAValueThatFitsTheTopic(t *testing.T) {
 		})
 		return fits
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 300}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 300})); err != nil {
 		t.Fatal(err)
 	}
 	// The reported input, and a fleet that does fit and must not be refused.

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 	"github.com/uw-syfi/vibesys/cli/internal/shorttmp"
 )
 
@@ -36,7 +37,7 @@ func TestChooseIsShortWheneverAShortUsableDirectoryExists(t *testing.T) {
 		default:
 			return len(got) <= shorttmp.MaxLen && usable[got]
 		}
-	}, nil)
+	}, propcheck.Config(t, nil))
 	if err != nil {
 		t.Fatal(err)
 	}

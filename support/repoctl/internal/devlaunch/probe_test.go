@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+
+	"repoctl/internal/propcheck"
 )
 
 func TestParseProbeTable(t *testing.T) {
@@ -47,7 +49,7 @@ func TestParseProbeRoundTripsAnyGitState(t *testing.T) {
 		got, found, err := ParseProbe(out)
 		return err == nil && found && got.Head == strings.TrimSpace(head) && got.Branch == strings.TrimSpace(branch) && got.Dirty == (changed > 0)
 	}
-	if err := quick.Check(check, nil); err != nil {
+	if err := quick.Check(check, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }

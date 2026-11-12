@@ -23,6 +23,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/production"
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
@@ -165,7 +166,7 @@ func TestAnyUnknownCommandIsInvalidInput(t *testing.T) {
 		r := c.run(args...)
 		return r.code == exitInvalidInput && r.stdout == "" && r.stderr != ""
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 	if c.starter.Calls() != 0 {
@@ -692,7 +693,7 @@ func TestCommandSummaryIsOneBoundedLine(t *testing.T) {
 			utf8.RuneCountInString(got) <= commandWidth+len(" … (99999 more lines, full argv in --json)") &&
 			(got == joined) == fits
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 2000}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 2000})); err != nil {
 		t.Fatal(err)
 	}
 }

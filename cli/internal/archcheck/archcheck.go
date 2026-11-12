@@ -29,7 +29,7 @@ const (
 // testSupport lists the packages every test file may import: support that keeps a test binary's
 // environment from deciding its result, or lets it end the processes it started and tell that they
 // ended, and that no product code reaches.
-var testSupport = []string{"internal/shorttmp", "internal/proctable"}
+var testSupport = []string{"internal/shorttmp", "internal/proctable", "internal/propcheck"}
 
 // rules lists, for each package directory under cli/, the module packages it may import beyond
 // itself. An entry ending in "/" allows the whole subtree. A package with Go files and no entry
@@ -142,6 +142,9 @@ var rules = map[string][]string{
 	// Test support only: the machine's process table, read the way each system gives it, for a test
 	// that ends the processes it started and says that they ended.
 	"internal/proctable": {},
+	// Test support only: the seed of every quick.Check, fixed in a pull request and fresh in the
+	// nightly run.
+	"internal/propcheck": {},
 
 	// Storage.
 	"internal/store":           {"internal/alloc", "internal/core"},

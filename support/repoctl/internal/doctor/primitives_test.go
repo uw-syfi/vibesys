@@ -6,6 +6,7 @@ import (
 	"testing/quick"
 
 	"repoctl/internal/doctor"
+	"repoctl/internal/propcheck"
 )
 
 func TestParseVersion(t *testing.T) {
@@ -60,7 +61,7 @@ func TestCompareVersionsIsATotalOrder(t *testing.T) {
 		}
 		// Trailing zero fields do not change a version.
 		return doctor.CompareVersions(a, a+".0") == 0
-	}, nil)
+	}, propcheck.Config(t, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +97,7 @@ func TestQuoteRoundTripsAnyString(t *testing.T) {
 	err := quick.Check(func(s string) bool {
 		got, ok := unquote(doctor.Quote(s))
 		return ok && got == s
-	}, &quick.Config{MaxCount: 2000})
+	}, propcheck.Config(t, &quick.Config{MaxCount: 2000}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +166,7 @@ func TestMountInfoNeverNamesAMountThatDoesNotHoldThePath(t *testing.T) {
 			return got == "a_fs"
 		}
 		return got == "rootfs"
-	}, nil)
+	}, propcheck.Config(t, nil))
 	if err != nil {
 		t.Fatal(err)
 	}

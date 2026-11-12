@@ -2,14 +2,15 @@ package search_test
 
 import (
 	"fmt"
-	"math/rand"
 	"testing"
 	"testing/quick"
 
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/propcheck"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ours says the run "r" submitted a job.
@@ -47,7 +48,7 @@ func TestCapKeepsOnlyTheJobsOfTheRun(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{Rand: rand.New(rand.NewSource(9))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -72,7 +73,7 @@ func TestCapKeepsNewestAndTheirFacts(t *testing.T) {
 		}
 		return len(v.Facts) == len(facts)
 	}
-	if err := quick.Check(property, &quick.Config{Rand: rand.New(rand.NewSource(1))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -98,7 +99,7 @@ func TestJudgmentCapKeepsNewestMeasurements(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{Rand: rand.New(rand.NewSource(4))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }

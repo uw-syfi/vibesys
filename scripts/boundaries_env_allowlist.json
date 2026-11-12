@@ -16,6 +16,9 @@
   "cli/internal/production/production.go": {
     "XDG_CACHE_HOME": 1
   },
+  "cli/internal/propcheck/propcheck.go": {
+    "VIBESYS_PROPERTY_SEED": 1
+  },
   "cli/internal/runtimedir/runtimedir.go": {
     "XDG_RUNTIME_DIR": 1
   },
@@ -38,6 +41,9 @@
     "VIBESYS_PROPERTY_PATH": 2,
     "VIBESYS_PROPERTY_SEED": 3
   },
+  "gateway/internal/propcheck/propcheck.go": {
+    "VIBESYS_PROPERTY_SEED": 1
+  },
   "orchestrator/gatewayroot/gatewayroot.go": {
     "VIBESYS_HOME": 1
   },
@@ -54,6 +60,9 @@
   },
   "orchestrator/internal/localfs/localfs.go": {
     "XDG_STATE_HOME": 1
+  },
+  "orchestrator/internal/propcheck/propcheck.go": {
+    "VIBESYS_PROPERTY_SEED": 1
   },
   "sdk/vibesys-evaluator/go/evaluator/files.go": {
     "VIBESYS_ARTIFACTS_DIR": 1,

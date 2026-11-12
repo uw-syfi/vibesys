@@ -9,11 +9,13 @@ import (
 	"testing"
 	"testing/quick"
 
-	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
-	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/propcheck"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 )
 
 // mine says run "r" submitted a job, as a job the contract accepts.
@@ -125,7 +127,7 @@ func TestTheBestSoFarIsMarkedWhereAPointBeatsEveryEarlierOne(t *testing.T) {
 		}
 		return lastMarked == extreme && s.Tradeoff == nil
 	}
-	if err := quick.Check(property, &quick.Config{Rand: rand.New(rand.NewSource(3))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -207,7 +209,7 @@ func TestTheFrontierIsWhatNoMeasuredCandidateBeats(t *testing.T) {
 		}
 		return len(s.Series) == count
 	}
-	if err := quick.Check(property, &quick.Config{Rand: rand.New(rand.NewSource(4))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }

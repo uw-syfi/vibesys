@@ -8,6 +8,7 @@ import (
 
 	"repoctl/execution"
 	"repoctl/internal/doctor"
+	"repoctl/internal/propcheck"
 )
 
 // fakeInterpreters is a machine with python3 executables at given paths and versions.
@@ -48,7 +49,7 @@ func TestAnInterpreterThatMeetsTheMinimumIsChosenWhateverPathHoldsFirst(t *testi
 			return strings.Contains(err.Error(), "fix it") && strings.Contains(err.Error(), "3.12")
 		}
 		return doctor.CompareVersions(host.versions[got], "3.12") >= 0
-	}, nil)
+	}, propcheck.Config(t, nil))
 	if err != nil {
 		t.Fatal(err)
 	}

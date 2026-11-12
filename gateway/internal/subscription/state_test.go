@@ -10,9 +10,11 @@ import (
 	"testing"
 	"testing/quick"
 
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
-	"google.golang.org/protobuf/types/known/timestamppb"
+	"github.com/uw-syfi/vibesys/gateway/internal/propcheck"
 )
 
 const (
@@ -316,7 +318,7 @@ func TestDeliveredStateConvergesToTheProducersUnderAnyInterleaving(t *testing.T)
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 2000}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 2000})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -352,7 +354,7 @@ func TestAFlushSendsExactlyWhatWasOwedAndNoMoreThanTheKeyBoundAllows(t *testing.
 		}
 		return true
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 2000}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 2000})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -374,7 +376,7 @@ func TestWritesOutrunningAReaderCostOneValuePerKey(t *testing.T) {
 		}
 		return sent <= modelKeys
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -470,7 +472,7 @@ func TestEveryWaitingInstanceStartsOrFailsAndAStuckProducerIsNeverOverlapped(t *
 		}
 		return len(m.alive) <= 1
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 2000}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 2000})); err != nil {
 		t.Fatal(err)
 	}
 }

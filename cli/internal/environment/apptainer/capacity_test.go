@@ -12,6 +12,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer/clusterfake"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv/fakeworld"
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 )
 
 func capacityOf(t *testing.T, f apptainer.PartitionFacts, q apptainer.CapacityQuery) (names []string, usable map[string]bool) {
@@ -137,7 +138,7 @@ func TestCapacitySlotsAreNeverMoreFreeThanThereAre(t *testing.T) {
 		cluster.SetPartition(apptainer.PartitionFacts{NodesTotal: total, NodesIdle: idle, PendingJobs: pending})
 		c, _, err := apptainer.Capacity(context.Background(), apptainer.CapacityQuery{Cluster: cluster.Connect(), Placement: "p"})
 		return err == nil && c.GetSlotsFree() <= c.GetSlotsTotal() && c.GetSlurm().GetNodesIdle() <= c.GetSlurm().GetNodesTotal()
-	}, nil); err != nil {
+	}, propcheck.Config(t, nil)); err != nil {
 		t.Error(err)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"testing/quick"
 
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 )
 
 // entry is a file of a tar archive, as the tests compare them.
@@ -101,7 +102,7 @@ func TestTheRootFileSystemIsTheExportAsEnrootRunsIt(t *testing.T) {
 			return false
 		}
 		return true
-	}, nil)
+	}, propcheck.Config(t, nil))
 	if err != nil {
 		t.Error(err)
 	}

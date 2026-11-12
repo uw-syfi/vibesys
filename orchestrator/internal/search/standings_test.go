@@ -8,6 +8,7 @@ import (
 
 	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/propcheck"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 )
 
@@ -178,7 +179,7 @@ func TestStandingsNameEachObjectiveOnceWithFiniteValues(t *testing.T) {
 		}
 		return len(got) <= 64
 	}
-	if err := quick.Check(prop, nil); err != nil {
+	if err := quick.Check(prop, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }

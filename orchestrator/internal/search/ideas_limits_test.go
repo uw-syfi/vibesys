@@ -7,10 +7,12 @@ import (
 	"testing"
 	"testing/quick"
 
+	"google.golang.org/protobuf/proto"
+
 	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/propcheck"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
-	"google.golang.org/protobuf/proto"
 )
 
 // A run with no id matches no plan: a person's plan, which records no run, is not in it.
@@ -70,7 +72,7 @@ func TestAPlanAndItsIdeaAreCutTogetherAndNoMoreThanTheBudgetAsks(t *testing.T) {
 		}
 		return proto.Size(s) > search.MaxStateBytes-largest-2*proto.Size(s.Ideas[0])-16
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 30, Rand: rand.New(rand.NewSource(41))}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 30})); err != nil {
 		t.Fatal(err)
 	}
 }

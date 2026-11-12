@@ -17,6 +17,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv/fakeworld"
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 )
 
 const idle = 30 * time.Minute
@@ -158,7 +159,7 @@ func TestNoTwoContainersClaimOneAllocation(t *testing.T) {
 			}
 		}
 		return len(cluster.Running()) == 0 && len(cluster.Claimed()) == 0
-	}, &quick.Config{MaxCount: 30})
+	}, propcheck.Config(t, &quick.Config{MaxCount: 30}))
 	if err != nil {
 		t.Error(err)
 	}

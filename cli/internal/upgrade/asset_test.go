@@ -9,6 +9,7 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 	"github.com/uw-syfi/vibesys/cli/internal/upgrade"
 )
 
@@ -35,7 +36,7 @@ func TestAnyOtherPlatformIsUnsupported(t *testing.T) {
 		_, err := upgrade.AssetName(upgrade.Platform{OS: goos, Arch: arch})
 		return errors.Is(err, upgrade.ErrUnsupportedPlatform)
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 	for _, platform := range []upgrade.Platform{{OS: "windows", Arch: "amd64"}, {OS: "linux", Arch: "riscv64"}, {}} {
@@ -88,7 +89,7 @@ func TestParseChecksumsReadsWhatSha256sumWrites(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(property, nil); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }

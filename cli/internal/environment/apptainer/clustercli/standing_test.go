@@ -19,6 +19,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer/clustercli"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 )
 
 func golden(t *testing.T, name string) string {
@@ -94,7 +95,7 @@ func TestParseDetailTakesMalformedAnswersForNoAnswer(t *testing.T) {
 	if err := quick.Check(func(s string) bool {
 		d, err := clustercli.ParseDetail(s)
 		return err != nil || d.Phase == apptainer.Ended && strings.Contains(s, "squeue") || strings.Contains(s, "squeue 0")
-	}, nil); err != nil {
+	}, propcheck.Config(t, nil)); err != nil {
 		t.Error(err)
 	}
 }
@@ -285,7 +286,7 @@ func TestExpandHosts(t *testing.T) {
 	if err := quick.Check(func(s string) bool {
 		got, _ := clustercli.ExpandHosts(s)
 		return len(got) <= clustercli.MaxHosts+1
-	}, nil); err != nil {
+	}, propcheck.Config(t, nil)); err != nil {
 		t.Error(err)
 	}
 }

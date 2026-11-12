@@ -6,6 +6,7 @@ import (
 	"testing/quick"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/propcheck"
 )
 
 // gitRefOK states the rules git applies to a branch name, as far as a name made of the characters
@@ -41,7 +42,7 @@ func TestResultBranchIsAValidRefForExactlyTheTasksThatCanHaveOne(t *testing.T) {
 		}
 		return err == nil && got == core.ResultBranchPrefix+task && gitRefOK(got)
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: properties}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: properties})); err != nil {
 		t.Fatal(err)
 	}
 }

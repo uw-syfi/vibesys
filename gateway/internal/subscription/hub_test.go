@@ -15,14 +15,16 @@ import (
 	"time"
 
 	"buf.build/go/protovalidate"
-	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
-	"github.com/uw-syfi/vibesys/gateway/internal/clock"
-	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
-	"github.com/uw-syfi/vibesys/gateway/internal/subscription"
-	"github.com/uw-syfi/vibesys/gateway/internal/subscription/subscriptiontest"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
+	"github.com/uw-syfi/vibesys/gateway/internal/clock"
+	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
+	"github.com/uw-syfi/vibesys/gateway/internal/propcheck"
+	"github.com/uw-syfi/vibesys/gateway/internal/subscription"
+	"github.com/uw-syfi/vibesys/gateway/internal/subscription/subscriptiontest"
 )
 
 type stats = *apiv1.MachineStats
@@ -175,7 +177,7 @@ func TestAnyFailureDetailBecomesAFrameThatMarshals(t *testing.T) {
 	property := func(detail []byte, repeat uint8) bool {
 		return failsOverTheWire(t, strings.Repeat(string(detail), int(repeat)+1))
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 40}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 40})); err != nil {
 		t.Fatal(err)
 	}
 	// The reported inputs: a byte no UTF-8 string holds, a detail over the schema's
@@ -253,7 +255,7 @@ func TestAValueThatCannotBeMarshalledIsATypedFailureAndNeverRetained(t *testing.
 		})
 		return clean.Load()
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 100})); err != nil {
 		t.Fatal(err)
 	}
 	// The reported input: a name the schema's rules accept and no wire carries.
@@ -283,7 +285,7 @@ func TestAnyFailureCodeBecomesAValidFrame(t *testing.T) {
 		})
 		return valid.Load()
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+	if err := quick.Check(property, propcheck.Config(t, &quick.Config{MaxCount: 100})); err != nil {
 		t.Fatal(err)
 	}
 	for _, code := range []int32{0, 99, -1} {

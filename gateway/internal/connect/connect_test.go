@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
+	"github.com/uw-syfi/vibesys/gateway/internal/propcheck"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/hostlock"
 )
@@ -292,7 +293,7 @@ func TestDialEndsInOneWayForEveryReportSequence(t *testing.T) {
 			return false
 		}
 		return true
-	}, nil); err != nil {
+	}, propcheck.Config(t, nil)); err != nil {
 		t.Fatal(err)
 	}
 }
