@@ -19,8 +19,10 @@ from vs_evaluator_protocol.api import Measurement, parse_records, read_measureme
 
 ROOT = Path(__file__).parents[2]
 EVALUATOR = ROOT / "resources/evaluators/agentx/agentx_eval.py"
-PROJECT = ROOT / "examples/model-serving/qwen3.6-35b-a3b"
-TASK = "mi2104x-agentx"
+# The Flint tasks still run the evaluator package (task schema 0.1); the Qwen3.6 AgentX tasks
+# replay the same recipe from their own task image (tests/examples/test_qwen36_amd_agentx.py).
+PROJECT = ROOT / "examples/model-serving/flint"
+TASK = "mi2104x"
 # run_path loads the standalone public CLI without modifying its globals or patching modules.
 API = SimpleNamespace(**runpy.run_path(str(EVALUATOR)))
 
@@ -65,7 +67,7 @@ class FakeProfileRunner:
             (run_dir / "profile_export_aiperf.json").write_text(json.dumps(self.summary))
 
 
-def test_task_matches_the_five_axis_qwen_frontier() -> None:
+def test_task_matches_the_five_axis_frontier() -> None:
     bundle = load_example_task(PROJECT, TASK)
     assert bundle.reference_path is not None
     metadata = json.loads((bundle.reference_path / "meta.json").read_text())

@@ -1,13 +1,17 @@
 # Qwen3.6 TraceLab serving on 1 AMD MI300X GPU
 
-Build an OpenAI-compatible serving system for `Qwen/Qwen3.6-35B-A3B` on
-**1 AMD MI300X GPU**. This project supplies no candidate engine or validated
-AMD baseline. Implementing and optimizing the ROCm serving path is the task.
-The candidate lives in the project root, outside trusted `.vibesys/` inputs.
+Build an OpenAI-compatible serving system for `Qwen/Qwen3.6-35B-A3B` on **1 AMD
+MI300X GPU**. The candidate lives in the project root, outside trusted
+`.vibesys/` inputs.
 
-Keep BF16 weights on the single allocated GPU. Optimize fused expert kernels,
-continuous batching, prefix caching and recurrent-state management without
-cross-GPU communication.
+The project root holds a baseline engine, `engine/`, started by the project's
+documented service command. It runs the BF16
+checkpoint with Transformers, sharded over every visible GPU, prefilling one
+request at a time and decoding running requests as one batch, with a snapshot
+prefix cache. It meets the service contract below but is
+unoptimized and is not a validated performance baseline. Making the ROCm serving
+path fast, by changing or replacing any part of it, is the task. Keep that
+service command working.
 
 ## Model and hardware contract
 
@@ -21,11 +25,11 @@ skip experts, or change precision to improve the measurement.
 
 Serve the text-only coding workload; no vision throughput is scored. Preserve
 all text-model weights and the checkpoint's tokenizer/template semantics.
-PyTorch and Transformers may supply weight loading and reference operations;
-the candidate must own its serving path rather than proxy an existing server.
+PyTorch and Transformers may supply weight loading and model operations, as
+they do in the baseline; the candidate must own its serving path rather than
+proxy an existing server.
 Do not use extra GPUs, another machine, or a hosted model. Host-side cache
 offload is allowed within the allocation, with its costs inside measurement.
-See [the project README](../../../README.md) for AMD environment setup.
 
 ## Correctness and service interface
 
@@ -36,12 +40,19 @@ checker's short chat probes, using a non-thinking default so answers fit their
 small output budgets. Honor explicit template options, preserve supplied
 reasoning/tool history, and make temperature-zero completions repeatable.
 
-Run the configured service checker before benchmarking. It is shared with the
-existing H100 task and checks sentinel echo, known answers, and greedy
-repeatability. These are behavioral probes, **not numerical parity or proof of
-checkpoint identity**. Correct hybrid state and routing remain requirements;
-a passing behavioral probe does not authorize altered model execution.
-No full-size AMD run has validated this example yet.
+The configured service checker is shared by every task of this project and
+checks sentinel echo, known answers, and greedy repeatability. These are
+behavioral probes, **not numerical parity or proof of checkpoint identity**.
+Correct hybrid state and routing remain requirements; a passing behavioral probe
+does not authorize altered model execution. No full-size AMD run has validated
+this example yet.
+
+The server runs on the one MI300X GPU, reads the pinned checkpoint from the
+operator's read-only Hugging Face cache offline, listens on `127.0.0.1`, keeps
+the full 262,144-token context, and answers `GET /health` with a 2xx status once
+it can serve requests, within 30 minutes of starting. The image it runs in and
+everything it builds from are candidate code. The checker and the replay reach
+the server only over HTTP.
 
 ## TraceLab recorded workload and objectives
 
@@ -65,4 +76,4 @@ kernels; it is a separate frontier from the 15-minute AgentX task.
 Optimize output tokens/s (maximize), TTFT p50/p90 and TPOT p50/p90 in milliseconds
 (minimize), with 3% relative noise tolerance. A failed round, missing metric,
 wrong token count or incomplete replay fails measurement. No dry-run result is
-accepted. See [the TraceLab adapter](../../shared/tracelab/README.md).
+accepted.

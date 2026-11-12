@@ -233,13 +233,28 @@ def test_this_app_refuses_every_cli_task_naming_vibesys_cli(entry: ExampleEntry)
                 load_input_manifest(task.manifest_path)
 
 
+_WAYS = frozenset({"max", "min"})
+
+
 @pytest.mark.parametrize(
     "entry", [pytest.param(e, id=e.path) for e in ENTRIES if not e.external_repo]
 )
 def test_every_task_declares_which_way_its_objective_improves(entry: ExampleEntry) -> None:
-    """The run CLI consumes these metric axes and their validated max/min directions."""
+    """The run CLI consumes these metric axes and their validated max/min directions.
+
+    A vibesys-cli task's objectives.toml follows vibesys-cli's schema, which also takes a unit
+    and a noise floor per objective that this app's reader refuses; there, only the axes and
+    their directions are checked.
+    """
     for task in Project.open(example_root(entry)).discover_tasks():
-        assert load_objectives(task.manifest_path.parent).objective, (
+        root = task.manifest_path.parent
+        if is_cli_task(task.manifest_path):
+            path = root / "objectives.toml"
+            declared = tomllib.loads(path.read_text()).get("objective", []) if path.exists() else []
+            objectives = [o for o in declared if o.get("name") and o.get("direction") in _WAYS]
+        else:
+            objectives = list(load_objectives(root).objective)
+        assert objectives, (
             f"{entry.path} task={task.name.value}: declare an [[objective]] (name, direction)"
         )
 

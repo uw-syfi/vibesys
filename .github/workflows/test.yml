@@ -843,7 +843,8 @@ jobs:
   # parallel on one runner would compete for its two cores. The shard count is
   # the length of the list (`strategy.job-total`). It needs no Go, root
   # `uv sync`, or external repositories; the CPU-torch environment is the
-  # `cpu_check` project's own and takes ~3 s to build.
+  # `cpu_check` project's own and takes ~3 s to build. Shard 1 also runs the
+  # qwen3.6-35b-a3b baseline engine's ~20 s check, which is too short to split.
   validate-examples-cpu-check:
     needs: changes
     if: github.event_name != 'pull_request' && needs.changes.outputs.examples == 'true'
@@ -870,7 +871,9 @@ jobs:
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
-          cache-dependency-glob: examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/default/cpu_check/uv.lock
+          cache-dependency-glob: |
+            examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/default/cpu_check/uv.lock
+            examples/model-serving/qwen3.6-35b-a3b/.vibesys/shared/cpu_check/uv.lock
 
       - name: Set up Python
         run: uv python install 3.12
@@ -879,6 +882,10 @@ jobs:
         env:
           CPU_CHECK_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
         run: ./support/repoctl/repoctl run-checks --group examples_cpu_check_shard
+
+      - name: Run the Qwen3.6 baseline engine check
+        if: matrix.shard == 1
+        run: ./support/repoctl/repoctl run-checks --group examples_qwen36_cpu_check
 
   # Builds the example Dockerfiles a change selects, one matrix leg per Dockerfile directory (its
   # build context): a Dockerfile, or a file next to it, changing builds that Dockerfile and nothing

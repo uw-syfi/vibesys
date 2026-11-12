@@ -1,0 +1,5 @@
+# The build context of Dockerfile.rocm (the candidate's image for the AMD AgentX tasks) is the
+# project root; it needs only the engine's pinned dependencies. The engine's code is run from
+# the checkout, so editing it does not rebuild the image.
+*
+!requirements-agentx.txt

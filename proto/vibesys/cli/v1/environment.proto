@@ -50,6 +50,7 @@ enum AcceleratorModel {
   ACCELERATOR_MODEL_A100 = 8;
   ACCELERATOR_MODEL_TRAINIUM2 = 9;
   ACCELERATOR_MODEL_APPLE_SILICON = 10;
+  ACCELERATOR_MODEL_MI250 = 11;
   ACCELERATOR_MODEL_OTHER = 99;
 }
 
@@ -64,7 +65,7 @@ message AcceleratorNeed {
   option (buf.validate.message).cel = {
     id: "accelerator_need.model_of_vendor"
     message: "the model is not a device of the vendor (a CPU need names no model)"
-    expression: "this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false"
+    expression: "this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4, 11] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false"
   };
 
   AcceleratorVendor vendor = 1 [(buf.validate.field).enum = {
@@ -84,7 +85,7 @@ message AcceleratorOffer {
   option (buf.validate.message).cel = {
     id: "accelerator_offer.model_of_vendor"
     message: "the model is not a device of the vendor, or is missing"
-    expression: "this.model != 0 && (this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false)"
+    expression: "this.model != 0 && (this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4, 11] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false)"
   };
 
   AcceleratorVendor vendor = 1 [(buf.validate.field).enum = {

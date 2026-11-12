@@ -1,21 +1,42 @@
-version = "0.1"
+# Qwen3.6-35B-A3B on 1 AMD MI300X GPU, TraceLab recorded-session replay: a task of two images
+# for vibesys-cli (schema 0.2). The candidate's server runs in the image Dockerfile.rocm builds
+# from the candidate's commit, with the task's AMD GPUs; this directory is the task image
+# (Dockerfile here), which runs the checker and the replay against the server at
+# VIBESYS_SERVICE_URL.
+version = "0.2"
 backends = ["rocm"]
 
 [agent]
 domain = "llm-serving"
 interface = "service"
 
+# The operator provides the AMD GPUs, and the Hugging Face cache as the read-only mount named
+# "hf" (/vibesys/mounts/hf), which both images read offline: Qwen/Qwen3.6-35B-A3B at the pinned
+# revision (weights for the server, tokenizer for the replay).
+[environment]
+needs = ["rocm", "mounts"]
+
+[candidate]
+dockerfile = "Dockerfile.rocm"
+context = "."
+serve = ["python", "-m", "engine.server", "--host", "127.0.0.1", "--port", "${PORT}"]
+ready = "/health"
+# Loading about 70 GB of BF16 weights from the shared file system onto the GPU.
+startup_timeout_seconds = 1800
+
+# The shared service checker (sentinel echo, known answers, greedy repeatability).
 [accuracy]
-command = ["uv", "run", "python", "-I", "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/checker.py"]
+command = ["sh", "-c", "exec python3 -I /task/checker.py --url \"$VIBESYS_SERVICE_URL\""]
 timeout_seconds = 300
 
-[evaluator]
-name = "vibesys-evaluator-request-factory"
-version = "0.1.0"
-
+# All 303 rounds of the recorded sample, saturated at eight active sessions, through the
+# session_runner of the earlier `request-factory-adapter` entrypoint's pinned Request Factory.
+# vibesys-cli appends --vs-output FILE.
 [benchmark]
-entrypoint = "request-factory-adapter"
-args = ["${PROJECT_ROOT}/.vibesys/shared/tracelab/replay.py"]
+command = [
+  "python", "-I", "/task/tracelab/replay.py",
+  "--request-factory-engine", "/usr/local/bin/session_runner",
+]
 timeout_seconds = 3600
 result_protocol = 2
 

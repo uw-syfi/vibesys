@@ -19,6 +19,7 @@ var pairs = []struct {
 	model  cli.AcceleratorModel
 }{
 	{cli.AcceleratorVendor_ACCELERATOR_VENDOR_AMD, cli.AcceleratorModel_ACCELERATOR_MODEL_MI210},
+	{cli.AcceleratorVendor_ACCELERATOR_VENDOR_AMD, cli.AcceleratorModel_ACCELERATOR_MODEL_MI250},
 	{cli.AcceleratorVendor_ACCELERATOR_VENDOR_AMD, cli.AcceleratorModel_ACCELERATOR_MODEL_MI300A},
 	{cli.AcceleratorVendor_ACCELERATOR_VENDOR_AMD, cli.AcceleratorModel_ACCELERATOR_MODEL_MI300X},
 	{cli.AcceleratorVendor_ACCELERATOR_VENDOR_AMD, cli.AcceleratorModel_ACCELERATOR_MODEL_MI325X},

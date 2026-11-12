@@ -1,0 +1,52 @@
+# Qwen3.6-35B-A3B on one MI250 node (8 GCDs), TraceLab concurrency sweep: fixed-time windows of
+# real TraceLab traffic at rising concurrency until the engine saturates. A task of two images for
+# vibesys-cli (schema 0.2). The candidate's server runs in the image Dockerfile.rocm builds from
+# the candidate's commit, with the task's AMD GPUs; this directory is the task image (Dockerfile
+# here), which runs the checker and the replay against the server at VIBESYS_SERVICE_URL.
+version = "0.2"
+backends = ["rocm"]
+
+[agent]
+domain = "llm-serving"
+interface = "service"
+
+# The operator provides the AMD GPUs, and the Hugging Face cache as the read-only mount named
+# "hf" (/vibesys/mounts/hf), which both images read offline: Qwen/Qwen3.6-35B-A3B at the pinned
+# revision (weights for the server, tokenizer for the replay).
+[environment]
+needs = ["rocm", "mounts"]
+
+[candidate]
+dockerfile = "Dockerfile.rocm"
+context = "."
+serve = ["python", "-m", "engine.server", "--host", "127.0.0.1", "--port", "${PORT}"]
+ready = "/health"
+# Loading about 70 GB of BF16 weights from the shared file system onto the GPUs.
+startup_timeout_seconds = 1800
+
+# The shared service checker (sentinel echo, known answers, greedy repeatability).
+[accuracy]
+command = ["sh", "-c", "exec python3 -I /task/checker.py --url \"$VIBESYS_SERVICE_URL\""]
+timeout_seconds = 300
+
+[benchmark]
+# vibesys-cli appends --vs-output FILE. The sweep enforces its own overall deadline inside the
+# 3600 s timeout (tracelab/replay.py).
+command = [
+  "python", "-I", "/task/tracelab/replay.py",
+  "--request-factory-engine", "/usr/local/bin/session_runner",
+]
+timeout_seconds = 3600
+result_protocol = 2
+
+[catalogue]
+domain = "llm-serving"
+
+[catalogue.hardware]
+accelerator = "AMD MI250"
+count = 8
+vendor = "amd"
+
+[catalogue.model]
+name = "Qwen3.6 35B A3B"
+maker = "qwen"

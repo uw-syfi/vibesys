@@ -1,0 +1,75 @@
+{
+  "counts": {
+    "appended_tokens": 309352839,
+    "distinct_source_sessions": 1670,
+    "distinct_users": 35,
+    "folded_first_rounds": 1906,
+    "folded_prefix_tokens": 102853352,
+    "folded_rounds": 2024,
+    "major_compaction_rounds": 0,
+    "output_tokens": 24018649,
+    "rounds": 42439,
+    "sessions": 2000,
+    "source_rounds_dropped_before_start": 39395
+  },
+  "input": {
+    "path": "<data>/syfi_coding_trace.jsonl.gz",
+    "sha256": "11ce51ec0a25e3d1d95b025bca2f7d1647e47571eb7cc968acd5fc64d4b4fb65"
+  },
+  "outputs": {
+    "canonical_csv": "<data>/trace-dev-v2/trace.csv",
+    "canonical_csv_bytes": 3089833,
+    "canonical_csv_sha256": "a2546a138e9fcb48e583faeb696b2fe1e748b6a5524b7c1bcae1183f859d66bc",
+    "session_rounds_csv": "<data>/trace-dev-v2/session_rounds_v2.csv",
+    "session_rounds_csv_sha256": "78a815aedbbe28d32f0e12c87d5614e6729a60a8e8b2e97ee19e3f5ff622a796",
+    "tracegen_manifest": "<data>/trace-dev-v2/trace.manifest.json",
+    "tracegen_plan": "<data>/trace-dev-v2/trace.plan.json"
+  },
+  "parameters": {
+    "max_context": 262144,
+    "max_tool_wait_ms": 60000,
+    "sampling": "with replacement over context-eligible sessions; session grouping by session_id; start = min(int(u*n_rounds), n_rounds-1), u~Uniform[start_min,start_max]",
+    "seed": 0,
+    "sessions": 2000,
+    "start_max": 0.75,
+    "start_min": 0.25,
+    "tracegen": "<data>/rf-target/release/tracegen",
+    "tracegen_args": [
+      "--source",
+      "<data>/trace-dev-v2/session_rounds_v2.csv",
+      "--source-schema",
+      "session-rounds-v2",
+      "--out",
+      "<data>/trace-dev-v2/trace.csv",
+      "--seed",
+      "0",
+      "--session-order",
+      "source"
+    ]
+  },
+  "peak_context": {
+    "max": 260791,
+    "p50": 65359,
+    "p90": 169258
+  },
+  "peak_context_note": "max over rounds of prefix_len+input_len+output_len in the emitted canonical CSV",
+  "session_rounds": {
+    "max": 3872,
+    "p50": 7,
+    "p90": 39
+  },
+  "source_pool": {
+    "rounds_total": 665453,
+    "sessions_dropped_over_max_context": 367,
+    "sessions_eligible": 7691,
+    "sessions_total": 8058
+  },
+  "split": {
+    "eligible_sessions_excluded": 1780,
+    "eligible_sessions_on_this_side": 5911,
+    "other_side_exists": true,
+    "side": "dev",
+    "users_excluded": 14,
+    "users_on_this_side": 38
+  }
+}

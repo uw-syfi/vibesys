@@ -1,0 +1,29 @@
+# Three objectives: the peak output throughput over the TraceLab sweep's steps that meet the
+# latency cap (TPOT p50 <= 100 ms and TTFT p50 <= 10,000 ms), and TTFT p50 / TPOT p50 at the
+# fixed level of 4 concurrent sessions. Latency under heavy load is held by the cap. Tail
+# percentiles, the peak concurrency and the per-step throughputs are reported but are not
+# objectives.
+#
+# Noise floors from the run-to-run spread of five samples of an SGLang-based engine on
+# 4x MI210 (coefficients of variation about 9%, 4% and 2%), with margin.
+[[objective]]
+name = "output_tokens_per_s"
+direction = "max"
+unit = "tokens/s"
+relative_noise = 0.10
+
+[[objective]]
+name = "ttft_p50_ms_c4"
+direction = "min"
+unit = "ms"
+relative_noise = 0.05
+
+[[objective]]
+name = "tpot_p50_ms_c4"
+direction = "min"
+unit = "ms"
+relative_noise = 0.03
+
+# The floor of any objective that declares none (all three declare their own).
+[pareto]
+relative_noise = 0.03

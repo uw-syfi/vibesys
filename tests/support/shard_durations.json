@@ -870,7 +870,6 @@
  "tests/examples/test_qwen35_mi210_bundle.py": 0.33,
  "tests/examples/test_qwen35_mi210_seed_engine.py": 0.01,
  "tests/examples/test_qwen35_mi210_warmup_stop.py": 0.03,
- "tests/examples/test_qwen36_35b_request_factory_benchmark.py": 0.02,
  "tests/examples/test_qwen36_amd_agentx.py": 0.2,
  "tests/examples/test_qwen397b_request_factory_benchmark.py": 0.03,
  "tests/examples/test_verus_queue_task.py": 1.42,

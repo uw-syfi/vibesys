@@ -324,6 +324,22 @@ commands = [
   ["uv", "run", "--locked", "--directory", "examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/default", "--project", "cpu_check", "python", "-m", "pytest", "cpu_check", "-v", "--durations=0"],
 ]
 
+# The qwen3.6-35b-a3b baseline engine's HTTP-contract check: the engine on tiny random checkpoints,
+# in its own CPU-torch uv project, about 20 s. CI runs it once, beside shard 1 of the check above.
+[[check_groups]]
+name = "examples_qwen36_cpu_check"
+trigger_job = "examples"
+include_in_test = true
+local_paths = ["examples/model-serving/qwen3.6-35b-a3b"]
+language = "python"
+directory = "."
+timeout_seconds = 600
+# Outside the example's tree, for the reason given for the check above.
+env = { UV_PROJECT_ENVIRONMENT = "{repo_root}/artifacts/qwen36-cpu-check-venv" }
+commands = [
+  ["uv", "run", "--locked", "--project", "examples/model-serving/qwen3.6-35b-a3b/.vibesys/shared/cpu_check", "python", "-m", "pytest", "examples/model-serving/qwen3.6-35b-a3b/.vibesys/shared/cpu_check", "-v", "--durations=0"],
+]
+
 # Builds the example Dockerfiles a change selects (the `dockerfile_contexts` collection), one build per
 # directory and nothing else: no benchmark, no secret, no GPU. CI runs one matrix leg per directory
 # (`example-dockerfiles` in test.yml); locally the builds take minutes each and need Docker.

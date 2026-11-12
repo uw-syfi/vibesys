@@ -26,7 +26,7 @@ func TestPlacementViewsOfAnyReadingAreValid(t *testing.T) {
 	unknowns := []core.OffersUnknownReason{core.OffersKnown, core.OffersUnreadable, core.OffersTimedOut, core.OffersNotProbeable}
 	models := map[core.AcceleratorVendor][]core.AcceleratorModel{
 		core.VendorNVIDIA: {core.ModelOther, core.ModelH100, core.ModelB200, core.ModelL4, core.ModelA100},
-		core.VendorAMD:    {core.ModelOther, core.ModelMI210, core.ModelMI300A, core.ModelMI300X, core.ModelMI325X},
+		core.VendorAMD:    {core.ModelOther, core.ModelMI210, core.ModelMI250, core.ModelMI300A, core.ModelMI300X, core.ModelMI325X},
 	}
 	vendors := []core.AcceleratorVendor{core.VendorNVIDIA, core.VendorAMD}
 	reaches := []core.Reach{core.ReachReachable, core.ReachUnreachable, core.ReachNotProbed}

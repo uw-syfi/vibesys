@@ -32,6 +32,7 @@ var wireModels = map[core.AcceleratorModel]cliv1.AcceleratorModel{
 	core.ModelL4:           cliv1.AcceleratorModel_ACCELERATOR_MODEL_L4,
 	core.ModelA100:         cliv1.AcceleratorModel_ACCELERATOR_MODEL_A100,
 	core.ModelMI210:        cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI210,
+	core.ModelMI250:        cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI250,
 	core.ModelMI300A:       cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI300A,
 	core.ModelMI300X:       cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI300X,
 	core.ModelMI325X:       cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI325X,

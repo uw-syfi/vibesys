@@ -2,22 +2,27 @@
 [[objective]]
 name = "output_tokens_per_s"
 direction = "max"
+unit = "tok/s"
 
 [[objective]]
 name = "ttft_p50_ms"
 direction = "min"
+unit = "ms"
 
 [[objective]]
 name = "ttft_p90_ms"
 direction = "min"
+unit = "ms"
 
 [[objective]]
 name = "tpot_p50_ms"
 direction = "min"
+unit = "ms"
 
 [[objective]]
 name = "tpot_p90_ms"
 direction = "min"
+unit = "ms"
 
 [pareto]
 relative_noise = 0.03

@@ -100,7 +100,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			paths:       []string{"libs/vs-runtime/src/vs_runtime/_run_environment.py"},
 			wantCI:      []string{"examples", "python", "real_tiers"},
 			wantGroups:  []string{"always_on", "examples_native_evaluator_tests", "examples_tests", "python_architecture", "python_guards", "python_quality", "python_tests", "python_types"},
-			wantSkipped: []string{"examples_cpu_check_shard", "minimal_container_tests", "slurm_cluster_tests"},
+			wantSkipped: []string{"examples_cpu_check_shard", "examples_qwen36_cpu_check", "minimal_container_tests", "slurm_cluster_tests"},
 			wantTargets: -1,
 		},
 		{
@@ -108,7 +108,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			paths:       []string{"examples/microservices/kvstore/README.md"},
 			wantCI:      []string{"examples", "python"},
 			wantGroups:  []string{"always_on", "examples_native_evaluator_tests", "examples_tests", "python_architecture", "python_guards", "python_quality", "python_tests", "python_types"},
-			wantSkipped: []string{"examples_cpu_check_shard"},
+			wantSkipped: []string{"examples_cpu_check_shard", "examples_qwen36_cpu_check"},
 			wantTargets: -1,
 		},
 		{
@@ -116,7 +116,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			paths:       []string{"examples/database/kv-store/.vibesys/tasks/default/Dockerfile"},
 			wantCI:      []string{"dockerfiles", "examples", "python"},
 			wantGroups:  []string{"always_on", "examples_native_evaluator_tests", "examples_tests", "python_architecture", "python_guards", "python_quality", "python_tests", "python_types"},
-			wantSkipped: []string{"example_dockerfile_builds", "examples_cpu_check_shard"},
+			wantSkipped: []string{"example_dockerfile_builds", "examples_cpu_check_shard", "examples_qwen36_cpu_check"},
 			wantTargets: -1,
 		},
 		{
@@ -124,7 +124,15 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			paths:       []string{"examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/default/cpu_check/scoring.py"},
 			wantCI:      []string{"examples", "python"},
 			wantGroups:  []string{"always_on", "examples_cpu_check_shard", "examples_native_evaluator_tests", "examples_tests", "python_architecture", "python_guards", "python_quality", "python_tests", "python_types"},
-			wantSkipped: []string{},
+			wantSkipped: []string{"examples_qwen36_cpu_check"},
+			wantTargets: -1,
+		},
+		{
+			name:        "the qwen3.6 baseline engine selects its own CPU check",
+			paths:       []string{"examples/model-serving/qwen3.6-35b-a3b/engine/server.py"},
+			wantCI:      []string{"examples", "python"},
+			wantGroups:  []string{"always_on", "examples_native_evaluator_tests", "examples_qwen36_cpu_check", "examples_tests", "python_architecture", "python_guards", "python_quality", "python_tests", "python_types"},
+			wantSkipped: []string{"examples_cpu_check_shard"},
 			wantTargets: -1,
 		},
 		{

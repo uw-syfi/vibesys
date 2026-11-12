@@ -40,6 +40,7 @@ func legalPair(vendor cliv1.AcceleratorVendor, model cliv1.AcceleratorModel) boo
 	}
 	owner := map[cliv1.AcceleratorModel]cliv1.AcceleratorVendor{
 		cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI210:         cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_AMD,
+		cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI250:         cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_AMD,
 		cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI300A:        cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_AMD,
 		cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI300X:        cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_AMD,
 		cliv1.AcceleratorModel_ACCELERATOR_MODEL_MI325X:        cliv1.AcceleratorVendor_ACCELERATOR_VENDOR_AMD,
