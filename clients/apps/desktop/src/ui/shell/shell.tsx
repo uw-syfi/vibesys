@@ -3,7 +3,7 @@ import type {JSX, ReactNode} from 'react';
 import type {Destination, NavigationAction} from '../../state/index.js';
 
 /**
- * The window: a narrow rail of icons down the left edge (the app's mark, set apart, then one button
+ * The window: a narrow rail of icons down the left edge (the app's mark, a static picture set apart, then one button
  * for each destination, Settings last, at the rail's foot) and the destination's screen beside it. The rail's buttons send the intents
  * the navigation reducer takes; pressing the destination already shown goes back to its start.
  */
@@ -17,9 +17,7 @@ export function AppShell(props: {
     <RailFrame
       label="Main"
       state="ready"
-      mark={
-        <RailItem icon="mark" label="VibeSys" hideLabel press={() => go({type: 'open-runs'})} />
-      }
+      mark={{icon: 'mark', label: 'VibeSys'}}
       top={
         <>
           <RailItem

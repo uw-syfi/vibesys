@@ -317,17 +317,20 @@ async function pressCatchUpAndSeeWhatChanged(page: Page, world: World): Promise<
   await expect(page.getByRole('button', {name: 'Stop run'})).toHaveCount(0);
 }
 
-/** Settings is the other destination of the rail; its title is where the run pages' are. */
+/** Settings is the other destination of the rail; its title is where Runs' is. */
 async function checkSettingsTitleIsInTheSamePlace(page: Page): Promise<void> {
   await page.getByRole('button', {name: 'Settings'}).click();
   await expect(page.getByRole('heading', {level: 1})).toHaveText('Settings');
   await seen(page, '7-settings');
-  // Every destination has its title where every other has it, left and top, except the run report:
-  // it fills the window, so its title keeps the page gutter as its left edge while the others are
-  // centred, and its top is the same as theirs. The exception is recorded under law 1 of the visual
-  // spec (`.agents/skills/verify-desktop-ui/references/visual-spec.md`).
-  const top = new Set(titles.map(each => each.top));
-  expect(top.size, JSON.stringify(titles)).toBe(1);
+  // The titles of destinations without a trail (Runs, Settings) are at one height, and the titles
+  // under a trail at another. They share one left edge except for the run report: its dense grid
+  // fills the window, so its title keeps the page gutter while the other pages are centred. The
+  // exception is recorded under law 1 of the visual spec.
+  const bare = new Set(['1-runs', '7-settings']);
+  const placesOf = (wanted: boolean) =>
+    new Set(titles.filter(each => bare.has(each.name) === wanted).map(each => each.top));
+  expect(placesOf(true).size, JSON.stringify(titles)).toBe(1);
+  expect(placesOf(false).size, JSON.stringify(titles)).toBe(1);
   const left = new Set(titles.filter(each => each.name !== REPORT_SHOT).map(each => each.left));
   expect(left.size, JSON.stringify(titles)).toBe(1);
 }

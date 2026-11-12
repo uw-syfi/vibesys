@@ -430,7 +430,7 @@ test('the rail holds Settings at its foot at every window height, never touching
     }, frameHeight);
   // A 600 px window: Settings sits on the rail's bottom padding, the top group on its own gap.
   const tall = await read('100vh');
-  expect(tall.names).toEqual(['', 'Runs', 'Cost', 'Machines', 'Settings']);
+  expect(tall.names).toEqual(['Runs', 'Cost', 'Machines', 'Settings']);
   expect(tall.rail.height).toBeCloseTo(600, 0);
   expect(tall.rail.bottom - tall.padBottom - tall.settings.bottom).toBeLessThan(0.5);
   expect(tall.gap).toBeGreaterThanOrEqual(8);

@@ -13,13 +13,15 @@ import {WindowFrame} from './window-frame.js';
  * whether what the rail's own choices rest on has been read (such as where the mark goes), as
  * `data-state` on the rail: the rail is the app's navigation, so it says so for every screen.
  * The two groups are held apart by a `Spacer`, so `bottom` stays at the rail's foot at every window
- * height and, in a window too short for both, the rail scrolls rather than overlap them. The `mark` (the app's own button, a `RailItem` with `hideLabel`) stands first, set apart from the
- * destinations by a line, so it is never read as one of them.
+ * height and, in a window too short for both, the rail scrolls rather than overlap them. The `mark`
+ * (the app's own icon) stands first, set apart from the destinations by a line, so it is never read
+ * as one of them. It is a picture, not a control: no press, no hover or focus state, not in the tab
+ * order; it keeps the box of an item so the destinations start where they would under a button.
  */
 export function RailFrame(props: {
   readonly label: string;
   readonly state: PageState;
-  readonly mark?: ReactNode;
+  readonly mark?: {readonly icon: IconName; readonly label: string};
   readonly top: ReactNode;
   readonly bottom?: ReactNode;
   readonly children: ReactNode;
@@ -29,7 +31,13 @@ export function RailFrame(props: {
       start={
         <nav className="vs-rail" aria-label={props.label} data-state={props.state}>
           <div className="vs-rail-group">
-            {props.mark === undefined ? null : <div className="vs-rail-mark">{props.mark}</div>}
+            {props.mark === undefined ? null : (
+              <div className="vs-rail-mark">
+                <span className="vs-rail-mark-icon" role="img" aria-label={props.mark.label}>
+                  <Icon name={props.mark.icon} />
+                </span>
+              </div>
+            )}
             {props.top}
           </div>
           {props.bottom === undefined ? null : (
@@ -49,25 +57,20 @@ export function RailFrame(props: {
 }
 
 /** What names a rail item for assistive technology when its label alone does not. */
-function itemName(
-  label: string,
-  hideLabel: boolean,
-  extras: readonly (string | undefined)[],
-): string | undefined {
+function itemName(label: string, extras: readonly (string | undefined)[]): string | undefined {
   const said = extras.filter(text => text !== undefined);
-  return said.length === 0 && !hideLabel ? undefined : [label, ...said].join(', ');
+  return said.length === 0 ? undefined : [label, ...said].join(', ');
 }
 
 /**
  * A destination of the rail: an icon with its short label under it. `active` marks the current
  * screen. `badge` puts a count on the icon (named `badge.label` for assistive technology) and
- * `warning` a dot on it (named by the text); `hideLabel` leaves the icon alone, for the app's mark.
+ * `warning` a dot on it (named by the text).
  */
 export function RailItem(props: {
   readonly icon: IconName;
   readonly label: string;
   readonly active?: boolean;
-  readonly hideLabel?: boolean;
   readonly badge?: {readonly count: number; readonly label: string};
   readonly warning?: string;
   readonly hint?: string;
@@ -79,10 +82,7 @@ export function RailItem(props: {
       className="vs-rail-item"
       data-active={props.active === true || undefined}
       aria-current={props.active === true ? 'page' : undefined}
-      aria-label={itemName(props.label, props.hideLabel === true, [
-        props.badge?.label,
-        props.warning,
-      ])}
+      aria-label={itemName(props.label, [props.badge?.label, props.warning])}
       title={props.hint ?? props.label}
       onClick={props.press}
     >
@@ -95,7 +95,7 @@ export function RailItem(props: {
         )}
         {props.warning === undefined ? null : <span className="vs-rail-dot" aria-hidden="true" />}
       </span>
-      {props.hideLabel === true ? null : <Text variant="caption">{props.label}</Text>}
+      <Text variant="caption">{props.label}</Text>
     </button>
   );
 }

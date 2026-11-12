@@ -2,6 +2,7 @@ import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {describe, expect, it} from '@effect/vitest';
 import {
+  AcceleratorVendor,
   AgentRole,
   AgentSchema,
   AgentStatus,
@@ -18,6 +19,8 @@ import {
   RunsSnapshotSchema,
   type SearchState,
   SearchStateSchema,
+  type TaskCard,
+  TaskCardSchema,
 } from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import {act, type JSX, useReducer} from 'react';
@@ -72,6 +75,8 @@ interface RunFacts {
   readonly result?: {readonly value: number; readonly unit: string; readonly percent?: number};
   /** The search the host served for the run, whole: it replaces what `result` would make. */
   readonly search?: SearchState;
+  /** The task card the host stored on the run. */
+  readonly card?: TaskCard;
   readonly repository?: string;
   readonly stalledMs?: number;
   readonly limit?: RunLimit;
@@ -92,6 +97,7 @@ const runOf = (run: RunFacts): Run =>
     ...(run.endedMs === undefined ? {} : {endedAt: timestampFromMs(run.endedMs)}),
     ...(run.cost === undefined ? {} : {usage: {costUsd: run.cost}}),
     ...(run.budget === undefined ? {} : {maxCostUsd: run.budget}),
+    ...(run.card === undefined ? {} : {taskCard: run.card}),
     ...(run.stalledMs === undefined ? {} : {stalledSince: timestampFromMs(run.stalledMs)}),
     limitReached: run.limit ?? RunLimit.UNSPECIFIED,
     ...(run.limitMs === undefined ? {} : {limitReachedAt: timestampFromMs(run.limitMs)}),
@@ -273,7 +279,7 @@ function Screen(props: {
           move(action);
         }}
         retryHost={noop}
-        newRun={null}
+        newRun={<button type="button">New run</button>}
       />
     </DisplayClockProvider>
   );
@@ -330,6 +336,11 @@ describe('the fleet screen', () => {
     expect(cell(row, 'cost').textContent).toBe('$318of $500');
     expect(cell(row, 'name').textContent).toContain('decode-service');
     expect(cell(row, 'status').querySelector('.vs-chip')?.textContent).toBe('Running 5h 20m');
+    expect(cell(row, 'status').querySelector('.vs-chip')?.getAttribute('title')).toBe(
+      'Running 5h 20m',
+    );
+    expect(cell(row, 'status').getAttribute('title')).toContain('Running, started');
+    expect(cell(row, 'host').getAttribute('title')).toContain('This Mac');
     // A live run's chip grows with its running time; it is cut with an ellipsis, not left to
     // overflow the narrow column's track into Best.
     expect(cell(row, 'status').querySelector('.vs-chip')?.hasAttribute('data-clip')).toBe(true);
@@ -356,6 +367,10 @@ describe('the fleet screen', () => {
       '.vs-columnlist-headcell[title="Best"] .vs-columnlist-note',
     );
     expect(note?.textContent).toBe('% of bound');
+    expect(note?.hasAttribute('data-wide-only')).toBe(true);
+    expect(
+      screen.container.querySelector('[data-key="best"] button [data-narrow-only]')?.textContent,
+    ).toBe('Bound %');
     expect(note?.getAttribute('title')).toContain('how close it is to the bound');
     screen.unmount();
   });
@@ -369,6 +384,19 @@ describe('the fleet screen', () => {
     expect(cell(row, 'agents').textContent).toBe('—');
     expect(cell(row, 'cost').textContent).toBe('$12.40');
     expect(cell(row, 'best').textContent).toBe('—');
+    expect(cell(row, 'trend').textContent).toBe('—');
+    screen.unmount();
+  });
+
+  it('keeps candidate activity and the agent count in a narrow list, while Host moves into Run', () => {
+    const {screen} = open([hostA]);
+    const header = screen.container.querySelector('.vs-columnlist-head');
+    expect(header?.querySelector('[data-key="host"]')?.hasAttribute('data-optional')).toBe(true);
+    for (const key of ['trend', 'agents']) {
+      expect(header?.querySelector(`[data-key="${key}"]`)?.hasAttribute('data-optional')).toBe(
+        false,
+      );
+    }
     screen.unmount();
   });
 
@@ -490,30 +518,107 @@ describe('the fleet screen', () => {
     screen.unmount();
   });
 
-  it('says No runs at the start of the line, with the one New run button inside it', () => {
-    const log: NavigationAction[] = [];
-    const screen = mount(
-      <FleetScreen
-        hosts={[
-          {
-            key: 'local',
-            label: 'This Mac',
-            freshness: 'live',
-            status: statusFor('live', null, null),
-            data: emptyState,
-          },
-        ]}
-        place={initialNavigation.fleet}
-        nowMs={NOW}
-        go={action => log.push(action)}
-        retryHost={noop}
-        newRun={<button type="button">New run</button>}
-      />,
+  it('says what the filter leaves, as text at the start of the line, and keeps New run in the header', () => {
+    const empty: FleetHostInput = {
+      key: 'local',
+      label: 'This Mac',
+      freshness: 'live',
+      status: statusFor('live', null, null),
+      data: emptyState,
+    };
+    const titles = {all: 'No runs', live: 'No live runs', ended: 'No ended runs'} as const;
+    for (const filter of ['all', 'live', 'ended'] as const) {
+      const {screen} = open([empty]);
+      const radio = screen.container.querySelector<HTMLElement>(`input[value="${filter}"]`);
+      if (radio === null) throw new Error(`no ${filter} option`);
+      screen.press(radio);
+      const emptied = screen.container.querySelector('.vs-empty');
+      expect(emptied?.getAttribute('data-align')).toBe('start');
+      expect(emptied?.textContent).toBe(titles[filter]);
+      expect(emptied?.querySelector('button')).toBeNull();
+      expect(screen.controls('New run')).toHaveLength(1);
+      const header = screen.container.querySelector('.vs-page-header');
+      expect(header?.querySelector('button')?.textContent).toBe('New run');
+      screen.unmount();
+    }
+  });
+
+  it('keeps New run at one place in the header whatever the filter and whether or not any run is listed', () => {
+    const {screen} = open([hostA]);
+    const placeOf = (): string => {
+      const header = screen.container.querySelector('.vs-page-header');
+      const button = header?.querySelector('button');
+      if (header === null || header === undefined || button === null || button === undefined)
+        throw new Error('New run is not in the header');
+      return [...header.querySelectorAll('*')].indexOf(button).toString();
+    };
+    const first = placeOf();
+    for (const filter of ['live', 'ended', 'all', 'ended', 'live']) {
+      const radio = screen.container.querySelector<HTMLElement>(`input[value="${filter}"]`);
+      if (radio === null) throw new Error(`no ${filter} option`);
+      screen.press(radio);
+      expect(placeOf()).toBe(first);
+      expect(screen.controls('New run')).toHaveLength(1);
+    }
+    screen.unmount();
+  });
+
+  it('sorts a list by the header pressed, then the other way, then back to its own order, in a slot that stays', () => {
+    const {screen} = open([hostA, hostB]);
+    const names = (): string[] =>
+      rows(screen)
+        .filter(each => each.closest('[aria-label="Live runs"]') !== null)
+        .map(each => cell(each, 'name').textContent ?? '');
+    const own = names();
+    const head = (): Element | null =>
+      screen.container
+        .querySelector('[aria-label="Live runs"]')
+        ?.parentElement?.querySelector('[data-key="name"]') ?? null;
+    const slots = (): number => screen.container.querySelectorAll('.vs-columnlist-sortmark').length;
+    const before = slots();
+    screen.press(screen.controls('Sort by Run')[0] as HTMLElement);
+    expect(names()).toEqual([...own].sort((a, b) => a.localeCompare(b)));
+    expect(head()?.getAttribute('data-sorted')).toBe('asc');
+    screen.press(screen.controls('Sort by Run')[0] as HTMLElement);
+    expect(names()).toEqual([...own].sort((a, b) => b.localeCompare(a)));
+    screen.press(screen.controls('Sort by Run')[0] as HTMLElement);
+    expect(names()).toEqual(own);
+    expect(slots()).toBe(before);
+    screen.unmount();
+  });
+
+  it('cuts the model of a long run title and keeps its hardware whole', () => {
+    const card = create(TaskCardSchema, {
+      task: 'flint',
+      modelName: `Flint ${'very-long-model-name-'.repeat(8)}`,
+      hardware: {vendor: AcceleratorVendor.AMD, count: 1},
+      hardwareName: 'AMD MI300X',
+    });
+    const {screen} = open([
+      {
+        key: 'local',
+        label: 'This Mac',
+        freshness: 'live',
+        status: statusFor('live', null, null),
+        data: stateOf([live('x1', 'flint', {cost: 1, card})]),
+      },
+    ]);
+    const row = rows(screen)[0];
+    if (row === undefined) throw new Error('no row');
+    const lead = cell(row, 'name').querySelector('.vs-columnlist-split-lead');
+    const tail = cell(row, 'name').querySelector('.vs-columnlist-split-tail');
+    expect(lead?.textContent).toBe(card.modelName);
+    expect(tail?.textContent).toBe(' \u00b7 1\u00d7 MI300X');
+    expect(cell(row, 'name').getAttribute('title')).toContain(
+      `${card.modelName} \u00b7 1\u00d7 MI300X`,
     );
-    const empty = screen.container.querySelector('.vs-empty');
-    expect(empty?.getAttribute('data-align')).toBe('start');
-    expect(empty?.textContent).toContain('New run');
-    expect(screen.controls('New run')).toHaveLength(1);
+    screen.unmount();
+  });
+
+  it('draws a title with no hardware as one part', () => {
+    const {screen} = open([hostA]);
+    const row = rowOf(screen, 'queue-rs');
+    expect(row.querySelector('.vs-columnlist-split')).toBeNull();
     screen.unmount();
   });
 
@@ -954,7 +1059,7 @@ describe('the candidates cell of the fleet screen', () => {
     screen.unmount();
   });
 
-  it('is empty for a run with nothing measured, with no placeholder', () => {
+  it('marks a run with nothing measured as unavailable', () => {
     const {screen} = open([
       withHost([
         {
@@ -974,16 +1079,16 @@ describe('the candidates cell of the fleet screen', () => {
     ]);
     const trend = trendOf(screen, 'nothing measured');
     expect(trend.querySelector('svg')).toBeNull();
-    expect(trend.textContent).toBe('');
+    expect(trend.textContent).toBe('—');
     screen.unmount();
   });
 
-  it('is empty for a run of a host that serves no series, though it shows the best and the bound', () => {
+  it('marks a missing host series as unavailable, though it shows the best and the bound', () => {
     const {screen} = open([hostA]);
     const row = rowOf(screen, 'queue-rs');
     expect(cell(row, 'best').textContent).toBe('2.31k tok/s · 71%');
     expect(cell(row, 'trend').querySelector('svg')).toBeNull();
-    expect(cell(row, 'trend').textContent).toBe('');
+    expect(cell(row, 'trend').textContent).toBe('—');
     screen.unmount();
   });
 

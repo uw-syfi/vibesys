@@ -139,7 +139,7 @@ export function Page(props: {
   readonly actions?: ReactNode;
   /** What the page is about, in one row under its title: its state, what it is on. */
   readonly meta?: ReactNode;
-  /** Where the reader is, over the title: each level but the last a way back to it. */
+  /** Where the reader is, over the title: each level but the last a way back to it. A page with none has no band for it. */
   readonly trail?: readonly Crumb[];
   /** What stays in view below a body that scrolls: the page's primary action. */
   readonly footer?: ReactNode;
@@ -208,11 +208,11 @@ export function Page(props: {
       <div className="vs-page-content" data-width={width}>
         {header === undefined ? null : (
           <div className="vs-page-header">
-            <div className="vs-page-trail">
-              {props.trail === undefined ? null : (
+            {props.trail === undefined || props.trail.length === 0 ? null : (
+              <div className="vs-page-trail">
                 <Breadcrumb label="Where you are" items={props.trail} />
-              )}
-            </div>
+              </div>
+            )}
             {header}
           </div>
         )}

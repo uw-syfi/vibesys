@@ -110,14 +110,17 @@ export {
   type SpendSeriesView,
 } from './orchestrator/cost.js';
 export {
+  FLEET_COLUMNS,
   FLEET_STATES,
   type FleetAttention,
+  type FleetColumn,
   type FleetFilter,
   type FleetHostInput,
   type FleetHostRef,
   type FleetHostView,
   type FleetObjective,
   type FleetRow,
+  type FleetSort,
   type FleetState,
   type FleetView,
   fleetKey,
@@ -126,6 +129,7 @@ export {
   isLive,
   measuredObjectives,
   NO_FLEET_FILTER,
+  pressedSort,
   rowObjectives,
 } from './orchestrator/fleet.js';
 export {

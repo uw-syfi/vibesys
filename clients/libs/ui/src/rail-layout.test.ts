@@ -65,4 +65,16 @@ describe('the rail', () => {
     expect(item).toContain('var(--duration-fast) var(--easing)');
     expect(item).not.toMatch(/\d+m?s /);
   });
+
+  test("draws its mark in an item's box with none of an item's states", () => {
+    const mark = declarations('rail.css', '.vs-rail-mark-icon');
+    const item = declarations('rail.css', '.vs-rail-item');
+    for (const same of ['min-height: var(--control);', 'padding: var(--space-3) var(--space-0);']) {
+      expect(mark).toContain(same);
+      expect(item).toContain(same);
+    }
+    expect(mark).toContain('cursor: default;');
+    // No hover, focus or press rule reaches the mark.
+    expect(css('rail.css')).not.toMatch(/\.vs-rail-mark[^{]*:(hover|focus|active)/);
+  });
 });

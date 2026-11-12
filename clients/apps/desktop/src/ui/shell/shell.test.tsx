@@ -120,15 +120,17 @@ describe('the window shell', () => {
     for (const name of ['Cost', 'Machines', 'Settings']) {
       expect(screen.control(name).getAttribute('aria-current')).toBeNull();
     }
-    expect(screen.control('VibeSys')).toBeDefined();
-    // Each destination says its name under its icon; the app's mark is the icon alone.
+    // Each destination says its name under its icon; the app's mark is a picture, not a control.
     for (const name of RAIL_ORDER) expect(screen.control(name).textContent).toBe(name);
-    expect(screen.control('VibeSys').textContent).toBe('');
     const rail = screen.container.querySelector('nav[aria-label="Main"]');
+    expect(rail?.querySelector('.vs-rail-mark [role="img"]')?.getAttribute('aria-label')).toBe(
+      'VibeSys',
+    );
+    expect(rail?.querySelector('.vs-rail-mark button, .vs-rail-mark [tabindex]')).toBeNull();
     const named = [...(rail?.querySelectorAll('button') ?? [])].map(
       button => button.getAttribute('aria-label') ?? button.textContent,
     );
-    expect(named).toEqual(['VibeSys', ...RAIL_ORDER]);
+    expect(named).toEqual([...RAIL_ORDER]);
     // Settings alone is in the foot group, after the spacer that holds it at the rail's end.
     const foot = rail?.querySelector('.vs-rail-group[data-end]');
     expect([...(foot?.querySelectorAll('button') ?? [])].map(button => button.textContent)).toEqual(
@@ -270,6 +272,15 @@ describe('the window shell', () => {
     screen.press(
       screen.controls('Runs').find(control => !control.classList.contains('vs-crumb')) ?? row(),
     );
+    // The list's headers sort it, and the edge of a column moves with the arrow keys.
+    screen.press(screen.control('Sort by Cost'));
+    const edge = screen.container.querySelector<HTMLElement>('hr.vs-columnlist-grip');
+    if (edge === null) throw new Error('the list has no column edge');
+    const Key = (edge.ownerDocument.defaultView as unknown as {KeyboardEvent: typeof KeyboardEvent})
+      .KeyboardEvent;
+    act(() => {
+      edge.dispatchEvent(new Key('keydown', {key: 'ArrowRight', bubbles: true, cancelable: true}));
+    });
     // The list's own controls: its state filter and, with two hosts, its host filter.
     screen.press(
       screen.container.querySelector<HTMLElement>('input[type="radio"][value="live"]') ?? row(),

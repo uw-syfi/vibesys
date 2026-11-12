@@ -17,7 +17,9 @@ export interface SegmentOption<T extends string> extends ChoiceOption<T> {
 
 /**
  * A radio group drawn as segments, built on native radio inputs: one tab stop (the chosen segment),
- * and the arrow keys move the focus and choose, wrapping at the ends.
+ * and the arrow keys move the focus and choose, wrapping at the ends. The drawn selection is the
+ * `value` and nothing else: a hover or a focus ring never looks like it, and a press the owner does
+ * not take leaves the old segment drawn and checked.
  */
 export function SegmentedControl<T extends string>(props: {
   /** The group's accessible name. */
@@ -40,6 +42,10 @@ export function SegmentedControl<T extends string>(props: {
         <label
           key={option.value}
           className="vs-segment"
+          // The one fact the stylesheet draws the selection from: the owner's value, the same one
+          // the radio's `checked` is. Never the radio's own state, which a press changes before the
+          // owner has answered it.
+          data-selected={option.value === props.value || undefined}
           data-label={option.label}
           title={option.mark?.label}
         >

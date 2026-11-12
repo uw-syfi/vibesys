@@ -429,12 +429,12 @@ describe('RailFrame', () => {
 });
 
 describe('RailFrame mark', () => {
-  test('stands first in its own box above the destinations, so it is never read as one of them', async () => {
+  test('stands first in its own box above the destinations, as a picture and not a control', async () => {
     const container = await mount(
       <RailFrame
         label="App"
         state="ready"
-        mark={<RailItem icon="mark" label="Home" hideLabel press={() => undefined} />}
+        mark={{icon: 'mark', label: 'Home'}}
         top={<RailItem icon="list" label="Runs" active press={() => undefined} />}
       >
         <main>Page</main>
@@ -445,9 +445,16 @@ describe('RailFrame mark', () => {
       'vs-rail-mark',
       'vs-rail-item',
     ]);
-    expect(one(group, '.vs-rail-mark button').getAttribute('aria-label')).toBe('Home');
-    expect(one(group, '.vs-rail-mark button').getAttribute('aria-current')).toBeNull();
+    const mark = one(group, '.vs-rail-mark');
+    expect(one(mark, '[role="img"]').getAttribute('aria-label')).toBe('Home');
+    // Nothing in it is a control: no button, link or tab stop, and no press handler to reach.
+    expect(mark.querySelector('button, a, input, [tabindex], [role="button"]')).toBeNull();
+    expect(mark.querySelector('.vs-rail-item')).toBeNull();
     expect(group.children[1]?.getAttribute('aria-current')).toBe('page');
+    // Only the destinations are buttons of the rail.
+    expect(
+      [...container.querySelectorAll('.vs-rail button')].map(each => each.textContent),
+    ).toEqual(['Runs']);
   });
 });
 

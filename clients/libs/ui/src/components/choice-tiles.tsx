@@ -46,6 +46,9 @@ export function ChoiceTiles<T extends string>(props: {
         <label
           key={option.value}
           className="vs-choice-tile"
+          // What the stylesheet draws the selection from: the owner's value, never the radio's own
+          // state, which a press changes before the owner has answered it.
+          data-selected={option.value === props.value || undefined}
           data-unavailable={option.unavailable === undefined ? undefined : ''}
         >
           <input

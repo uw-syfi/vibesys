@@ -152,11 +152,13 @@ export function Stat(props: {
   );
 }
 
-/** What an empty list shows: a title, a body, and an optional action. */
+/**
+ * What an empty list shows: a title and a body, text only. It has no action: a screen's actions
+ * stay in its header in every state, so one never moves between the header and an empty list.
+ */
 export function EmptyState(props: {
   readonly title: string;
   readonly body?: string;
-  readonly action?: ReactNode;
   /** Where the words sit: centered (the default), or at the start, in line with the rest of a screen. */
   readonly align?: 'center' | 'start';
 }): JSX.Element {
@@ -164,7 +166,6 @@ export function EmptyState(props: {
     <div className="vs-empty" data-align={props.align}>
       <Text variant="heading">{props.title}</Text>
       {props.body === undefined ? null : <Text tone="muted">{props.body}</Text>}
-      {props.action === undefined ? null : <div className="vs-empty-action">{props.action}</div>}
     </div>
   );
 }
