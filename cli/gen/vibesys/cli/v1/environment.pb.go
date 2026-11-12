@@ -210,6 +210,7 @@ const (
 	AcceleratorModel_ACCELERATOR_MODEL_A100          AcceleratorModel = 8
 	AcceleratorModel_ACCELERATOR_MODEL_TRAINIUM2     AcceleratorModel = 9
 	AcceleratorModel_ACCELERATOR_MODEL_APPLE_SILICON AcceleratorModel = 10
+	AcceleratorModel_ACCELERATOR_MODEL_MI250         AcceleratorModel = 11
 	AcceleratorModel_ACCELERATOR_MODEL_OTHER         AcceleratorModel = 99
 )
 
@@ -227,6 +228,7 @@ var (
 		8:  "ACCELERATOR_MODEL_A100",
 		9:  "ACCELERATOR_MODEL_TRAINIUM2",
 		10: "ACCELERATOR_MODEL_APPLE_SILICON",
+		11: "ACCELERATOR_MODEL_MI250",
 		99: "ACCELERATOR_MODEL_OTHER",
 	}
 	AcceleratorModel_value = map[string]int32{
@@ -241,6 +243,7 @@ var (
 		"ACCELERATOR_MODEL_A100":          8,
 		"ACCELERATOR_MODEL_TRAINIUM2":     9,
 		"ACCELERATOR_MODEL_APPLE_SILICON": 10,
+		"ACCELERATOR_MODEL_MI250":         11,
 		"ACCELERATOR_MODEL_OTHER":         99,
 	}
 )
@@ -714,14 +717,14 @@ var File_vibesys_cli_v1_environment_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_environment_proto_rawDesc = "" +
 	"\n" +
-	" vibesys/cli/v1/environment.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x9f\x04\n" +
+	" vibesys/cli/v1/environment.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa3\x04\n" +
 	"\x0fAcceleratorNeed\x12E\n" +
 	"\x06vendor\x18\x01 \x01(\x0e2!.vibesys.cli.v1.AcceleratorVendorB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06vendor\x12@\n" +
 	"\x05model\x18\x02 \x01(\x0e2 .vibesys.cli.v1.AcceleratorModelB\b\xbaH\x05\x82\x01\x02\x10\x01R\x05model\x12 \n" +
 	"\x05count\x18\x03 \x01(\rB\n" +
-	"\xbaH\a*\x05\x18\x80 (\x01R\x05count:\xe0\x02\xbaH\xdc\x02\x1a\xd9\x02\n" +
-	" accelerator_need.model_of_vendor\x12Cthe model is not a device of the vendor (a CPU need names no model)\x1a\xef\x01this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false\"\xd4\x04\n" +
+	"\xbaH\a*\x05\x18\x80 (\x01R\x05count:\xe4\x02\xbaH\xe0\x02\x1a\xdd\x02\n" +
+	" accelerator_need.model_of_vendor\x12Cthe model is not a device of the vendor (a CPU need names no model)\x1a\xf3\x01this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4, 11] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false\"\xd8\x04\n" +
 	"\x10AcceleratorOffer\x12E\n" +
 	"\x06vendor\x18\x01 \x01(\x0e2!.vibesys.cli.v1.AcceleratorVendorB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06vendor\x12@\n" +
@@ -729,8 +732,8 @@ const file_vibesys_cli_v1_environment_proto_rawDesc = "" +
 	"\x05count\x18\x03 \x01(\rB\n" +
 	"\xbaH\a*\x05\x18\x80 (\x01R\x05count\x12)\n" +
 	"\vdevice_name\x18\x04 \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\n" +
-	"deviceName:\xe9\x02\xbaH\xe5\x02\x1a\xe2\x02\n" +
-	"!accelerator_offer.model_of_vendor\x126the model is not a device of the vendor, or is missing\x1a\x84\x02this.model != 0 && (this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false)\"\xaa\x02\n" +
+	"deviceName:\xed\x02\xbaH\xe9\x02\x1a\xe6\x02\n" +
+	"!accelerator_offer.model_of_vendor\x126the model is not a device of the vendor, or is missing\x1a\x88\x02this.model != 0 && (this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4, 11] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false)\"\xaa\x02\n" +
 	"\x16EnvironmentFingerprint\x123\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1f.vibesys.cli.v1.EnvironmentKindR\x04kind\x125\n" +
 	"\abackend\x18\x02 \x01(\x0e2\x1b.vibesys.cli.v1.BackendKindR\abackend\x12!\n" +
@@ -770,7 +773,7 @@ const file_vibesys_cli_v1_environment_proto_rawDesc = "" +
 	"\x16ACCELERATOR_VENDOR_AMD\x10\x02\x12\x1a\n" +
 	"\x16ACCELERATOR_VENDOR_AWS\x10\x03\x12\x1c\n" +
 	"\x18ACCELERATOR_VENDOR_APPLE\x10\x04\x12\x1a\n" +
-	"\x16ACCELERATOR_VENDOR_CPU\x10\x05*\xfd\x02\n" +
+	"\x16ACCELERATOR_VENDOR_CPU\x10\x05*\x9a\x03\n" +
 	"\x10AcceleratorModel\x12!\n" +
 	"\x1dACCELERATOR_MODEL_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17ACCELERATOR_MODEL_MI210\x10\x01\x12\x1c\n" +
@@ -784,6 +787,7 @@ const file_vibesys_cli_v1_environment_proto_rawDesc = "" +
 	"\x1bACCELERATOR_MODEL_TRAINIUM2\x10\t\x12#\n" +
 	"\x1fACCELERATOR_MODEL_APPLE_SILICON\x10\n" +
 	"\x12\x1b\n" +
+	"\x17ACCELERATOR_MODEL_MI250\x10\v\x12\x1b\n" +
 	"\x17ACCELERATOR_MODEL_OTHER\x10c*\x94\x01\n" +
 	"\fResourceKind\x12\x1d\n" +
 	"\x19RESOURCE_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +

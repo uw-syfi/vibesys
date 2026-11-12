@@ -33,6 +33,7 @@ const (
 	ModelL4           AcceleratorModel = "l4"
 	ModelA100         AcceleratorModel = "a100"
 	ModelMI210        AcceleratorModel = "mi210"
+	ModelMI250        AcceleratorModel = "mi250"
 	ModelMI300A       AcceleratorModel = "mi300a"
 	ModelMI300X       AcceleratorModel = "mi300x"
 	ModelMI325X       AcceleratorModel = "mi325x"
@@ -75,6 +76,8 @@ type AcceleratorIdentity struct {
 var accelerators = []AcceleratorIdentity{
 	{VendorCPU, "", "CPU", nil},
 	{VendorAMD, ModelMI210, "AMD MI210", []string{"mi210"}},
+	// ROCm names the device "AMD Instinct MI250X / MI250".
+	{VendorAMD, ModelMI250, "AMD MI250", []string{"mi250", "mi250x"}},
 	{VendorAMD, ModelMI300A, "AMD MI300A", []string{"mi300a"}},
 	{VendorAMD, ModelMI300X, "AMD MI300X", []string{"mi300x"}},
 	{VendorAMD, ModelMI325X, "AMD MI325X", []string{"mi325x"}},

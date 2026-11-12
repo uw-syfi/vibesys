@@ -26,6 +26,7 @@ export const domainWord = (domain: TaskDomain): string => {
 const MODEL_WORDS: Readonly<Record<AcceleratorModel, string>> = {
   [AcceleratorModel.UNSPECIFIED]: '',
   [AcceleratorModel.MI210]: 'MI210',
+  [AcceleratorModel.MI250]: 'MI250',
   [AcceleratorModel.MI300A]: 'MI300A',
   [AcceleratorModel.MI300X]: 'MI300X',
   [AcceleratorModel.MI325X]: 'MI325X',

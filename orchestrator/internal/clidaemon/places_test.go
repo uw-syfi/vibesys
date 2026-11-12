@@ -126,7 +126,7 @@ func TestEveryValidPlacementViewMapsToAValidEvalPlace(t *testing.T) {
 	vendors := []cli.AcceleratorVendor{cli.AcceleratorVendor_ACCELERATOR_VENDOR_NVIDIA, cli.AcceleratorVendor_ACCELERATOR_VENDOR_AMD, cli.AcceleratorVendor_ACCELERATOR_VENDOR_AWS, cli.AcceleratorVendor_ACCELERATOR_VENDOR_APPLE}
 	models := map[cli.AcceleratorVendor][]cli.AcceleratorModel{
 		cli.AcceleratorVendor_ACCELERATOR_VENDOR_NVIDIA: {cli.AcceleratorModel_ACCELERATOR_MODEL_H100, cli.AcceleratorModel_ACCELERATOR_MODEL_B200, cli.AcceleratorModel_ACCELERATOR_MODEL_L4, cli.AcceleratorModel_ACCELERATOR_MODEL_A100, cli.AcceleratorModel_ACCELERATOR_MODEL_OTHER},
-		cli.AcceleratorVendor_ACCELERATOR_VENDOR_AMD:    {cli.AcceleratorModel_ACCELERATOR_MODEL_MI210, cli.AcceleratorModel_ACCELERATOR_MODEL_MI300A, cli.AcceleratorModel_ACCELERATOR_MODEL_MI300X, cli.AcceleratorModel_ACCELERATOR_MODEL_MI325X, cli.AcceleratorModel_ACCELERATOR_MODEL_OTHER},
+		cli.AcceleratorVendor_ACCELERATOR_VENDOR_AMD:    {cli.AcceleratorModel_ACCELERATOR_MODEL_MI210, cli.AcceleratorModel_ACCELERATOR_MODEL_MI250, cli.AcceleratorModel_ACCELERATOR_MODEL_MI300A, cli.AcceleratorModel_ACCELERATOR_MODEL_MI300X, cli.AcceleratorModel_ACCELERATOR_MODEL_MI325X, cli.AcceleratorModel_ACCELERATOR_MODEL_OTHER},
 		cli.AcceleratorVendor_ACCELERATOR_VENDOR_AWS:    {cli.AcceleratorModel_ACCELERATOR_MODEL_TRAINIUM2, cli.AcceleratorModel_ACCELERATOR_MODEL_OTHER},
 		cli.AcceleratorVendor_ACCELERATOR_VENDOR_APPLE:  {cli.AcceleratorModel_ACCELERATOR_MODEL_APPLE_SILICON, cli.AcceleratorModel_ACCELERATOR_MODEL_OTHER},
 	}

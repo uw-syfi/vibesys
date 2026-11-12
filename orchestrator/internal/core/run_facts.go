@@ -63,6 +63,7 @@ type AcceleratorModel string
 // The models.
 const (
 	ModelMI210        AcceleratorModel = "mi210"
+	ModelMI250        AcceleratorModel = "mi250"
 	ModelMI300A       AcceleratorModel = "mi300a"
 	ModelMI300X       AcceleratorModel = "mi300x"
 	ModelMI325X       AcceleratorModel = "mi325x"

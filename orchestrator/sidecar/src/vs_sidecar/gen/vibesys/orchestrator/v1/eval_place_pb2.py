@@ -27,7 +27,7 @@ from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__
 from vs_sidecar.gen.vibesys.cli.v1 import environment_pb2 as vibesys_dot_cli_dot_v1_dot_environment__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n(vibesys/orchestrator/v1/eval_place.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a vibesys/cli/v1/environment.proto\"\xeb\x02\n\tEvalPlace\x12\x35\n\x04name\x18\x01 \x01(\tB!\xbaH\x1er\x1c\x32\x1a^[a-z0-9][a-z0-9_-]{0,62}$R\x04name\x12\x46\n\x04kind\x18\x02 \x01(\x0e\x32&.vibesys.orchestrator.v1.EvalPlaceKindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x04kind\x12\x44\n\x06offers\x18\x03 \x03(\x0b\x32\".vibesys.orchestrator.v1.EvalOfferB\x08\xbaH\x05\x92\x01\x02\x10@R\x06offers\x12<\n\x05known\x18\x04 \x01(\x0b\x32$.vibesys.orchestrator.v1.OffersKnownH\x00R\x05known\x12K\n\nunreadable\x18\x05 \x01(\x0b\x32).vibesys.orchestrator.v1.OffersUnreadableH\x00R\nunreadableB\x0e\n\x05state\x12\x05\xbaH\x02\x08\x01\"\xc6\x04\n\tEvalOffer\x12\x45\n\x06vendor\x18\x01 \x01(\x0e\x32!.vibesys.cli.v1.AcceleratorVendorB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x06vendor\x12@\n\x05model\x18\x02 \x01(\x0e\x32 .vibesys.cli.v1.AcceleratorModelB\x08\xbaH\x05\x82\x01\x02\x10\x01R\x05model\x12 \n\x05\x63ount\x18\x03 \x01(\rB\n\xbaH\x07*\x05\x18\x80 (\x01R\x05\x63ount\x12)\n\x0b\x64\x65vice_name\x18\x04 \x01(\tB\x08\xbaH\x05r\x03(\x80\x01R\ndeviceName:\xe2\x02\xbaH\xde\x02\x1a\xdb\x02\n\x1a\x65val_offer.model_of_vendor\x12\x36the model is not a device of the vendor, or is missing\x1a\x84\x02this.model != 0 && (this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false)\"\x91\x01\n\x0bOffersKnown\x12I\n\x06source\x18\x01 \x01(\x0e\x32%.vibesys.orchestrator.v1.OffersSourceB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x06source\x12\x37\n\tprobed_at\x18\x02 \x01(\x0b\x32\x1a.google.protobuf.TimestampR\x08probedAt\"\x89\x01\n\x10OffersUnreadable\x12S\n\x06reason\x18\x01 \x01(\x0e\x32/.vibesys.orchestrator.v1.OffersUnreadableReasonB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x06reason\x12 \n\x06\x64\x65tail\x18\x02 \x01(\tB\x08\xbaH\x05r\x03(\x80\x08R\x06\x64\x65tail\"1\n\x15ListEvalPlacesRequest\x12\x18\n\x07refresh\x18\x01 \x01(\x08R\x07refresh\"^\n\x16ListEvalPlacesResponse\x12\x44\n\x06places\x18\x01 \x03(\x0b\x32\".vibesys.orchestrator.v1.EvalPlaceB\x08\xbaH\x05\x92\x01\x02\x10@R\x06places*\xb9\x01\n\rEvalPlaceKind\x12\x1f\n\x1b\x45VAL_PLACE_KIND_UNSPECIFIED\x10\x00\x12\x19\n\x15\x45VAL_PLACE_KIND_LOCAL\x10\x01\x12\x17\n\x13\x45VAL_PLACE_KIND_SSH\x10\x02\x12\x19\n\x15\x45VAL_PLACE_KIND_SLURM\x10\x03\x12\x1d\n\x19\x45VAL_PLACE_KIND_APPTAINER\x10\x04\x12\x19\n\x15\x45VAL_PLACE_KIND_CLOUD\x10\x05*c\n\x0cOffersSource\x12\x1d\n\x19OFFERS_SOURCE_UNSPECIFIED\x10\x00\x12\x18\n\x14OFFERS_SOURCE_PROBED\x10\x01\x12\x1a\n\x16OFFERS_SOURCE_DECLARED\x10\x02*\xe9\x01\n\x16OffersUnreadableReason\x12(\n$OFFERS_UNREADABLE_REASON_UNSPECIFIED\x10\x00\x12(\n$OFFERS_UNREADABLE_REASON_UNREACHABLE\x10\x01\x12\'\n#OFFERS_UNREADABLE_REASON_UNREADABLE\x10\x02\x12&\n\"OFFERS_UNREADABLE_REASON_TIMED_OUT\x10\x03\x12*\n&OFFERS_UNREADABLE_REASON_NOT_PROBEABLE\x10\x04\x42TZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n(vibesys/orchestrator/v1/eval_place.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a vibesys/cli/v1/environment.proto\"\xeb\x02\n\tEvalPlace\x12\x35\n\x04name\x18\x01 \x01(\tB!\xbaH\x1er\x1c\x32\x1a^[a-z0-9][a-z0-9_-]{0,62}$R\x04name\x12\x46\n\x04kind\x18\x02 \x01(\x0e\x32&.vibesys.orchestrator.v1.EvalPlaceKindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x04kind\x12\x44\n\x06offers\x18\x03 \x03(\x0b\x32\".vibesys.orchestrator.v1.EvalOfferB\x08\xbaH\x05\x92\x01\x02\x10@R\x06offers\x12<\n\x05known\x18\x04 \x01(\x0b\x32$.vibesys.orchestrator.v1.OffersKnownH\x00R\x05known\x12K\n\nunreadable\x18\x05 \x01(\x0b\x32).vibesys.orchestrator.v1.OffersUnreadableH\x00R\nunreadableB\x0e\n\x05state\x12\x05\xbaH\x02\x08\x01\"\xca\x04\n\tEvalOffer\x12\x45\n\x06vendor\x18\x01 \x01(\x0e\x32!.vibesys.cli.v1.AcceleratorVendorB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x06vendor\x12@\n\x05model\x18\x02 \x01(\x0e\x32 .vibesys.cli.v1.AcceleratorModelB\x08\xbaH\x05\x82\x01\x02\x10\x01R\x05model\x12 \n\x05\x63ount\x18\x03 \x01(\rB\n\xbaH\x07*\x05\x18\x80 (\x01R\x05\x63ount\x12)\n\x0b\x64\x65vice_name\x18\x04 \x01(\tB\x08\xbaH\x05r\x03(\x80\x01R\ndeviceName:\xe6\x02\xbaH\xe2\x02\x1a\xdf\x02\n\x1a\x65val_offer.model_of_vendor\x12\x36the model is not a device of the vendor, or is missing\x1a\x88\x02this.model != 0 && (this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4, 11] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false)\"\x91\x01\n\x0bOffersKnown\x12I\n\x06source\x18\x01 \x01(\x0e\x32%.vibesys.orchestrator.v1.OffersSourceB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x06source\x12\x37\n\tprobed_at\x18\x02 \x01(\x0b\x32\x1a.google.protobuf.TimestampR\x08probedAt\"\x89\x01\n\x10OffersUnreadable\x12S\n\x06reason\x18\x01 \x01(\x0e\x32/.vibesys.orchestrator.v1.OffersUnreadableReasonB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x06reason\x12 \n\x06\x64\x65tail\x18\x02 \x01(\tB\x08\xbaH\x05r\x03(\x80\x08R\x06\x64\x65tail\"1\n\x15ListEvalPlacesRequest\x12\x18\n\x07refresh\x18\x01 \x01(\x08R\x07refresh\"^\n\x16ListEvalPlacesResponse\x12\x44\n\x06places\x18\x01 \x03(\x0b\x32\".vibesys.orchestrator.v1.EvalPlaceB\x08\xbaH\x05\x92\x01\x02\x10@R\x06places*\xb9\x01\n\rEvalPlaceKind\x12\x1f\n\x1b\x45VAL_PLACE_KIND_UNSPECIFIED\x10\x00\x12\x19\n\x15\x45VAL_PLACE_KIND_LOCAL\x10\x01\x12\x17\n\x13\x45VAL_PLACE_KIND_SSH\x10\x02\x12\x19\n\x15\x45VAL_PLACE_KIND_SLURM\x10\x03\x12\x1d\n\x19\x45VAL_PLACE_KIND_APPTAINER\x10\x04\x12\x19\n\x15\x45VAL_PLACE_KIND_CLOUD\x10\x05*c\n\x0cOffersSource\x12\x1d\n\x19OFFERS_SOURCE_UNSPECIFIED\x10\x00\x12\x18\n\x14OFFERS_SOURCE_PROBED\x10\x01\x12\x1a\n\x16OFFERS_SOURCE_DECLARED\x10\x02*\xe9\x01\n\x16OffersUnreadableReason\x12(\n$OFFERS_UNREADABLE_REASON_UNSPECIFIED\x10\x00\x12(\n$OFFERS_UNREADABLE_REASON_UNREACHABLE\x10\x01\x12\'\n#OFFERS_UNREADABLE_REASON_UNREADABLE\x10\x02\x12&\n\"OFFERS_UNREADABLE_REASON_TIMED_OUT\x10\x03\x12*\n&OFFERS_UNREADABLE_REASON_NOT_PROBEABLE\x10\x04\x42TZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -52,7 +52,7 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_EVALOFFER'].fields_by_name['device_name']._loaded_options = None
   _globals['_EVALOFFER'].fields_by_name['device_name']._serialized_options = b'\272H\005r\003(\200\001'
   _globals['_EVALOFFER']._loaded_options = None
-  _globals['_EVALOFFER']._serialized_options = b'\272H\336\002\032\333\002\n\032eval_offer.model_of_vendor\0226the model is not a device of the vendor, or is missing\032\204\002this.model != 0 && (this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false)'
+  _globals['_EVALOFFER']._serialized_options = b'\272H\342\002\032\337\002\n\032eval_offer.model_of_vendor\0226the model is not a device of the vendor, or is missing\032\210\002this.model != 0 && (this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4, 11] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false)'
   _globals['_OFFERSKNOWN'].fields_by_name['source']._loaded_options = None
   _globals['_OFFERSKNOWN'].fields_by_name['source']._serialized_options = b'\272H\007\202\001\004\020\001 \000'
   _globals['_OFFERSUNREADABLE'].fields_by_name['reason']._loaded_options = None
@@ -61,22 +61,22 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_OFFERSUNREADABLE'].fields_by_name['detail']._serialized_options = b'\272H\005r\003(\200\010'
   _globals['_LISTEVALPLACESRESPONSE'].fields_by_name['places']._loaded_options = None
   _globals['_LISTEVALPLACESRESPONSE'].fields_by_name['places']._serialized_options = b'\272H\005\222\001\002\020@'
-  _globals['_EVALPLACEKIND']._serialized_start=1552
-  _globals['_EVALPLACEKIND']._serialized_end=1737
-  _globals['_OFFERSSOURCE']._serialized_start=1739
-  _globals['_OFFERSSOURCE']._serialized_end=1838
-  _globals['_OFFERSUNREADABLEREASON']._serialized_start=1841
-  _globals['_OFFERSUNREADABLEREASON']._serialized_end=2074
+  _globals['_EVALPLACEKIND']._serialized_start=1556
+  _globals['_EVALPLACEKIND']._serialized_end=1741
+  _globals['_OFFERSSOURCE']._serialized_start=1743
+  _globals['_OFFERSSOURCE']._serialized_end=1842
+  _globals['_OFFERSUNREADABLEREASON']._serialized_start=1845
+  _globals['_OFFERSUNREADABLEREASON']._serialized_end=2078
   _globals['_EVALPLACE']._serialized_start=166
   _globals['_EVALPLACE']._serialized_end=529
   _globals['_EVALOFFER']._serialized_start=532
-  _globals['_EVALOFFER']._serialized_end=1114
-  _globals['_OFFERSKNOWN']._serialized_start=1117
-  _globals['_OFFERSKNOWN']._serialized_end=1262
-  _globals['_OFFERSUNREADABLE']._serialized_start=1265
-  _globals['_OFFERSUNREADABLE']._serialized_end=1402
-  _globals['_LISTEVALPLACESREQUEST']._serialized_start=1404
-  _globals['_LISTEVALPLACESREQUEST']._serialized_end=1453
-  _globals['_LISTEVALPLACESRESPONSE']._serialized_start=1455
-  _globals['_LISTEVALPLACESRESPONSE']._serialized_end=1549
+  _globals['_EVALOFFER']._serialized_end=1118
+  _globals['_OFFERSKNOWN']._serialized_start=1121
+  _globals['_OFFERSKNOWN']._serialized_end=1266
+  _globals['_OFFERSUNREADABLE']._serialized_start=1269
+  _globals['_OFFERSUNREADABLE']._serialized_end=1406
+  _globals['_LISTEVALPLACESREQUEST']._serialized_start=1408
+  _globals['_LISTEVALPLACESREQUEST']._serialized_end=1457
+  _globals['_LISTEVALPLACESRESPONSE']._serialized_start=1459
+  _globals['_LISTEVALPLACESRESPONSE']._serialized_end=1553
 # @@protoc_insertion_point(module_scope)

@@ -58,7 +58,7 @@ func TestEveryRegisteredIdentityIsALegalNeed(t *testing.T) {
 // The registry holds every name the examples author, so a new example with a known device needs no
 // change here, and a name not in it is refused.
 func TestTheRegistryIsSeededFromTheExamples(t *testing.T) {
-	for _, n := range []string{"AMD MI210", "AMD MI300A", "AMD MI300X", "AWS Trainium2", "Apple Silicon", "CPU", "NVIDIA B200", "NVIDIA GPU", "NVIDIA H100", "NVIDIA L4"} {
+	for _, n := range []string{"AMD MI210", "AMD MI250", "AMD MI300A", "AMD MI300X", "AWS Trainium2", "Apple Silicon", "CPU", "NVIDIA B200", "NVIDIA GPU", "NVIDIA H100", "NVIDIA L4"} {
 		if _, ok := task.LookupAccelerator(n); !ok {
 			t.Errorf("%q is not registered", n)
 		}

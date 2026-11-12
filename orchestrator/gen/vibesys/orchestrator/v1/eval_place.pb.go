@@ -585,7 +585,7 @@ const file_vibesys_orchestrator_v1_eval_place_proto_rawDesc = "" +
 	"\n" +
 	"unreadable\x18\x05 \x01(\v2).vibesys.orchestrator.v1.OffersUnreadableH\x00R\n" +
 	"unreadableB\x0e\n" +
-	"\x05state\x12\x05\xbaH\x02\b\x01\"\xc6\x04\n" +
+	"\x05state\x12\x05\xbaH\x02\b\x01\"\xca\x04\n" +
 	"\tEvalOffer\x12E\n" +
 	"\x06vendor\x18\x01 \x01(\x0e2!.vibesys.cli.v1.AcceleratorVendorB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06vendor\x12@\n" +
@@ -593,8 +593,8 @@ const file_vibesys_orchestrator_v1_eval_place_proto_rawDesc = "" +
 	"\x05count\x18\x03 \x01(\rB\n" +
 	"\xbaH\a*\x05\x18\x80 (\x01R\x05count\x12)\n" +
 	"\vdevice_name\x18\x04 \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\n" +
-	"deviceName:\xe2\x02\xbaH\xde\x02\x1a\xdb\x02\n" +
-	"\x1aeval_offer.model_of_vendor\x126the model is not a device of the vendor, or is missing\x1a\x84\x02this.model != 0 && (this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false)\"\x91\x01\n" +
+	"deviceName:\xe6\x02\xbaH\xe2\x02\x1a\xdf\x02\n" +
+	"\x1aeval_offer.model_of_vendor\x126the model is not a device of the vendor, or is missing\x1a\x88\x02this.model != 0 && (this.model == 0 ? true : this.model == 99 ? this.vendor != 5 : this.model in [1, 2, 3, 4, 11] ? this.vendor == 2 : this.model in [5, 6, 7, 8] ? this.vendor == 1 : this.model == 9 ? this.vendor == 3 : this.model == 10 ? this.vendor == 4 : false)\"\x91\x01\n" +
 	"\vOffersKnown\x12I\n" +
 	"\x06source\x18\x01 \x01(\x0e2%.vibesys.orchestrator.v1.OffersSourceB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06source\x127\n" +
