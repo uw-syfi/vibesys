@@ -337,7 +337,7 @@ func TestAMessageMissingItsBodyIsRefused(t *testing.T) {
 func TestAnIntervalBetweenReportsIsFiveMinutesOrMoreOrAbsent(t *testing.T) {
 	start := func(every *durationpb.Duration) *pb.Command {
 		return &pb.Command{Id: "c", Body: &pb.Command_StartRun{StartRun: &pb.StartRun{
-			Repository: "repo", Task: "task", Lead: &pb.AgentSpec{Harness: pb.Harness_HARNESS_CLAUDE_CODE}, SummaryEvery: every,
+			Repository: "repo", Task: "task", FanoutLimit: 1, Lead: &pb.AgentSpec{Harness: pb.Harness_HARNESS_CLAUDE_CODE}, SummaryEvery: every,
 		}}}
 	}
 	for _, tc := range []struct {

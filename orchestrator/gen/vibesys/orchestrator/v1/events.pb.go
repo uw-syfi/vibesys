@@ -2389,13 +2389,13 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\tAgentSpec\x12D\n" +
 	"\aharness\x18\x01 \x01(\x0e2 .vibesys.orchestrator.v1.HarnessB\b\xbaH\x05\x82\x01\x02\x10\x01R\aharness\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12)\n" +
-	"\x10reasoning_effort\x18\x03 \x01(\tR\x0freasoningEffort\"\x88\x05\n" +
+	"\x10reasoning_effort\x18\x03 \x01(\tR\x0freasoningEffort\"\x91\x05\n" +
 	"\bStartRun\x12'\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\n" +
 	"repository\x12\x1b\n" +
-	"\x04task\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04task\x12!\n" +
-	"\ffanout_limit\x18\x03 \x01(\rR\vfanoutLimit\x12\x86\x01\n" +
+	"\x04task\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04task\x12*\n" +
+	"\ffanout_limit\x18\x03 \x01(\rB\a\xbaH\x04*\x02(\x01R\vfanoutLimit\x12\x86\x01\n" +
 	"\x04lead\x18\x05 \x01(\v2\".vibesys.orchestrator.v1.AgentSpecBN\xbaHK\xba\x01E\n" +
 	"\x16start_run.lead.harness\x12\x18the lead needs a harness\x1a\x11this.harness != 0\xc8\x01\x01R\x04lead\x12\x14\n" +
 	"\x05brief\x18\x06 \x01(\tR\x05brief\x12H\n" +
@@ -2435,14 +2435,14 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\x04lead\x18\x02 \x01(\v2\".vibesys.orchestrator.v1.AgentSpecBP\xbaHM\xba\x01G\n" +
 	"\x18begin_setup.lead.harness\x12\x18the lead needs a harness\x1a\x11this.harness != 0\xc8\x01\x01R\x04lead\x12\x14\n" +
 	"\x05brief\x18\x03 \x01(\tR\x05brief\x12H\n" +
-	"\fallow_agents\x18\x04 \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\vallowAgents\"\xe2\x03\n" +
+	"\fallow_agents\x18\x04 \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\vallowAgents\"\xeb\x03\n" +
 	"\rCompleteSetup\x12\x1e\n" +
 	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12\x1b\n" +
 	"\x04task\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04task\x127\n" +
 	"\fmax_cost_usd\x18\x03 \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x00R\n" +
 	"maxCostUsd\x88\x01\x01\x12>\n" +
-	"\bmax_time\x18\x04 \x01(\v2\x19.google.protobuf.DurationB\b\xbaH\x05\xaa\x01\x02*\x00R\amaxTime\x12!\n" +
-	"\ffanout_limit\x18\x05 \x01(\rR\vfanoutLimit\x12\x8b\x01\n" +
+	"\bmax_time\x18\x04 \x01(\v2\x19.google.protobuf.DurationB\b\xbaH\x05\xaa\x01\x02*\x00R\amaxTime\x12*\n" +
+	"\ffanout_limit\x18\x05 \x01(\rB\a\xbaH\x04*\x02(\x01R\vfanoutLimit\x12\x8b\x01\n" +
 	"\x04lead\x18\x06 \x01(\v2\".vibesys.orchestrator.v1.AgentSpecBS\xbaHP\xba\x01J\n" +
 	"\x1bcomplete_setup.lead.harness\x12\x18the lead needs a harness\x1a\x11this.harness != 0\xc8\x01\x01R\x04lead\x12\x14\n" +
 	"\x05brief\x18\a \x01(\tR\x05brief\x12C\n" +
