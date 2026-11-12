@@ -287,7 +287,7 @@ func TestReadSetupReadsTheDraftAndTheStageOfAFailedJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := st.Submit(ctx, core.Submission{
-		Context: core.CallContext{Scope: s.scope, Run: "run-1"}, Spec: core.JobSpec{Commit: commitID(0), Environment: core.EnvironmentHost, Settings: core.CommandSettings{Argv: []string{"true"}}},
+		Context: core.CallContext{Scope: s.scope, Run: "run-1"}, Spec: core.JobSpec{Commit: commitID(0), Environment: core.EnvironmentHost, Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"true"}}},
 		At: s.submitAt,
 	}); err != nil {
 		t.Fatal(err)

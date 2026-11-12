@@ -57,7 +57,11 @@ export function ObjectiveSummary(props: {
         {objective.name}
       </Text>
       <Text variant="small" tone="muted">
-        {objective.better === 'lower' ? 'Lower is better' : 'Higher is better'}
+        {objective.better === null
+          ? 'Direction unavailable'
+          : objective.better === 'lower'
+            ? 'Lower is better'
+            : 'Higher is better'}
       </Text>
       <Row gap="space-2" align="baseline" wrap>
         <Text

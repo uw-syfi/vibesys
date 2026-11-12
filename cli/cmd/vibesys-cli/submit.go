@@ -16,73 +16,18 @@ import (
 // submitCommand is `submit <kind> <commit> ...`.
 func submitCommand(ctx context.Context, d deps, args []string) int {
 	if len(args) == 0 {
-		return fail(d, d.jsonErrors, usagef("submit: name the kind of job: check, measure, command or profile"))
+		return fail(d, d.jsonErrors, usagef("submit: name the kind of job: check, measure or command"))
 	}
 	switch args[0] {
 	case "command":
 		return submitJob(ctx, d, args[1:])
 	case "profile":
-		return submitProfile(ctx, d, args[1:])
+		return fail(d, d.jsonErrors, usagef("submit profile: retired; run the load as a command in the task's image, with the profiler wrapping the candidate's server: submit command <commit> --image harness --wrap '<profiler>' -- <load argv>"))
 	case "check", "measure":
 		return submitFlow(ctx, d, args[0], args[1:])
 	default:
-		return fail(d, d.jsonErrors, usagef("submit: %q is not a kind of job (check, measure, command or profile)", args[0]))
+		return fail(d, d.jsonErrors, usagef("submit: %q is not a kind of job (check, measure or command)", args[0]))
 	}
-}
-
-// submitProfile is `submit profile <commit> [--wrap prefix]`: the task's [profile] load, run in
-// the task's image against the candidate's server, which starts under the wrapper. It is a command
-// job, so it is never cached or scored, and its artifacts are kept with it.
-func submitProfile(ctx context.Context, d deps, args []string) int {
-	flagArgs, extra, hasCommand := splitDashes(args)
-	fs, c := newFlags("submit profile", d)
-	var (
-		wrap    = fs.String("wrap", "", "an argv prefix the candidate's server starts under, such as a profiler's command line, split into words as --service is")
-		timeout = fs.Duration("timeout", 0, "the time limit of the load, such as 10m (default: the task's [profile] timeout); the server's startup time is added")
-		note    = fs.String("note", "", "a note to attach to the job")
-		plan    = fs.Uint("plan", 0, "the number of a plan to link the job to")
-		wait    = fs.Bool("wait", false, "block until the job is final, then exit as `wait` does")
-	)
-	positional, err := parse(fs, flagArgs)
-	if err != nil {
-		return parseFailed(d, fs, err)
-	}
-	asJSON := c.json
-	switch {
-	case len(positional) != 1:
-		return fail(d, asJSON, usagef("submit profile: give one commit"))
-	case hasCommand || len(extra) > 0:
-		return fail(d, asJSON, usagef("submit profile: runs the task's [profile] load, so it takes no command after --; use submit command for one of your own"))
-	case *timeout < 0:
-		return fail(d, asJSON, usagef("--timeout: %v is negative", *timeout))
-	}
-	if err := checkPlanFlags(fs, *plan, false); err != nil {
-		return fail(d, asJSON, err)
-	}
-	prefix, err := splitWords("--wrap", *wrap)
-	if err != nil {
-		return fail(d, asJSON, err)
-	}
-	callCtx, err := c.callContext(d)
-	if err != nil {
-		return fail(d, asJSON, err)
-	}
-	commit, err := d.commit(ctx, callCtx, positional[0])
-	if err != nil {
-		return fail(d, asJSON, err)
-	}
-	settings := &cliv1.CommandSettings{Profile: &cliv1.ProfileRequest{Wrap: prefix}}
-	if *timeout > 0 {
-		settings.Timeout = durationpb.New(*timeout)
-	}
-	return send(ctx, d, asJSON, *wait, &cliv1.SubmitRequest{
-		Context: callCtx,
-		Spec: &cliv1.JobSpec{
-			Commit: commit, Environment: cliv1.EnvironmentKind_ENVIRONMENT_KIND_DOCKER, Placement: c.placement, Allocation: c.alloc,
-			Settings: &cliv1.JobSpec_Command{Command: settings},
-		},
-		Note: *note, Plan: uint32(*plan),
-	})
 }
 
 // unavailable is a refusal the command makes before it calls the daemon.
@@ -160,11 +105,12 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 	flagArgs, argv, hasCommand := splitDashes(args)
 	fs, c := newFlags("submit command", d)
 	var (
+		image   = fs.String("image", "", "required: the image the command runs in: harness (the task's image, where its check and benchmark run, beside the candidate's server on a task with [candidate]) or candidate (the image built from the commit's [candidate] dockerfile)")
 		env     = fs.String("env", "", "the environment to run in: host or docker (default: the task's)")
-		timeout = fs.Duration("timeout", 0, "the time limit of the command, such as 10m (default: the daemon's)")
-		service = fs.String("service", "", "a long-lived process to run the command against, split into words as a shell would, quotes kept")
+		timeout = fs.Duration("timeout", 0, "the time limit of the command, such as 10m (default: the daemon's); beside a candidate's server, the server's startup time is added")
+		service = fs.String("service", "", "a long-lived process to run the command against, split into words as a shell would, quotes kept; not beside a candidate's server")
 		probe   = fs.String("probe", "", "a command that succeeds when the service is ready, split as --service is")
-		wrap    = fs.String("wrap", "", "an argv prefix, split as --service is, put in front of --service when it is given and of the command otherwise")
+		wrap    = fs.String("wrap", "", "an argv prefix, split as --service is: with --image harness on a task with [candidate], put in front of the candidate's server (a profiler's command line, say); otherwise in front of --service when it is given and of the command when not")
 		note    = fs.String("note", "", "a note to attach to the job")
 		noCache = fs.Bool("no-cache", false, "run a new job even when a matching one exists")
 		plan    = fs.Uint("plan", 0, "the number of a plan to link the job to")
@@ -188,10 +134,24 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 	if err := checkPlanFlags(fs, *plan, false); err != nil {
 		return fail(d, asJSON, err)
 	}
+	if *image == "" {
+		return fail(d, asJSON, usagef("submit command: --image is required: harness (the task's image, where its check and benchmark run) or candidate (the image built from the commit's [candidate] dockerfile)"))
+	}
+	imageKind, err := commandImage(*image)
+	if err != nil {
+		return fail(d, asJSON, err)
+	}
 	kind, err := environmentKind(*env)
 	if err == nil {
 		err = refuseHostPlacement(fs, *env)
 	}
+	if err == nil && imageKind == cliv1.CommandImage_COMMAND_IMAGE_CANDIDATE && *env == "host" {
+		err = usagef("--image candidate: the candidate's image runs in docker, so not with --env host")
+	}
+	if err != nil {
+		return fail(d, asJSON, err)
+	}
+	prefix, err := splitWords("--wrap", *wrap)
 	if err != nil {
 		return fail(d, asJSON, err)
 	}
@@ -204,11 +164,9 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 		return fail(d, asJSON, err)
 	}
 
-	prefix, err := splitWords("--wrap", *wrap)
-	if err != nil {
-		return fail(d, asJSON, err)
-	}
-	settings := &cliv1.CommandSettings{Argv: argv}
+	// The daemon puts the wrapper where it goes, as only it reads the task: in front of the
+	// candidate's server, the service or the command.
+	settings := &cliv1.CommandSettings{Argv: argv, Image: imageKind, Wrap: prefix}
 	if *timeout > 0 {
 		settings.Timeout = durationpb.New(*timeout)
 	}
@@ -224,9 +182,7 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 		if len(serviceArgv) == 0 {
 			return fail(d, asJSON, usagef("--service: %q has no command in it", *service))
 		}
-		settings.Service = &cliv1.ServiceSpec{Argv: append(prefix, serviceArgv...), Probe: probeArgv}
-	} else {
-		settings.Argv = append(prefix, argv...)
+		settings.Service = &cliv1.ServiceSpec{Argv: serviceArgv, Probe: probeArgv}
 	}
 	return send(ctx, d, asJSON, *wait, &cliv1.SubmitRequest{
 		Context: callCtx,
@@ -236,6 +192,17 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 		},
 		NoCache: *noCache, Note: *note, Plan: uint32(*plan),
 	})
+}
+
+// commandImage reads --image, which names one of the two images a command runs in.
+func commandImage(name string) (cliv1.CommandImage, error) {
+	switch name {
+	case "harness":
+		return cliv1.CommandImage_COMMAND_IMAGE_HARNESS, nil
+	case "candidate":
+		return cliv1.CommandImage_COMMAND_IMAGE_CANDIDATE, nil
+	}
+	return 0, usagef("--image: %q is neither harness (the task's image, where its check and benchmark run) nor candidate (the image built from the commit's [candidate] dockerfile)", name)
 }
 
 // checkPlanFlags refuses a --plan that cannot name a plan, and --plan beside --no-plan: a job tests

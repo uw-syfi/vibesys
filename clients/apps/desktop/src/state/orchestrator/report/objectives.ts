@@ -31,7 +31,8 @@ export interface MeasuredPointView {
 
 export interface ObjectiveReport {
   readonly name: string;
-  readonly better: Better;
+  /** Which way improves, or null when only the summary declares the objective. */
+  readonly better: Better | null;
   /** What the value is counted in, as the standing says; null when it says none. */
   readonly unit: string | null;
   /** In the order the host sent them: oldest first. */
@@ -70,17 +71,33 @@ const boundUnitOf = (
 });
 
 /**
- * The objectives of the run in the order the host serves them (the task's own), then the ones that
- * have a declared bound and no measurement yet, by name.
+ * The objectives of the run in the summary's order (the task's own), then measured objectives in
+ * their served order, then objectives that only have a bound, by name. The summary and search are
+ * disjoint feeds, so either can be absent without hiding what the other has already served.
  */
 export function objectiveReports(
-  search: SearchState,
+  search: SearchState | undefined,
   standings: readonly ObjectiveStanding[],
 ): readonly ObjectiveReport[] {
-  const bounds = new Map(objectiveBounds(search).map(bound => [bound.objective, bound]));
+  const bounds = new Map(
+    (search === undefined ? [] : objectiveBounds(search)).map(bound => [bound.objective, bound]),
+  );
   const standingOf = new Map(standings.map(standing => [standing.name, standing]));
-  const measured: ObjectiveReport[] = search.series.map(series => {
-    const points = series.points.map(point => ({
+  const series = search?.series ?? [];
+  const seriesOf = new Map(series.map(entry => [entry.objective, entry]));
+  const seen = new Set<string>();
+  const names = [
+    ...standings.map(standing => standing.name),
+    ...series.map(entry => entry.objective),
+    ...[...bounds.keys()].sort((a, b) => a.localeCompare(b)),
+  ].filter(name => {
+    if (seen.has(name)) return false;
+    seen.add(name);
+    return true;
+  });
+  return names.map((name): ObjectiveReport => {
+    const objectiveSeries = seriesOf.get(name);
+    const points = (objectiveSeries?.points ?? []).map(point => ({
       id: point.jobId,
       commit: point.commit,
       atMs: ms(point.at) ?? 0,
@@ -88,37 +105,25 @@ export function objectiveReports(
       bestSoFar: point.bestSoFar,
     }));
     const bestPath = points.filter(point => point.bestSoFar);
-    const bound = bounds.get(series.objective);
+    const bound = bounds.get(name);
+    const standing = standingOf.get(name);
     return {
-      name: series.objective,
-      better: betterOf(series.direction),
-      unit: unitOf(standingOf.get(series.objective)),
+      name,
+      better:
+        objectiveSeries !== undefined
+          ? betterOf(objectiveSeries.direction)
+          : bound === undefined
+            ? null
+            : betterOf(bound.direction),
+      unit: unitOf(standing),
       points,
       bestPath,
-      bestValue: standingOf.get(series.objective)?.bestValue,
-      headValue: standingOf.get(series.objective)?.headValue,
-      percentOfBound: standingOf.get(series.objective)?.headPercentOfBound,
-      bestPercentOfBound: standingOf.get(series.objective)?.bestPercentOfBound,
+      bestValue: standing?.bestValue,
+      headValue: standing?.headValue,
+      percentOfBound: standing?.headPercentOfBound,
+      bestPercentOfBound: standing?.bestPercentOfBound,
       bound,
-      ...boundUnitOf(standingOf.get(series.objective)),
+      ...boundUnitOf(standing),
     };
   });
-  const seen = new Set(measured.map(objective => objective.name));
-  const unmeasured: ObjectiveReport[] = [...bounds.values()]
-    .filter(bound => !seen.has(bound.objective))
-    .sort((a, b) => a.objective.localeCompare(b.objective))
-    .map(bound => ({
-      name: bound.objective,
-      better: betterOf(bound.direction),
-      unit: unitOf(standingOf.get(bound.objective)),
-      points: [],
-      bestPath: [],
-      bestValue: standingOf.get(bound.objective)?.bestValue,
-      headValue: standingOf.get(bound.objective)?.headValue,
-      percentOfBound: standingOf.get(bound.objective)?.headPercentOfBound,
-      bestPercentOfBound: standingOf.get(bound.objective)?.bestPercentOfBound,
-      bound,
-      ...boundUnitOf(standingOf.get(bound.objective)),
-    }));
-  return [...measured, ...unmeasured];
 }

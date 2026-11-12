@@ -55,6 +55,5 @@ and finite non-negative values; anything else is an error, never a score.
 
 ## Profile (`profile`)
 
-A 60-second smoke replay of two corpus entries: the load to record under a
-profiler (`submit profile --wrap ...`). It is never scored; never use its
-numbers to select a candidate.
+A 60-second smoke replay of two corpus entries, a load to record under a
+profiler. It is never scored; never use its numbers to select a candidate.

@@ -126,7 +126,7 @@ func TestHoldCopiesDeeply(t *testing.T) {
 	started := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	code := 3
 	in := core.Job{
-		ID: "j1", Spec: core.JobSpec{Settings: core.CommandSettings{Argv: []string{"a", "b"}, Service: &core.ServiceSpec{Argv: []string{"s"}}}},
+		ID: "j1", Spec: core.JobSpec{Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"a", "b"}, Service: &core.ServiceSpec{Argv: []string{"s"}}}},
 		Notes: []core.Note{{Text: "n"}}, Plans: []core.PlanNumber{1}, StartedAt: &started, ExitCode: &code,
 		Environment: &core.Fingerprint{Facts: map[string]string{"k": "v"}},
 	}

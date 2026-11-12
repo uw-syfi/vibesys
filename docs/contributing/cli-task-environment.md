@@ -52,10 +52,11 @@ belong to the Python evaluator package and stay refused.
 ### A task of two images (schema 0.2)
 
 `[candidate]` is optional. A 0.2 manifest without it is a task of one image,
-read like a 0.1 command task: the task image runs the check, the benchmark and
-the profile command, which own the system under test (a microservice task, for
-example, deploys its app from its own trusted code). It has no candidate image,
-no server, and no standard profile (`submit command --wrap` profiles it). With
+read like a 0.1 command task: the task image runs the check and the benchmark,
+which own the system under test (a microservice task, for example, deploys its
+app from its own trusted code). It has no candidate image and no server; a
+command job runs with `--image harness`, where the check and the benchmark run,
+and `--wrap` puts a profiler in front of the command. With
 no `Dockerfile` either, its commands run on the host, which the Metal backend
 needs: the `Llama-3.1-8B-Instruct-MLX-8bit` example is such a task, whose
 `bench.py` starts the candidate's server from the checkout, asks it and stops
@@ -63,8 +64,8 @@ its process group in each of its modes. The rest of this section describes a
 manifest with `[candidate]`.
 
 Schema 0.2 splits the judge from the candidate. The task's `Dockerfile` still
-builds the task image, which runs the check, the benchmark and the profile
-load. The candidate's commit builds a second image, the candidate image, from
+builds the task image, which runs the check and the benchmark. The candidate's
+commit builds a second image, the candidate image, from
 a Dockerfile and context it names, and its server runs there:
 
 ```toml
@@ -91,10 +92,6 @@ command = ["python", "/task/bench.py"]
 timeout_seconds = 3600
 result_protocol = 2
 
-[profile]
-command = ["python", "/task/bench.py", "--short"]
-timeout_seconds = 900
-
 [environment]
 needs = ["gpu", "mounts"]
 ```
@@ -103,27 +100,37 @@ The schema is `TaskManifestV02` in `proto/vibesys/cli/v1/task.proto`, the only
 definition of its keys; the CLI decodes the TOML into it and refuses an
 unknown key by name. Its keys are every key of 0.1, with the same meaning,
 except `[evaluator]` and a command's `entrypoint` and `args`, which it refuses
-by name, plus an optional `[candidate]`; and `[profile]` holds a command:
+by name, plus an optional `[candidate]`:
 
 - `version`, `backends`, `metric`;
 - `[agent]` `domain` and `interface`;
-- `[build]`, `[accuracy]` (or `[check]`), `[benchmark]` (or `[measure]`) and
-  `[profile]`, each with `command` and `timeout_seconds`; the benchmark also
+- `[build]`, `[accuracy]` (or `[check]`) and `[benchmark]` (or `[measure]`),
+  each with `command` and `timeout_seconds`; the benchmark also
   has `result_protocol`, `[benchmark.result]` (`json_argument`, `metric`) and
   `requires_accuracy`;
 - `[candidate]` `dockerfile`, `context`, `serve`, `ready`,
   `startup_timeout_seconds` and `allowed_bases`;
 - `[environment]` `needs`, `docker_in_docker` and `modal` (refused, as in 0.1);
 - `[profile_guided]`, `[resources]`, `[workspace]`, `[plan]`, `[catalogue]` and
-  `[[comparison]]`, accepted without being read, as in 0.1.
+  `[[comparison]]`, accepted without being read, as in 0.1;
+- `[profile]`, retired with the profile job: still accepted with its `command`
+  and `timeout_seconds`, so a manifest written for it loads, and not read.
 
 Every command of a job then runs in two containers: the candidate's server
 (`serve`, from the checkout's root, with `${PORT}` replaced by the port of the
 job) in the candidate image, and the command in the task image, joined to the
 server's network namespace, with `VIBESYS_SERVICE_URL=http://127.0.0.1:<port>`.
-`submit profile <commit> --wrap '<prefix>'` starts the server under the prefix,
-such as a profiler's command line, and drives it with `[profile]`; it is a
-command job, never cached or scored, and its artifacts are kept with it.
+A command job names the image it runs in. `submit command <commit> --image
+harness -- <argv>` runs the command in the task image beside the candidate's
+server, exactly as the check and the benchmark run (the same server start,
+readiness poll, `VIBESYS_SERVICE_URL` and resource shares), and `--wrap
+'<prefix>'` starts the server under the prefix, such as a profiler's command
+line; the server's startup time is added to the command's `--timeout`. `submit
+command <commit> --image candidate -- <argv>` runs the command in the candidate
+image, with no server, and `--wrap` goes in front of the command (or of
+`--service`). Either is never cached or scored, and its artifacts are kept with
+it. A profile is a harness command: `submit command <sha> --image harness
+--wrap '<profiler>' -- <load argv>`.
 
 ### A server kept for the job (schema 0.2, `[service]`)
 

@@ -297,4 +297,11 @@ image plus the task directory; `bench.py` runs the golden gate (`check`), the
 scored AgentX replay (`benchmark`) and a smoke replay to profile (`profile`)
 against the server at `VIBESYS_SERVICE_URL`. Full measurements run for 15
 minutes, plus dataset preparation, warmup and drain; see the task objective
-for the exact recipe and comparability limits.
+for the exact recipe and comparability limits. The smoke replay is an unscored
+command in the task image, beside the candidate's server, which `--wrap` starts
+under a profiler:
+
+```bash
+vibesys-cli submit command <sha> --task agentx --image harness \
+  --wrap '<profiler command line>' -- python /task/bench.py profile
+```

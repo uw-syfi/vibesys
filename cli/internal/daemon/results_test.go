@@ -258,7 +258,7 @@ func TestViewPlanFillsEachLinkedJobsVerdict(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []core.Commit{cm(1), cm(2)} {
-		spec := wire.JobSpec(core.JobSpec{Commit: c, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Argv: []string{"exit", "0"}}})
+		spec := wire.JobSpec(core.JobSpec{Commit: c, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"exit", "0"}}})
 		if _, err := r.client.Submit(ctx, &cliv1.SubmitRequest{Context: call, Spec: spec, Plan: created.GetPlan().GetNumber()}); err != nil {
 			t.Fatalf("Submit: %v", err)
 		}

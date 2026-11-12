@@ -142,7 +142,7 @@ func (h *neighborhood) submit(d *neighbor) {
 	defer cancel()
 	out, err := d.app.Submit(ctx, app.SubmitRequest{Context: d.call, Spec: core.JobSpec{
 		Commit: commitOf(d), Environment: core.EnvironmentHost,
-		Settings: core.CommandSettings{Argv: []string{"mark", name, ";", "hold", gate, ";", "exit", "0"}},
+		Settings: core.CommandSettings{Image: core.ImageHarness, Argv: []string{"mark", name, ";", "hold", gate, ";", "exit", "0"}},
 	}})
 	if err != nil {
 		h.violation = fmt.Sprintf("%s could not submit: %v", d.user, err)

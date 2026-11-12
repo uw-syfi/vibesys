@@ -356,7 +356,7 @@ func testSubmit(t *testing.T, newStore New) {
 				case 0:
 					s.Spec.Settings = core.CheckSettings{}
 				case 1:
-					s.Spec.Settings = core.CommandSettings{Argv: []string{"ls"}}
+					s.Spec.Settings = core.CommandSettings{Image: core.ImageHarness, Argv: []string{"ls"}}
 					s.Key = ""
 				default:
 					s.Spec.Settings = core.MeasureSettings{Samples: uint32(g.pick(6)), Recheck: g.pick(2) == 0}

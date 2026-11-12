@@ -85,7 +85,7 @@ schema or a seed. The model is pinned to revision
   split (1400 schemas of at most 1500 characters; the first 96 of the fixed
   order are asked), with validity broken down by the schema's source. Run it on
   a final or promoted commit, never in the loop (no manifest section runs it):
-  `vibesys-cli submit command <commit> -- uv run --frozen --project
+  `vibesys-cli submit command <commit> --image harness -- uv run --frozen --project
   .vibesys/tasks/default python .vibesys/tasks/default/bench.py holdout`. It
   takes about 7 minutes with the baseline (48 schemas took 3.4 minutes). It reports `latency_ms.p50` and the
   other benchmark metrics, plus `valid_frac.<source>` for each of `github`,
@@ -94,9 +94,8 @@ schema or a seed. The model is pinned to revision
   column), and fails as the benchmark does when the answers are not correct.
   The records are kept as `holdout.jsonl` in the job's artifacts.
 - **Profile.** `bench.py profile` asks 4 requests and keeps the server log and
-  answers with the job. A task of one image has no `[profile]` section for
-  `submit profile`; run the mode as a command job under a profiler's wrapper:
-  `vibesys-cli submit command HEAD --wrap '<profiler>' -- uv run --frozen
+  answers with the job. Run the mode as a command job under a profiler's wrapper:
+  `vibesys-cli submit command HEAD --image harness --wrap '<profiler>' -- uv run --frozen
   --project .vibesys/tasks/default python .vibesys/tasks/default/bench.py profile`.
 
 The weights and the dataset come from the Hugging Face cache and are
