@@ -1,12 +1,11 @@
-"""Modal deployment of the baseline engine for the H100 ``default`` task.
+"""Modal deployment of the baseline engine on two H100s.
 
-``vibesys --modal`` deploys this file (the run environment's default
-entrypoint), waits for ``/health`` on the web endpoint, and runs the trusted
-checker and benchmark inside the serving container against
-``http://localhost:8000``. The engine is the same ``python -m engine.server``
-every other task launches; this file only supplies the image, two H100s and a
-persistent Hugging Face cache, so the first start downloads the BF16 weights
-(about 70 GB) and later starts read them from the volume.
+``modal deploy main.py`` serves the same ``python -m engine.server`` that every
+task launches, behind a Modal web endpoint whose readiness URL is ``/health``.
+It is a development convenience for CUDA hosts: none of this project's tasks
+runs on Modal. This file only supplies the image, two H100s and a persistent
+Hugging Face cache, so the first start downloads the BF16 weights (about
+70 GB) and later starts read them from the volume.
 """
 
 from __future__ import annotations

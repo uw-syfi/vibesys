@@ -1,11 +1,16 @@
-Accuracy checker for Qwen3.6-35B-A3B (service-style).
+Accuracy checker for Qwen3.6-35B-A3B (service-style), shared by every task.
+
+`checker.py` here is the canonical source. Each task carries a byte-for-byte
+copy as its own `checker.py`, so the checker is part of the task's version and
+of its task image, never read from a candidate's checkout; the example tests
+fail when a copy drifts. Edit this file, then copy it into every task.
 
 The checker drives a **running** OpenAI-compatible server over HTTP. It does
 not import the candidate's model or load weights locally, so it works the same
-against a local, Docker, or remote Modal server. Point it at the server URL:
+against any server it can reach. Point it at the server URL:
 
     python checker.py --url http://localhost:8000
-    python checker.py --url https://<app>.modal.run --seed 0
+    python checker.py --url http://localhost:8000 --seed 0
 
 Correctness is established with three reference-free gates (see `--help` for
 thresholds):

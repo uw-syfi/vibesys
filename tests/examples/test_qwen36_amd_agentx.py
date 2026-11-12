@@ -115,7 +115,7 @@ def test_agentx_tasks_differ_only_in_their_hardware() -> None:
 
 @pytest.mark.parametrize("task", _AGENTX_TASKS)
 def test_agentx_task_images_carry_the_shared_service_checker(task: str) -> None:
-    shared = _PROJECT / ".vibesys/tasks/default/accuracy_checker/checker.py"
+    shared = _PROJECT / ".vibesys/shared/accuracy_checker/checker.py"
     assert (task_root(_PROJECT, task) / "checker.py").read_bytes() == shared.read_bytes()
     dockerfile = (task_root(_PROJECT, task) / "Dockerfile").read_text()
     assert "\nFROM ghcr.io/uw-syfi/vibesys-evaluator-llm-serving:" in dockerfile
@@ -197,7 +197,7 @@ def test_tracelab_scale_task_is_a_two_image_task_of_the_baseline_engine() -> Non
 
 def test_tracelab_scale_task_image_carries_the_checker_and_the_adapter() -> None:
     root = task_root(_PROJECT, _SCALE)
-    shared = _PROJECT / ".vibesys/tasks/default/accuracy_checker/checker.py"
+    shared = _PROJECT / ".vibesys/shared/accuracy_checker/checker.py"
     assert (root / "checker.py").read_bytes() == shared.read_bytes()
     dockerfile = (root / "Dockerfile").read_text()
     assert "HF_HOME=/vibesys/mounts/hf HF_HUB_OFFLINE=1" in dockerfile

@@ -1,8 +1,8 @@
-# The task image: the service checker (accuracy_checker/), the TraceLab adapter (tracelab/) and
+# The task image: the service checker (checker.py), the TraceLab adapter (tracelab/) and
 # Request Factory's session_runner at the revision the adapter replays with. It has no GPU and
 # reaches the candidate's server only over HTTP, at VIBESYS_SERVICE_URL. vibesys-cli builds it
 # with this directory as the context. checker.py is a byte-for-byte copy of
-# .vibesys/tasks/default/accuracy_checker/checker.py, kept here so that it is part of the task's
+# .vibesys/shared/accuracy_checker/checker.py, kept here so that it is part of the task's
 # version and of this image, never read from a candidate's checkout. Every base is pinned by
 # digest and every Python distribution by hash.
 

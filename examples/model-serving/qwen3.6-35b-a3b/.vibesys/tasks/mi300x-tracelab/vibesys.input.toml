@@ -6,7 +6,7 @@ domain = "llm-serving"
 interface = "service"
 
 [accuracy]
-command = ["uv", "run", "python", "-I", "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/checker.py"]
+command = ["uv", "run", "python", "-I", "${PROJECT_ROOT}/.vibesys/shared/accuracy_checker/checker.py"]
 timeout_seconds = 300
 
 [evaluator]

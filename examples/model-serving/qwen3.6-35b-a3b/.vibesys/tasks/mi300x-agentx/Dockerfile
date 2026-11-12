@@ -7,7 +7,7 @@
 # its release notes record: the vibesys_evaluator package and agentx-harness 1.0.7, the
 # harness version the earlier [evaluator] (vibesys-evaluator-agentx 0.1.0) locked, replayed
 # with the same recipe. checker.py is a byte-for-byte copy of
-# .vibesys/tasks/default/accuracy_checker/checker.py, kept in this directory so that it is part
+# .vibesys/shared/accuracy_checker/checker.py, kept in this directory so that it is part
 # of the task's version and of this image, never read from a candidate's checkout.
 FROM ghcr.io/uw-syfi/vibesys-evaluator-llm-serving:0.2.0rc1@sha256:8650a93b953c6e7a46b0adcf29f7d0de7e61357e914a79f8413555b1b55f83d0
 

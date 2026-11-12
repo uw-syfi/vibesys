@@ -62,8 +62,8 @@ for the existing service checker. Temperature-zero requests must be repeatable.
 The short-answer correctness probes require a non-thinking default; preserve
 explicit template options and any reasoning history supplied by AgentX.
 
-Run the configured service checker before benchmarking. It is shared with the
-existing H100 task and checks sentinel echo, known answers, and greedy
+Run the configured service checker before benchmarking. Every task of this
+project shares it; it checks sentinel echo, known answers, and greedy
 repeatability. These are behavioral probes, **not numerical parity or proof of
 checkpoint identity**. Correct hybrid state and routing remain requirements;
 a passing behavioral probe does not authorize altered model execution.
@@ -82,6 +82,6 @@ Optimize output tokens/s (maximize), TTFT p50/p90 and TPOT p50/p90 in
 milliseconds (minimize), with 3% relative noise tolerance. P90 request latency
 is diagnostic. Smoke mode is unscored and cannot produce an accepted result.
 Failed requests, fewer output tokens, changed traces or a lower context cap
-are not improvements. Maintain separate frontiers for each hardware task;
-the H100 fixed-text Request Factory task has a different workload and metrics.
+are not improvements. Maintain separate frontiers for each hardware task and
+workload.
 AgentX measures serving performance, not coding-agent task success.

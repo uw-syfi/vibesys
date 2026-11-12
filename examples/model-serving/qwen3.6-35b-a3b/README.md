@@ -4,15 +4,14 @@ One candidate project supports these hardware and workload tasks:
 
 | Task | Hardware | Workload |
 | --- | --- | --- |
-| `default` | 2 NVIDIA H100 GPUs | Fixed-text Request Factory |
 | `mi2104x-agentx` | 4 AMD MI210 GPUs | AgentX |
 | `mi300x-agentx` | 1 AMD MI300X GPU | AgentX |
 | `mi2104x-tracelab` | 4 AMD MI210 GPUs | TraceLab recorded sessions |
 | `mi300x-tracelab` | 1 AMD MI300X GPU | TraceLab recorded sessions |
+| `mi2508x-tracelab-scale` | 1 AMD MI250 node (8 GCDs) | TraceLab concurrency sweep |
 
 Use `examples/model-serving/qwen3.6-35b-a3b` as the input project and select
-the task when creating a run. The H100 `default` task supports Modal-backed
-runs.
+the task when creating a run.
 
 ## Baseline engine
 
@@ -21,7 +20,7 @@ OpenAI-compatible server that runs and is slow:
 
 - Transformers runs the BF16 checkpoint, pinned in `engine/checkpoint.json`,
   sharded over every visible GPU with `device_map="auto"`. The same code runs on
-  two H100s, four MI210s or one MI300X. It refuses to start
+  four MI210s, one MI300X or an MI250 node, and on CUDA GPUs. It refuses to start
   rather than offload weights to the host.
 - One worker thread prefills new requests one at a time, in arrival order, then
   runs one decode step for every running request together: their caches are
@@ -48,7 +47,8 @@ python -m engine.server --host 127.0.0.1 --port <port>
 
 Its readiness URL is `/health`; the port opens once the weights are loaded.
 On Modal, [`main.py`](main.py) deploys the same command on two H100s with a
-persistent Hugging Face cache volume.
+persistent Hugging Face cache volume, for development on CUDA; no task runs
+there.
 [`.vibesys/shared/cpu_check/`](.vibesys/shared/cpu_check/) checks the HTTP contract
 on CPU against tiny random checkpoints of the same architecture:
 
@@ -69,7 +69,6 @@ This project also offers two tasks over the same candidate codebase:
   64 GB HBM each. Partition weights and optimize communication, expert dispatch
   and hybrid recurrent state across devices.
 
-Select the task when creating a run. `default` targets two H100s and Request Factory.
 The AgentX tasks have five throughput/TTFT/TPOT objectives with 3% relative
 noise tolerance. They pin weights and tokenizer to revision
 `995ad96eacd98c81ed38be0c5b274b04031597b0`.
@@ -105,8 +104,8 @@ and runtime overhead are additional; native context capacity does not promise
 four simultaneous maximum-length sessions fit without cache management.
 
 For Linux x86-64 with Python 3.12 and ROCm 6.4, install AMD PyTorch explicitly,
-then the engine's other pins. The H100 task's `requirements.txt` has the same
-pins with the CUDA build of torch.
+then the engine's other pins. `requirements.txt` has the same pins with the
+CUDA build of torch.
 
 ```bash
 uv venv --python 3.12
@@ -128,7 +127,7 @@ for prefill chunks a loop over the experts that received tokens.
 Neither AMD task supplies a validated comparison baseline. The baseline engine
 uses Transformers' reference DeltaNet and MoE code; that it runs does not
 establish that an optimized kernel path supports either GPU. The shared
-H100 service checker is behavioral, not a numerical parity check. Its short
+service checker is behavioral, not a numerical parity check. Its short
 chat probes need a non-thinking default; explicit chat-template settings and
 reasoning/tool history from the benchmark must still be preserved. Full-size
 correctness and AgentX execution have not been measured on either AMD target.
@@ -142,6 +141,5 @@ active sessions, prefix reuse and tool waits. They use the same five objectives
 and 3% noise tolerance. See [the adapter's provenance and measurement policy](.vibesys/shared/tracelab/README.md).
 
 The sample is recorded, not statistically resampled, but it is much smaller
-than the full TraceLab corpus. Keep its frontier separate from AgentX and the
-legacy H100 fixed-text task. Its behavioral accuracy gate has the same limits
+than the full TraceLab corpus. Keep its frontier separate from AgentX. Its behavioral accuracy gate has the same limits
 as the AMD AgentX tasks.

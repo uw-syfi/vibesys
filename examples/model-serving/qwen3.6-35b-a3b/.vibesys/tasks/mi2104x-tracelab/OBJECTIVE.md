@@ -49,8 +49,8 @@ checker's short chat probes, using a non-thinking default so answers fit their
 small output budgets. Honor explicit template options, preserve supplied
 reasoning/tool history, and make temperature-zero completions repeatable.
 
-Run the configured service checker before benchmarking. It is shared with the
-existing H100 task and checks sentinel echo, known answers, and greedy
+Run the configured service checker before benchmarking. Every task of this
+project shares it; it checks sentinel echo, known answers, and greedy
 repeatability. These are behavioral probes, **not numerical parity or proof of
 checkpoint identity**. Correct hybrid state and routing remain requirements;
 a passing behavioral probe does not authorize altered model execution.
