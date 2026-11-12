@@ -13,6 +13,19 @@ unoptimized and is not a validated performance baseline. Making the ROCm serving
 path fast, by changing or replacing any part of it, is the task. Keep that
 launch command working: the project README gives it as the service command.
 
+The server runs in a container of the image that
+[`Dockerfile.rocm`](../../../Dockerfile.rocm) builds from the candidate's commit
+(its context is the project root, filtered by the root `.dockerignore`), with
+the one MI300X GPU, as `python -m engine.server --host 127.0.0.1 --port <port>`
+from the checkout's root; it must answer `GET /health` within 30 minutes.
+That image and its `.dockerignore` are part of the candidate, as `engine/` is;
+the seed holds the README's environment (Python 3.12, `torch==2.9.1+rocm6.4`,
+`requirements-agentx.txt`). Weights are never baked into it: the pinned
+checkpoint is read from the operator's Hugging Face cache, mounted read-only at
+`/vibesys/mounts/hf` (`HF_HOME`, with `HF_HUB_OFFLINE=1`). The image's own files
+are read-only at run time; write only under `/tmp`. The checker and the AgentX
+replay run in a separate task image, without GPUs, and reach the server over HTTP.
+
 Keep BF16 weights on the single allocated GPU. Optimize fused expert kernels,
 continuous batching, prefix caching and recurrent-state management without
 cross-GPU communication.
@@ -58,7 +71,8 @@ No full-size AMD run has validated this example yet.
 
 ## AgentX workload and objectives
 
-Use the trusted `agentx-v1` evaluator. Full mode replays the date-pinned June 21
+The trusted task image replays AgentX with `agentx-harness==1.0.7`, the
+recipe of the earlier `agentx-v1` evaluator. Full mode replays the date-pinned June 21
 coding corpus with parent/subagent dependencies, four concurrent session trees,
 seed 42, trajectory start ratios 0.25–0.75, ten warmup requests per lane and
 900 seconds of profiling. Child agents may add simultaneous requests.

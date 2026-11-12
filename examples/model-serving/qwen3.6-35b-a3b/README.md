@@ -70,10 +70,32 @@ This project also offers two tasks over the same candidate codebase:
   and hybrid recurrent state across devices.
 
 Select the task when creating a run. `default` targets two H100s and Request Factory.
-The AMD tasks use [the shared AgentX evaluator](../../../resources/evaluators/agentx/README.md)
-and five throughput/TTFT/TPOT objectives with 3% relative noise tolerance.
-They pin weights and tokenizer to revision
+The AgentX tasks have five throughput/TTFT/TPOT objectives with 3% relative
+noise tolerance. They pin weights and tokenizer to revision
 `995ad96eacd98c81ed38be0c5b274b04031597b0`.
+
+They are two-image tasks (`version = "0.2"`) that only vibesys-cli runs; this
+app refuses them. The candidate's server runs in the image
+[`Dockerfile.rocm`](Dockerfile.rocm) builds from the candidate's commit (context:
+the project root, which the root `.dockerignore` filters to
+`requirements-agentx.txt`), as `python -m engine.server --host 127.0.0.1 --port
+<port>` from the checkout's root, with readiness `/health` and 30 minutes to
+load. Each task's own `Dockerfile` is the task image: the
+`vibesys-evaluator-llm-serving` image (release 0.2.0rc1, pinned by digest, with
+`agentx-harness==1.0.7`) plus the task directory, where `checker.py` is a copy
+of the shared service checker and `bench.py` runs the replay against
+`VIBESYS_SERVICE_URL`. Both images read the operator's Hugging Face cache,
+mounted read-only as `hf` (`HF_HOME=/vibesys/mounts/hf`, `HF_HUB_OFFLINE=1`);
+it must already hold `Qwen/Qwen3.6-35B-A3B` at the pinned revision and the
+prepared AgentX corpus `semianalysisai/cc-traces-weka-062126` under
+`datasets/` (the replay copies it to a writable cache when the mount is
+read-only).
+
+`python /task/bench.py benchmark` is the scored full replay, the recipe of
+[the earlier AgentX evaluator](../../../resources/evaluators/agentx/README.md).
+`python /task/bench.py profile` is its smoke replay: two corpus entries for 60
+seconds, never scored. Run it as a command in the task image against the
+candidate's server to try the chat path or to record a profile.
 
 BF16 weights alone occupy roughly 70 GB. One 64 GB MI210 cannot hold them;
 four MI210s provide 256 GB aggregate HBM, distributed across separate devices.

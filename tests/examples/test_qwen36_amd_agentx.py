@@ -15,38 +15,146 @@ from hypothesis import given
 from hypothesis import strategies as st
 from tests.examples.example_task import load_example_task, task_root
 
+from vibesys_evaluator.llm_serving import _agentx
+
 _PROJECT = Path(__file__).parents[2] / "examples/model-serving/qwen3.6-35b-a3b"
 _TRACE = _PROJECT / ".vibesys/shared/tracelab"
 _REPLAY = SimpleNamespace(**runpy.run_path(str(_TRACE / "replay.py")))
 
 
-@pytest.mark.parametrize("workload", ["agentx", "tracelab"])
-def test_amd_tasks_share_workload_but_declare_distinct_hardware(workload: str) -> None:
-    small = load_example_task(_PROJECT, f"mi2104x-{workload}").manifest
-    large = load_example_task(_PROJECT, f"mi300x-{workload}").manifest
+_HARDWARE = {"mi2104x": ("AMD MI210", 4), "mi300x": ("AMD MI300X", 1)}
+_AGENTX_TASKS = [f"{hardware}-agentx" for hardware in _HARDWARE]
+# The benchmark arguments of the schema-0.1 AgentX tasks, which ran the `agentx-v1` entrypoint of
+# resources/evaluators/agentx; the schema-0.2 tasks must replay exactly this recipe.
+_AGENTX_V1_ARGS = [
+    "--mode", "full",
+    "--model", "Qwen/Qwen3.6-35B-A3B",
+    "--tokenizer", "Qwen/Qwen3.6-35B-A3B",
+    "--tokenizer-revision", "995ad96eacd98c81ed38be0c5b274b04031597b0",
+    "--concurrency", "4",
+    "--max-context-length", "262144",
+]  # fmt: skip
+
+
+def _manifest(task: str) -> dict:
+    return tomllib.loads((task_root(_PROJECT, task) / "vibesys.input.toml").read_text())
+
+
+def test_tracelab_tasks_share_workload_but_declare_distinct_hardware() -> None:
+    small = load_example_task(_PROJECT, "mi2104x-tracelab").manifest
+    large = load_example_task(_PROJECT, "mi300x-tracelab").manifest
     assert small.catalogue is not None
     assert large.catalogue is not None
     assert (small.catalogue.hardware.accelerator, small.catalogue.hardware.count) == (
-        "AMD MI210",
-        4,
+        _HARDWARE["mi2104x"]
     )
     assert (large.catalogue.hardware.accelerator, large.catalogue.hardware.count) == (
-        "AMD MI300X",
-        1,
+        _HARDWARE["mi300x"]
     )
     assert small.backends == large.backends
     assert small.benchmark == large.benchmark
     assert small.accuracy == large.accuracy
     assert small.benchmark.result_protocol == 2
-    assert small.benchmark.entrypoint == (
-        "agentx-v1" if workload == "agentx" else "request-factory-adapter"
-    )
-    for hardware in ("mi2104x", "mi300x"):
+    assert small.benchmark.entrypoint == "request-factory-adapter"
+
+
+@pytest.mark.parametrize("workload", ["agentx", "tracelab"])
+def test_amd_tasks_score_the_same_five_objectives(workload: str) -> None:
+    for hardware in _HARDWARE:
         root = task_root(_PROJECT, f"{hardware}-{workload}")
         objectives = tomllib.loads((root / "objectives.toml").read_text())
         assert {item["name"] for item in objectives["objective"]} == set(_REPLAY.METRICS)
         assert objectives["pareto"]["relative_noise"] == 0.03
         assert _REPLAY.REVISION in (root / "reference/meta.json").read_text()
+
+
+@pytest.mark.parametrize("task", _AGENTX_TASKS)
+def test_agentx_tasks_are_two_image_tasks_of_the_baseline_engine(task: str) -> None:
+    manifest = _manifest(task)
+    assert manifest["version"] == "0.2"
+    assert manifest["backends"] == ["rocm"]
+    assert "evaluator" not in manifest
+    # [profile] is not part of these tasks: the smoke replay is a command in the task image.
+    assert "profile" not in manifest
+    assert set(manifest["environment"]["needs"]) == {"rocm", "mounts"}
+    candidate = manifest["candidate"]
+    assert (candidate["dockerfile"], candidate["context"]) == ("Dockerfile.rocm", ".")
+    assert (_PROJECT / candidate["dockerfile"]).is_file()
+    assert candidate["serve"] == [
+        "python", "-m", "engine.server", "--host", "127.0.0.1", "--port", "${PORT}",
+    ]  # fmt: skip
+    assert candidate["ready"] == "/health"
+    assert candidate["startup_timeout_seconds"] == 1800
+    assert manifest["accuracy"] == {
+        "command": ["sh", "-c", 'exec python3 -I /task/checker.py --url "$VIBESYS_SERVICE_URL"'],
+        "timeout_seconds": 300,
+    }
+    assert manifest["benchmark"] == {
+        "command": ["python", "/task/bench.py", "benchmark"],
+        "timeout_seconds": 3600,
+        "result_protocol": 2,
+    }
+    hardware = manifest["catalogue"]["hardware"]
+    assert (hardware["accelerator"], hardware["count"], hardware["vendor"]) == (
+        *_HARDWARE[task.removesuffix("-agentx")],
+        "amd",
+    )
+
+
+def test_agentx_tasks_differ_only_in_their_hardware() -> None:
+    small, large = (task_root(_PROJECT, task) for task in _AGENTX_TASKS)
+    names = sorted(p.relative_to(small).as_posix() for p in small.rglob("*") if p.is_file())
+    assert names == sorted(p.relative_to(large).as_posix() for p in large.rglob("*") if p.is_file())
+    differ = [name for name in names if (small / name).read_bytes() != (large / name).read_bytes()]
+    assert differ == ["OBJECTIVE.md", "vibesys.input.toml"]
+    small_manifest, large_manifest = (_manifest(task) for task in _AGENTX_TASKS)
+    small_manifest.pop("catalogue")
+    large_manifest.pop("catalogue")
+    assert small_manifest == large_manifest
+
+
+@pytest.mark.parametrize("task", _AGENTX_TASKS)
+def test_agentx_task_images_carry_the_shared_service_checker(task: str) -> None:
+    shared = _PROJECT / ".vibesys/tasks/default/accuracy_checker/checker.py"
+    assert (task_root(_PROJECT, task) / "checker.py").read_bytes() == shared.read_bytes()
+    dockerfile = (task_root(_PROJECT, task) / "Dockerfile").read_text()
+    assert "\nFROM ghcr.io/uw-syfi/vibesys-evaluator-llm-serving:" in dockerfile
+    assert "@sha256:" in dockerfile.split("\nFROM ", 1)[1].split("\n", 1)[0]
+    assert "HF_HOME=/vibesys/mounts/hf HF_HUB_OFFLINE=1" in dockerfile
+
+
+@pytest.mark.parametrize("task", _AGENTX_TASKS)
+@pytest.mark.parametrize("mode", ["full", "smoke"])
+def test_agentx_bench_replays_the_agentx_v1_recipe(task: str, mode: str, tmp_path: Path) -> None:
+    """bench.py's replay is the command the 0.1 tasks' `agentx-v1` evaluator ran, flag for flag."""
+    calls: list[dict] = []
+    bench = SimpleNamespace(**runpy.run_path(str(task_root(_PROJECT, task) / "bench.py")))
+    # This run of bench.py has globals of its own: its `agentx` records the replay it asks for.
+    bench.replay.__globals__["agentx"] = SimpleNamespace(
+        replay=lambda **kwargs: calls.append(kwargs) or {}
+    )
+    reports: list[dict] = []
+    run = SimpleNamespace(phase=lambda name: tmp_path / name, report=reports.append)
+    if mode == "full":
+        bench.benchmark(run)
+        assert reports == [{}]
+    else:
+        bench.profile(run)
+        assert reports == []
+    (kwargs,) = calls
+    assert kwargs["mode"] == mode
+    assert kwargs.pop("artifacts") == tmp_path / "agentx"
+    url = "http://127.0.0.1:9"
+    replay = _agentx.Replay(**kwargs, url=url, timeout_secs=3300)
+    evaluator = SimpleNamespace(
+        **runpy.run_path(
+            str(Path(__file__).parents[2] / "resources/evaluators/agentx/agentx_eval.py")
+        )
+    )
+    args = [*_AGENTX_V1_ARGS, "--url", url]
+    args[args.index("--mode") + 1] = mode
+    expected = evaluator.profile_command(evaluator.parse_args(args), tmp_path)
+    assert _agentx.command(replay, tmp_path, python=expected[0]) == expected
 
 
 def test_the_baseline_engine_serves_the_checkpoint_every_task_pins() -> None:
