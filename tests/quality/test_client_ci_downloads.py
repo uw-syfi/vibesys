@@ -171,11 +171,12 @@ def test_only_the_e2e_job_asks_setup_clients_for_playwright() -> None:
     assert seen
 
 
-def test_browser_job_pins_a_playwright_supported_runner() -> None:
+def test_jobs_broken_by_the_ubuntu_latest_move_pin_the_supported_runner() -> None:
     workflow = _load(WORKFLOW)
     assert isinstance(workflow, dict)
     jobs = _mapping(workflow["jobs"])
-    assert _mapping(jobs["clients-e2e"])["runs-on"] == "ubuntu-24.04"
+    for name in ("clients-e2e", "cli"):
+        assert _mapping(jobs[name])["runs-on"] == "ubuntu-24.04", name
 
 
 def test_browser_download_attempts_are_bounded() -> None:
