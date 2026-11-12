@@ -37,7 +37,7 @@ const offersOf = (row: Extract<MachineTableRow, {readonly kind: 'place'}>): stri
   return offers.length === 0 ? 'CPU only' : offers.map(offerWords).join(', ');
 };
 
-/** The text a name cell is cut from, which the pointer shows whole. */
+/** The whole text of a clipped name or note cell, which remains in the document and on hover. */
 const nameText = (row: MachineTableRow): string => {
   switch (row.kind) {
     case 'machine':
@@ -45,7 +45,7 @@ const nameText = (row: MachineTableRow): string => {
     case 'place':
       return row.place.name;
     case 'note':
-      return '';
+      return NOTE_WORDS[row.note];
   }
 };
 

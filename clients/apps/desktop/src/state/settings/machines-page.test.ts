@@ -59,11 +59,18 @@ describe('the table of machines and their places', () => {
     );
     expect(rows.map(row => row.key)).toEqual([
       'machine:host-a',
-      'place:host-a:p1',
-      'place:host-a:p2',
+      'place:["host-a","p1",0]',
+      'place:["host-a","p2",0]',
       'machine:host-b',
-      'place:host-b:q1',
+      'place:["host-b","q1",0]',
     ]);
+  });
+
+  it('keeps duplicate place names as distinct rows in the order the host gave them', () => {
+    const rows = machineTableRows([entry('host-a', placesOf('same', 'same', 'other'))], none);
+    const places = rows.filter(row => row.kind === 'place');
+    expect(places.map(row => row.place.name)).toEqual(['same', 'same', 'other']);
+    expect(new Set(places.map(row => row.key)).size).toBe(places.length);
   });
 
   it('has one machine row for each machine and a place row for each place, whatever they are', () => {
@@ -71,9 +78,7 @@ describe('the table of machines and their places', () => {
     const hosts = fc.uniqueArray(fc.string({minLength: 1, maxLength: 6}), {maxLength: 5});
     fc.assert(
       fc.property(hosts, fc.array(names, {maxLength: 5}), (keys, lists) => {
-        const entries = keys.map((key, at) =>
-          entry(key, placesOf(...[...new Set(lists[at] ?? [])])),
-        );
+        const entries = keys.map((key, at) => entry(key, placesOf(...(lists[at] ?? []))));
         const rows = machineTableRows(entries, none);
         expect(rows.filter(row => row.kind === 'machine')).toHaveLength(keys.length);
         const total = entries.reduce(

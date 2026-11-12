@@ -166,6 +166,23 @@ describe('the Machines page', () => {
     screen.unmount();
   });
 
+  it('keeps every clipped place note whole in the document and on hover', () => {
+    const cases = [
+      {places: NOT_READ, note: 'Waiting for job places'},
+      {places: readOf(create(ListEvalPlacesResponseSchema, {places: []})), note: 'No job places'},
+      {places: failedOf(NOT_READ, 'host unreachable'), note: 'Job places not read'},
+    ] as const;
+    for (const {places, note} of cases) {
+      const {screen} = open({places: {local: places}});
+      const clipped = screen.container.querySelector<HTMLElement>(
+        'tr[data-kind="sub"] td[data-clip]',
+      );
+      expect(clipped?.textContent?.trim()).toBe(note);
+      expect(clipped?.getAttribute('title')).toBe(note);
+      screen.unmount();
+    }
+  });
+
   it('says No stats with a hint, and why places were not read, for a machine that cannot say', () => {
     const {screen} = open({
       rows: [refused],
