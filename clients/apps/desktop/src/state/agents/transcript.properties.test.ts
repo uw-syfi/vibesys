@@ -314,6 +314,55 @@ describe('a transcript', () => {
     );
   });
 
+  it('keeps an older empty known turn before newer unavailable items and routes events by time', () => {
+    const known = create(TurnSchema, {
+      id: 'known-old',
+      agentId: ME,
+      ordinal: 1,
+      trigger: TurnTrigger.MESSAGE,
+      triggerMessageId: 'missing',
+      status: TurnStatus.COMPLETED,
+      startedAt: timestampFromMs(1_000),
+    });
+    const prompt = itemOf({
+      id: 'prompt',
+      turnId: 'missing-new',
+      agentId: ME,
+      ordinal: 1,
+      atMs: 2_000,
+      startedMs: 2_000,
+      kind: 'prompt',
+      text: 'Do the work.',
+    });
+    const answer = itemOf({
+      id: 'answer',
+      turnId: 'missing-new',
+      agentId: ME,
+      ordinal: 2,
+      atMs: 3_000,
+      startedMs: 3_000,
+      kind: 'assistant',
+      text: 'Done.',
+    });
+    const child = agent('child', ME, 2_500);
+    const state: OrchestratorState = {
+      ...emptyState,
+      agents: {[ME]: agent(ME, '', 0), [child.id]: child},
+      turns: {[known.id]: known},
+      items: {[prompt.id]: prompt, [answer.id]: answer},
+    };
+
+    const result = transcript(state, ME, NOW);
+
+    expect(result?.entries.map(entry => entry.key)).toEqual([
+      'turn:known-old',
+      'turn-unavailable:missing-new',
+      'item:prompt:prompt',
+      'spawn:child',
+      'item:answer',
+    ]);
+  });
+
   it('puts the turns in order and each item under the divider of its own turn', () => {
     fc.assert(
       fc.property(world, spec => {

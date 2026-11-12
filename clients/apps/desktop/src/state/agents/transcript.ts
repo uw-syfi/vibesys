@@ -404,25 +404,49 @@ type TurnSegment =
   | {readonly kind: 'available'; readonly turn: Turn; readonly own: readonly Item[]}
   | {readonly kind: 'unavailable'; readonly turnId: string; readonly own: readonly Item[]};
 
+const startOfSegment = (segment: TurnSegment): number => {
+  if (segment.kind === 'available') return ms(segment.turn.startedAt) ?? 0;
+  const first = segment.own[0];
+  return first === undefined ? 0 : startOfItem(first);
+};
+
 /**
- * The loaded turn groups to draw, ordered by agent-global item ordinal. Known turns newer than all
- * loaded known items follow them. Missing turn records cannot be placed in turn-ordinal space, so
- * their item ordinal is the only ordering fact this fold uses.
+ * The loaded turn groups to draw, ordered by agent-global item ordinal. Empty known turns follow
+ * loaded known turns and sit among unavailable groups by recorded start. Missing turn records
+ * cannot be placed in turn-ordinal space, so their item ordinal orders them relative to each other.
  */
 function turnSegments(turns: readonly Turn[], loaded: ReadonlyMap<string, Item[]>): TurnSegment[] {
   const available = new Set(turns.map(turn => turn.id));
-  const shown = shownTurns(turns, loaded).map<TurnSegment>(turn => ({
-    kind: 'available',
-    turn,
-    own: loaded.get(turn.id) ?? [],
-  }));
+  const shown: Extract<TurnSegment, {readonly kind: 'available'}>[] = shownTurns(turns, loaded).map(
+    turn => ({
+      kind: 'available',
+      turn,
+      own: loaded.get(turn.id) ?? [],
+    }),
+  );
   const unavailable = [...loaded.entries()]
     .filter(([turnId]) => !available.has(turnId))
     .map<TurnSegment>(([turnId, own]) => ({kind: 'unavailable', turnId, own}));
   const withItems = [...shown.filter(segment => segment.own.length > 0), ...unavailable].sort(
     (a, b) => (a.own[0]?.ordinal ?? 0) - (b.own[0]?.ordinal ?? 0),
   );
-  return [...withItems, ...shown.filter(segment => segment.own.length === 0)];
+  const result = [...withItems];
+  let afterKnownItems =
+    result.reduce(
+      (last, segment, index) =>
+        segment.kind === 'available' && segment.own.length > 0 ? index : last,
+      -1,
+    ) + 1;
+  for (const empty of shown.filter(segment => segment.own.length === 0)) {
+    const began = ms(empty.turn.startedAt) ?? 0;
+    const next = result.findIndex(
+      (segment, index) => index >= afterKnownItems && startOfSegment(segment) > began,
+    );
+    const at = next === -1 ? result.length : next;
+    result.splice(at, 0, empty);
+    afterKnownItems = at + 1;
+  }
+  return result;
 }
 
 /** Items and the agent-tree events that happened among them. */
@@ -507,14 +531,24 @@ export function transcript(
   for (const item of items) loaded.set(item.turnId, [...(loaded.get(item.turnId) ?? []), item]);
   const segments = turnSegments(turns, loaded);
   const events = spawnEvents(state, agent).sort((a, b) => a.atMs - b.atMs);
-  // Each event goes to the last segment shown that began at or before it, else the first.
-  const starts = segments.map(segment =>
-    segment.kind === 'available'
-      ? (ms(segment.turn.startedAt) ?? 0)
-      : startOfItem(segment.own[0] as Item),
-  );
-  const turnOf = (atMs: number): number =>
-    starts.reduce((found, start, index) => (start <= atMs ? index : found), 0);
+  // Each event goes to the most recently begun segment at that moment. Visual order can differ
+  // from start-time order when bounded history omits a turn record, so array position is not time.
+  const starts = segments.map(startOfSegment);
+  const turnOf = (atMs: number): number => {
+    const eligible = starts.reduce(
+      (found, start, index) =>
+        start <= atMs && (found === -1 || start >= (starts[found] ?? Number.NEGATIVE_INFINITY))
+          ? index
+          : found,
+      -1,
+    );
+    if (eligible !== -1) return eligible;
+    return starts.reduce(
+      (first, start, index) =>
+        start < (starts[first] ?? Number.POSITIVE_INFINITY) ? index : first,
+      0,
+    );
+  };
   const entries = segments.flatMap((segment, index) => {
     const ownEvents = events.filter(event => turnOf(event.atMs) === index);
     return segment.kind === 'available'
