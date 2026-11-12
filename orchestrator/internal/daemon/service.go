@@ -424,6 +424,9 @@ func (s *Service) WatchAgentFrom(agent core.AgentID, pageSize uint32, after uint
 	}
 	w := &AgentWatch{
 		e: s.e, run: a.Run,
+		stamp: func(response *pb.WatchAgentResponse, sequence uint64) {
+			response.Sequence = sequence
+		},
 		snapshot: func(_ core.State, last uint64) (*pb.WatchAgentResponse, error) {
 			page, err := s.itemsPage(agent, 0, int(pageSize))
 			if err != nil {
