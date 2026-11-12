@@ -1,1 +1,6 @@
-export {makeRunDetailFeed} from './feed.js';
+export {
+  makeRunDetailFeed,
+  type RunDetailDelivery,
+  type RunDetailFeed,
+  type RunDetailStaleReason,
+} from './feed.js';
