@@ -96,6 +96,21 @@ class StepMetrics(unittest.TestCase):
                 with self.subTest(field=field, value=value), self.assertRaises(ValueError):
                     replay.step_metrics(bad, 60, 180)
 
+    def test_window_with_no_submissions_censors_latency_at_its_length(self) -> None:
+        idle = copy.deepcopy(summary())
+        idle["replay"]["window"]["requests_submitted"] = 0
+        for key in ("ttft_ms_p50", "ttft_ms_p90"):
+            idle["replay"]["common"][key] = None
+        del idle["replay"]["common"]["tpot_ms_p90"]
+        values = replay.step_metrics(idle, 60, 180)
+        self.assertEqual(values["ttft_p50_ms"], 180_000.0)
+        self.assertEqual(values["ttft_p90_ms"], 180_000.0)
+        self.assertEqual(values["tpot_p90_ms"], 180_000.0)
+        self.assertFalse(replay.passes_cap(values))
+        idle["replay"]["common"]["output_token_throughput_per_s"] = None
+        with self.assertRaises(ValueError):
+            replay.step_metrics(idle, 60, 180)
+
     def test_zero_throughput_and_malformed_summaries_are_rejected(self) -> None:
         zero = summary()
         zero["replay"]["common"]["output_token_throughput_per_s"] = 0.0

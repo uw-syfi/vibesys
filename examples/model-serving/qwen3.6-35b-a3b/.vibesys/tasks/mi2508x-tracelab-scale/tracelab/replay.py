@@ -165,7 +165,8 @@ def step_metrics(summary: object, warmup_secs: float, duration_secs: float) -> d
 
     Any failed request, wrong output length, request whose tokens could not be placed in
     time, empty window, or missing/non-finite metric raises ValueError, which fails the whole
-    measurement.
+    measurement. The one exception is a window into which no request was submitted: its
+    latencies are undefined, and are censored at the window's length (overload).
     """
     if not isinstance(summary, dict) or not isinstance(summary.get("replay"), dict):
         raise ValueError("summary.replay must be an object")
@@ -210,8 +211,15 @@ def step_metrics(summary: object, warmup_secs: float, duration_secs: float) -> d
     if count(window, "window", "output_tokens") <= 0:
         raise ValueError("the window produced no output tokens")
     values = {}
+    # A window into which no request was submitted (every session was still busy with a
+    # request sent earlier) measures no latency: the runner reports it as null. That is
+    # overload, not a malformed run, so the latency is censored at the window's length,
+    # which fails the latency cap; any other missing or non-finite metric is an error.
+    idle_window = count(window, "window", "requests_submitted") == 0
     for name, field in METRICS.items():
         value = common.get(field)
+        if value is None and idle_window and name != "output_tokens_per_s":
+            value = duration_secs * 1000.0
         if not _finite_nonnegative(value):
             raise ValueError(f"summary.replay.common.{field} must be finite and nonnegative")
         values[name] = float(value)
