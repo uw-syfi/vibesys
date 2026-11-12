@@ -135,6 +135,31 @@ describe('the transcript screen', () => {
       })[0],
     ).toMatch(/^Could not load 5 KB/);
   });
+
+  it('marks content whose turn details were not loaded without inventing a turn number', () => {
+    const data: Transcript = {
+      agentId: 'lead',
+      crumbs: [],
+      state: 'running',
+      costUsd: null,
+      turns: 0,
+      entries: [
+        {
+          kind: 'turn-unavailable',
+          key: 'turn-unavailable:missing',
+          turnId: 'missing',
+          items: 3,
+        },
+      ],
+      earlier: null,
+    };
+    const [rule] = itemsOf(data, contextOf(emptyState, 'lead'));
+    expect(rule).toEqual({
+      kind: 'rule',
+      id: 'turn-unavailable:missing',
+      label: 'Turn details not loaded · 3 items',
+    });
+  });
 });
 
 /** One turn of a lead, whose entries say what came of a child named Worker 2. */

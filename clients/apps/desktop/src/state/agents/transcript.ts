@@ -6,8 +6,9 @@
  *
  * Properties the tests hold (`transcript.properties.test.ts`), for any items, turns, messages and
  * children, loaded in any amount:
- * - every loaded item the transcript shows appears exactly once, in item order, and a prompt item
- *   shows only where no message started its turn;
+ * - every loaded item with visible content appears exactly once, in item order; items whose turn
+ *   record was not loaded sit below an explicit unavailable-turn divider, and a prompt item shows
+ *   only where no message started its turn or its turn record is unavailable;
  * - the turns shown are in order, each divider is followed by that turn's entries only, and a turn
  *   with no loaded items is shown only when it is newer than every loaded one;
  * - a spawn or join row appears once per child and per result, after the divider of the last turn
@@ -55,6 +56,13 @@ export type Entry =
       /** What the host says the turn cost; null when it says nothing. */
       readonly costUsd: number | null;
       readonly outcome: TurnOutcome;
+    }
+  | {
+      readonly kind: 'turn-unavailable';
+      readonly key: string;
+      readonly turnId: string;
+      /** Loaded items attributed to this turn, including ones with no visible body. */
+      readonly items: number;
     }
   | {
       readonly kind: 'incoming';
@@ -254,6 +262,23 @@ function entriesOfItem(state: OrchestratorState, item: Item, nowMs: number): Ent
   }
 }
 
+/** A prompt whose turn record is unavailable: the surviving input to that turn, when it has words. */
+function entryOfUnavailablePrompt(state: OrchestratorState, item: Item): Entry[] {
+  if (!itemIs(item, 'prompt')) return [];
+  const text = wordsOf(state, item).text;
+  return text === ''
+    ? []
+    : [
+        {
+          kind: 'incoming',
+          key: `item:${item.id}:prompt`,
+          atMs: ms(item.at) ?? 0,
+          from: {kind: 'host'},
+          note: {kind: 'text', text},
+        },
+      ];
+}
+
 const partyOf = (message: Message, note: MessageNote): Party => {
   if (message.fromAgentId !== '') return {kind: 'agent', agentId: message.fromAgentId};
   switch (note.kind) {
@@ -375,6 +400,52 @@ interface Event {
   readonly entry: Entry;
 }
 
+type TurnSegment =
+  | {readonly kind: 'available'; readonly turn: Turn; readonly own: readonly Item[]}
+  | {readonly kind: 'unavailable'; readonly turnId: string; readonly own: readonly Item[]};
+
+/**
+ * The loaded turn groups to draw, ordered by agent-global item ordinal. Known turns newer than all
+ * loaded known items follow them. Missing turn records cannot be placed in turn-ordinal space, so
+ * their item ordinal is the only ordering fact this fold uses.
+ */
+function turnSegments(turns: readonly Turn[], loaded: ReadonlyMap<string, Item[]>): TurnSegment[] {
+  const available = new Set(turns.map(turn => turn.id));
+  const shown = shownTurns(turns, loaded).map<TurnSegment>(turn => ({
+    kind: 'available',
+    turn,
+    own: loaded.get(turn.id) ?? [],
+  }));
+  const unavailable = [...loaded.entries()]
+    .filter(([turnId]) => !available.has(turnId))
+    .map<TurnSegment>(([turnId, own]) => ({kind: 'unavailable', turnId, own}));
+  const withItems = [...shown.filter(segment => segment.own.length > 0), ...unavailable].sort(
+    (a, b) => (a.own[0]?.ordinal ?? 0) - (b.own[0]?.ordinal ?? 0),
+  );
+  return [...withItems, ...shown.filter(segment => segment.own.length === 0)];
+}
+
+/** Items and the agent-tree events that happened among them. */
+function entriesAmongItems(
+  state: OrchestratorState,
+  own: readonly Item[],
+  events: readonly Event[],
+  nowMs: number,
+  unavailable: boolean,
+): Entry[] {
+  const body: Entry[] = [];
+  let next = 0;
+  for (const item of own) {
+    // An event comes after every item that began at or before it.
+    while (next < events.length && (events[next]?.atMs ?? 0) < startOfItem(item)) {
+      body.push((events[next++] as Event).entry);
+    }
+    if (unavailable) body.push(...entryOfUnavailablePrompt(state, item));
+    body.push(...entriesOfItem(state, item, nowMs));
+  }
+  return [...body, ...events.slice(next).map(event => event.entry)];
+}
+
 /** One turn's entries: its divider, what started it, then its items with the events that fall among them. */
 function entriesOfTurn(
   state: OrchestratorState,
@@ -396,16 +467,26 @@ function entriesOfTurn(
     },
     ...incomingOf(state, turn, started ? undefined : own.find(item => itemIs(item, 'prompt'))),
   ];
-  const body: Entry[] = [];
-  let next = 0;
-  for (const item of own) {
-    // An event comes after every item that began at or before it.
-    while (next < events.length && (events[next]?.atMs ?? 0) < startOfItem(item)) {
-      body.push((events[next++] as Event).entry);
-    }
-    body.push(...entriesOfItem(state, item, nowMs));
-  }
-  return [...head, ...body, ...events.slice(next).map(event => event.entry)];
+  return [...head, ...entriesAmongItems(state, own, events, nowMs, false)];
+}
+
+/** Loaded items whose turn record was not in the run history window. */
+function entriesOfUnavailableTurn(
+  state: OrchestratorState,
+  turnId: string,
+  own: readonly Item[],
+  events: readonly Event[],
+  nowMs: number,
+): Entry[] {
+  return [
+    {
+      kind: 'turn-unavailable',
+      key: `turn-unavailable:${turnId}`,
+      turnId,
+      items: own.length,
+    },
+    ...entriesAmongItems(state, own, events, nowMs, true),
+  ];
 }
 
 /** The transcript of one agent, or null when the agent is not in the state. */
@@ -424,21 +505,22 @@ export function transcript(
     .sort((a, b) => a.ordinal - b.ordinal);
   const loaded = new Map<string, Item[]>();
   for (const item of items) loaded.set(item.turnId, [...(loaded.get(item.turnId) ?? []), item]);
-  const shown = shownTurns(turns, loaded);
+  const segments = turnSegments(turns, loaded);
   const events = spawnEvents(state, agent).sort((a, b) => a.atMs - b.atMs);
-  // Each event goes to the last turn shown that began at or before it, else the first.
-  const starts = shown.map(turn => ms(turn.startedAt) ?? 0);
+  // Each event goes to the last segment shown that began at or before it, else the first.
+  const starts = segments.map(segment =>
+    segment.kind === 'available'
+      ? (ms(segment.turn.startedAt) ?? 0)
+      : startOfItem(segment.own[0] as Item),
+  );
   const turnOf = (atMs: number): number =>
     starts.reduce((found, start, index) => (start <= atMs ? index : found), 0);
-  const entries = shown.flatMap((turn, index) =>
-    entriesOfTurn(
-      state,
-      turn,
-      loaded.get(turn.id) ?? [],
-      events.filter(event => turnOf(event.atMs) === index),
-      nowMs,
-    ),
-  );
+  const entries = segments.flatMap((segment, index) => {
+    const ownEvents = events.filter(event => turnOf(event.atMs) === index);
+    return segment.kind === 'available'
+      ? entriesOfTurn(state, segment.turn, segment.own, ownEvents, nowMs)
+      : entriesOfUnavailableTurn(state, segment.turnId, segment.own, ownEvents, nowMs);
+  });
   const from = unbrokenFrom(state, agentId);
   const span = STATE[agent.status];
   return {

@@ -275,6 +275,45 @@ describe('a transcript', () => {
     );
   });
 
+  it('keeps loaded items in order when their turn records were not loaded', () => {
+    fc.assert(
+      fc.property(world, spec => {
+        const {state, items} = build(spec);
+        const unavailable = new Set(items.map(item => item.turnId));
+        const withoutItemTurns: OrchestratorState = {
+          ...state,
+          turns: Object.fromEntries(
+            Object.entries(state.turns).filter(([turnId]) => !unavailable.has(turnId)),
+          ),
+        };
+        const result = transcript(withoutItemTurns, ME, NOW);
+        if (result === null) throw new Error('the agent is in the state');
+        const expected = items
+          .filter(item => hasWords(item, withoutItemTurns))
+          .map(item => `item:${item.id}`);
+        expect(itemEntries(result.entries).map(entry => entry.key)).toEqual(expected);
+        const groups = new Map<string, number>();
+        for (const item of items) groups.set(item.turnId, (groups.get(item.turnId) ?? 0) + 1);
+        expect(
+          result.entries.flatMap(entry =>
+            entry.kind === 'turn-unavailable' ? [{turnId: entry.turnId, items: entry.items}] : [],
+          ),
+        ).toEqual([...groups].map(([turnId, count]) => ({turnId, items: count})));
+        expect(
+          result.entries.flatMap(entry =>
+            entry.kind === 'incoming' && entry.key.endsWith(':prompt') && entry.note.kind === 'text'
+              ? [entry.note.text]
+              : [],
+          ),
+        ).toEqual(
+          items.flatMap(item =>
+            itemIs(item, 'prompt') && item.body.value.text !== '' ? [item.body.value.text] : [],
+          ),
+        );
+      }),
+    );
+  });
+
   it('puts the turns in order and each item under the divider of its own turn', () => {
     fc.assert(
       fc.property(world, spec => {
