@@ -17,6 +17,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
+	"github.com/uw-syfi/vibesys/orchestrator/release"
 )
 
 const (
@@ -200,6 +201,52 @@ func TestListCatalogueFailsWhenTheCatalogueCannotBeRead(t *testing.T) {
 	r.Catalogue.Fail(errors.New("catalogue.pb is missing"))
 	if _, err := r.Service.ListCatalogue(context.Background(), &pb.ListCatalogueRequest{}); status.Code(err) != codes.Unavailable {
 		t.Errorf("got %v, want Unavailable", err)
+	}
+}
+
+// TestListCatalogueReportsAClassifiedProblemInsteadOfFailing covers the two release.Finder errors
+// problemReason also classifies for HostControlService.Identify's parts (see production/parts.go):
+// a host that has no release at all, and one whose release is missing a file. Either answers a
+// successful, valid reply naming the problem, with no entries and the repositories directory kept,
+// rather than the opaque Unavailable every other read failure still gets.
+func TestListCatalogueReportsAClassifiedProblemInsteadOfFailing(t *testing.T) {
+	for name, arrange := range map[string]struct {
+		fail   error
+		reason pb.CatalogueProblemReason
+	}{
+		"no release": {
+			fail:   &release.NotInstalledError{Program: "/opt/vibesys/bin/vibesys-host", Manifest: "/opt/vibesys/release.json"},
+			reason: pb.CatalogueProblemReason_CATALOGUE_PROBLEM_REASON_NO_RELEASE,
+		},
+		"an incomplete release": {
+			fail:   &release.IncompleteError{Dir: "/opt/vibesys", Missing: []string{"catalogue.pb"}},
+			reason: pb.CatalogueProblemReason_CATALOGUE_PROBLEM_REASON_RELEASE_INCOMPLETE,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := daemontest.NewRig(t)
+			r.Catalogue.Set(daemon.Catalogue{RepositoriesDirectory: "/home/user/.vibesys/repos"})
+			r.Catalogue.Fail(arrange.fail)
+			resp, err := r.Service.ListCatalogue(context.Background(), &pb.ListCatalogueRequest{})
+			if err != nil {
+				t.Fatalf("got an error, want a classified reply: %v", err)
+			}
+			if err := wire.Validate(resp); err != nil {
+				t.Fatalf("response is not valid: %v", err)
+			}
+			if resp.GetProblem().GetReason() != arrange.reason {
+				t.Errorf("reason %v, want %v", resp.GetProblem().GetReason(), arrange.reason)
+			}
+			if resp.GetProblem().GetDetail() != arrange.fail.Error() {
+				t.Errorf("detail %q, want %q", resp.GetProblem().GetDetail(), arrange.fail.Error())
+			}
+			if len(resp.GetEntries()) != 0 {
+				t.Errorf("%d entries, want none", len(resp.GetEntries()))
+			}
+			if resp.GetRepositoriesDirectory() != "/home/user/.vibesys/repos" {
+				t.Errorf("repositories directory %q, want it kept from the source", resp.GetRepositoriesDirectory())
+			}
+		})
 	}
 }
 

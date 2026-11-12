@@ -26,7 +26,7 @@ from vs_sidecar.gen.buf.validate import validate_pb2 as buf_dot_validate_dot_val
 from vs_sidecar.gen.vibesys.cli.v1 import task_pb2 as vibesys_dot_cli_dot_v1_dot_task__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\'vibesys/orchestrator/v1/catalogue.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a\x19vibesys/cli/v1/task.proto\"r\n\x03\x46it\x12\x43\n\x05state\x18\x01 \x01(\x0e\x32!.vibesys.orchestrator.v1.FitStateB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x05state\x12&\n\x06places\x18\x02 \x03(\tB\x0e\xbaH\x0b\x92\x01\x08\x10@\"\x04r\x02\x10\x01R\x06places\"\xc5\x01\n\x0e\x43\x61talogueEntry\x12$\n\x07\x65xample\x18\x01 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x02R\x07\x65xample\x12\x34\n\x04\x63\x61rd\x18\x02 \x01(\x0b\x32\x18.vibesys.cli.v1.TaskCardB\x06\xbaH\x03\xc8\x01\x01R\x04\x63\x61rd\x12\x1f\n\x0bneeds_clone\x18\x03 \x01(\x08R\nneedsClone\x12\x36\n\x03\x66it\x18\x04 \x01(\x0b\x32\x1c.vibesys.orchestrator.v1.FitB\x06\xbaH\x03\xc8\x01\x01R\x03\x66it\"\x16\n\x14ListCatalogueRequest\"\xd4\x01\n\x15ListCatalogueResponse\x12\"\n\x07release\x18\x01 \x01(\tB\x08\xbaH\x05r\x03(\x80\x01R\x07release\x12I\n\x16repositories_directory\x18\x02 \x01(\tB\x12\xbaH\x0fr\r2\x0b^/[^\\x00]*$R\x15repositoriesDirectory\x12L\n\x07\x65ntries\x18\x03 \x03(\x0b\x32\'.vibesys.orchestrator.v1.CatalogueEntryB\t\xbaH\x06\x92\x01\x03\x10\xd0\x0fR\x07\x65ntries*\x9b\x01\n\x08\x46itState\x12\x19\n\x15\x46IT_STATE_UNSPECIFIED\x10\x00\x12\x12\n\x0e\x46IT_STATE_FITS\x10\x01\x12\x1c\n\x18\x46IT_STATE_NO_ACCELERATOR\x10\x02\x12!\n\x1d\x46IT_STATE_UNKNOWN_ACCELERATOR\x10\x03\x12\x1f\n\x1b\x46IT_STATE_PLACES_UNREADABLE\x10\x04\x42TZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\'vibesys/orchestrator/v1/catalogue.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a\x19vibesys/cli/v1/task.proto\"r\n\x03\x46it\x12\x43\n\x05state\x18\x01 \x01(\x0e\x32!.vibesys.orchestrator.v1.FitStateB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x05state\x12&\n\x06places\x18\x02 \x03(\tB\x0e\xbaH\x0b\x92\x01\x08\x10@\"\x04r\x02\x10\x01R\x06places\"\xc5\x01\n\x0e\x43\x61talogueEntry\x12$\n\x07\x65xample\x18\x01 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x02R\x07\x65xample\x12\x34\n\x04\x63\x61rd\x18\x02 \x01(\x0b\x32\x18.vibesys.cli.v1.TaskCardB\x06\xbaH\x03\xc8\x01\x01R\x04\x63\x61rd\x12\x1f\n\x0bneeds_clone\x18\x03 \x01(\x08R\nneedsClone\x12\x36\n\x03\x66it\x18\x04 \x01(\x0b\x32\x1c.vibesys.orchestrator.v1.FitB\x06\xbaH\x03\xc8\x01\x01R\x03\x66it\"\x16\n\x14ListCatalogueRequest\"\x99\x02\n\x15ListCatalogueResponse\x12\"\n\x07release\x18\x01 \x01(\tB\x08\xbaH\x05r\x03(\x80\x01R\x07release\x12I\n\x16repositories_directory\x18\x02 \x01(\tB\x12\xbaH\x0fr\r2\x0b^/[^\\x00]*$R\x15repositoriesDirectory\x12L\n\x07\x65ntries\x18\x03 \x03(\x0b\x32\'.vibesys.orchestrator.v1.CatalogueEntryB\t\xbaH\x06\x92\x01\x03\x10\xd0\x0fR\x07\x65ntries\x12\x43\n\x07problem\x18\x04 \x01(\x0b\x32).vibesys.orchestrator.v1.CatalogueProblemR\x07problem\"\x89\x01\n\x10\x43\x61talogueProblem\x12S\n\x06reason\x18\x01 \x01(\x0e\x32/.vibesys.orchestrator.v1.CatalogueProblemReasonB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x06reason\x12 \n\x06\x64\x65tail\x18\x02 \x01(\tB\x08\xbaH\x05r\x03(\x80 R\x06\x64\x65tail*\x9b\x01\n\x08\x46itState\x12\x19\n\x15\x46IT_STATE_UNSPECIFIED\x10\x00\x12\x12\n\x0e\x46IT_STATE_FITS\x10\x01\x12\x1c\n\x18\x46IT_STATE_NO_ACCELERATOR\x10\x02\x12!\n\x1d\x46IT_STATE_UNKNOWN_ACCELERATOR\x10\x03\x12\x1f\n\x1b\x46IT_STATE_PLACES_UNREADABLE\x10\x04*\x9c\x01\n\x16\x43\x61talogueProblemReason\x12(\n$CATALOGUE_PROBLEM_REASON_UNSPECIFIED\x10\x00\x12\'\n#CATALOGUE_PROBLEM_REASON_NO_RELEASE\x10\x01\x12/\n+CATALOGUE_PROBLEM_REASON_RELEASE_INCOMPLETE\x10\x02\x42TZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -50,8 +50,14 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_LISTCATALOGUERESPONSE'].fields_by_name['repositories_directory']._serialized_options = b'\272H\017r\r2\013^/[^\\x00]*$'
   _globals['_LISTCATALOGUERESPONSE'].fields_by_name['entries']._loaded_options = None
   _globals['_LISTCATALOGUERESPONSE'].fields_by_name['entries']._serialized_options = b'\272H\006\222\001\003\020\320\017'
-  _globals['_FITSTATE']._serialized_start=680
-  _globals['_FITSTATE']._serialized_end=835
+  _globals['_CATALOGUEPROBLEM'].fields_by_name['reason']._loaded_options = None
+  _globals['_CATALOGUEPROBLEM'].fields_by_name['reason']._serialized_options = b'\272H\007\202\001\004\020\001 \000'
+  _globals['_CATALOGUEPROBLEM'].fields_by_name['detail']._loaded_options = None
+  _globals['_CATALOGUEPROBLEM'].fields_by_name['detail']._serialized_options = b'\272H\005r\003(\200 '
+  _globals['_FITSTATE']._serialized_start=889
+  _globals['_FITSTATE']._serialized_end=1044
+  _globals['_CATALOGUEPROBLEMREASON']._serialized_start=1047
+  _globals['_CATALOGUEPROBLEMREASON']._serialized_end=1203
   _globals['_FIT']._serialized_start=124
   _globals['_FIT']._serialized_end=238
   _globals['_CATALOGUEENTRY']._serialized_start=241
@@ -59,5 +65,7 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_LISTCATALOGUEREQUEST']._serialized_start=440
   _globals['_LISTCATALOGUEREQUEST']._serialized_end=462
   _globals['_LISTCATALOGUERESPONSE']._serialized_start=465
-  _globals['_LISTCATALOGUERESPONSE']._serialized_end=677
+  _globals['_LISTCATALOGUERESPONSE']._serialized_end=746
+  _globals['_CATALOGUEPROBLEM']._serialized_start=749
+  _globals['_CATALOGUEPROBLEM']._serialized_end=886
 # @@protoc_insertion_point(module_scope)

@@ -1,6 +1,7 @@
 import {create} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
 import {
+  CatalogueProblemReason,
   EvalPlaceKind,
   EvalPlaceSchema,
   ListEvalPlacesResponseSchema,
@@ -23,6 +24,7 @@ import {appCommandsOf, hostSnapshotOf} from '../../testing/dom/app-builders.js';
 import {installDom, mount, type Screen} from '../../testing/dom/harness.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
 import {richCatalogueResponse, richPlaces} from '../../testing/orchestrator/new-run-catalogue.js';
+import {fixtureCatalogueProblemResponse} from '../../testing/orchestrator/new-run-fixtures.js';
 import type {AppCommands, HostSnapshot} from './app.js';
 import {OrchestratorApp} from './app.js';
 
@@ -387,6 +389,30 @@ describe('the catalog step', () => {
     screen.press(card(screen, 'CatalogStart from an example'));
     screen.press(screen.control('New run'));
     expect(screen.text()).toContain('Bring a repository, or describe one');
+    screen.unmount();
+  });
+
+  it('shows the fix for a classified catalogue problem instead of the card grid', () => {
+    const problem = fixtureCatalogueProblemResponse(
+      CatalogueProblemReason.NO_RELEASE,
+      'no release found next to this host',
+    );
+    const {screen} = open([read({catalogue: readOf(problem)})]);
+    screen.press(card(screen, 'CatalogStart from an example'));
+    const text = screen.text();
+    expect(text).toContain('no release found next to this host');
+    expect(text).toContain('install.sh');
+    expect(text).toContain('vibesys-client host status');
+    expect(screen.container.querySelectorAll('.vs-pick-card')).toHaveLength(0);
+    screen.unmount();
+  });
+
+  it('shows the host failure message for an unclassified catalogue failure', () => {
+    const {screen} = open([
+      read({catalogue: {data: null, reading: false, failure: 'the daemon is down'}}),
+    ]);
+    screen.press(card(screen, 'CatalogStart from an example'));
+    expect(screen.text()).toContain('the daemon is down');
     screen.unmount();
   });
 });

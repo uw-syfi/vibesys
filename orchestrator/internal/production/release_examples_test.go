@@ -117,10 +117,15 @@ func TestTheExampleSourceReadsTheBuiltTreesAndPinsClones(t *testing.T) {
 }
 
 func TestTheSourcesFailAsTheReleaseDoes(t *testing.T) {
-	_, err := ReleaseCatalogue{Find: developerBuild}.Catalogue(t.Context())
+	got, err := ReleaseCatalogue{Find: developerBuild, RepositoriesDirectory: "/home/u/repos"}.Catalogue(t.Context())
 	var notInstalled *release.NotInstalledError
 	if !errors.As(err, &notInstalled) {
 		t.Fatalf("catalogue of a developer build: %v", err)
+	}
+	// The directory survives the failure: the daemon reports it beside a classified problem rather
+	// than losing it, the one fact ListCatalogue still has to give the client.
+	if got.RepositoriesDirectory != "/home/u/repos" {
+		t.Fatalf("repositories directory on a failed catalogue = %q", got.RepositoriesDirectory)
 	}
 	if _, err := (ReleaseExamples{Find: developerBuild}).Source(t.Context(), "a/b"); !errors.As(err, &notInstalled) {
 		t.Fatalf("source of a developer build: %v", err)
@@ -133,7 +138,11 @@ func TestTheSourcesFailAsTheReleaseDoes(t *testing.T) {
 	}
 	find := func() (*release.Release, error) { return release.OpenDir(dir) }
 	var incomplete *release.IncompleteError
-	if _, err := (ReleaseCatalogue{Find: find}).Catalogue(t.Context()); !errors.As(err, &incomplete) || !slices.Equal(incomplete.Missing, []string{release.CatalogueName}) {
+	gotIncomplete, err := (ReleaseCatalogue{Find: find, RepositoriesDirectory: "/home/u/repos"}).Catalogue(t.Context())
+	if !errors.As(err, &incomplete) || !slices.Equal(incomplete.Missing, []string{release.CatalogueName}) {
 		t.Fatalf("catalogue of an incomplete release: %v", err)
+	}
+	if gotIncomplete.RepositoriesDirectory != "/home/u/repos" {
+		t.Fatalf("repositories directory on an incomplete catalogue = %q", gotIncomplete.RepositoriesDirectory)
 	}
 }

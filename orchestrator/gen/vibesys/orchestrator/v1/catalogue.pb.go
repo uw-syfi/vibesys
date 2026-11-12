@@ -85,6 +85,59 @@ func (FitState) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_orchestrator_v1_catalogue_proto_rawDescGZIP(), []int{0}
 }
 
+// CatalogueProblemReason classifies why a host's catalogue could not be read, for the two causes a
+// client can act on: no release installed, or one that is missing files.
+type CatalogueProblemReason int32
+
+const (
+	CatalogueProblemReason_CATALOGUE_PROBLEM_REASON_UNSPECIFIED CatalogueProblemReason = 0
+	// The host runs no release: nothing was ever installed beside it.
+	CatalogueProblemReason_CATALOGUE_PROBLEM_REASON_NO_RELEASE CatalogueProblemReason = 1
+	// The release is installed but is missing the catalogue or the examples it lists.
+	CatalogueProblemReason_CATALOGUE_PROBLEM_REASON_RELEASE_INCOMPLETE CatalogueProblemReason = 2
+)
+
+// Enum value maps for CatalogueProblemReason.
+var (
+	CatalogueProblemReason_name = map[int32]string{
+		0: "CATALOGUE_PROBLEM_REASON_UNSPECIFIED",
+		1: "CATALOGUE_PROBLEM_REASON_NO_RELEASE",
+		2: "CATALOGUE_PROBLEM_REASON_RELEASE_INCOMPLETE",
+	}
+	CatalogueProblemReason_value = map[string]int32{
+		"CATALOGUE_PROBLEM_REASON_UNSPECIFIED":        0,
+		"CATALOGUE_PROBLEM_REASON_NO_RELEASE":         1,
+		"CATALOGUE_PROBLEM_REASON_RELEASE_INCOMPLETE": 2,
+	}
+)
+
+func (x CatalogueProblemReason) Enum() *CatalogueProblemReason {
+	p := new(CatalogueProblemReason)
+	*p = x
+	return p
+}
+
+func (x CatalogueProblemReason) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CatalogueProblemReason) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_orchestrator_v1_catalogue_proto_enumTypes[1].Descriptor()
+}
+
+func (CatalogueProblemReason) Type() protoreflect.EnumType {
+	return &file_vibesys_orchestrator_v1_catalogue_proto_enumTypes[1]
+}
+
+func (x CatalogueProblemReason) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CatalogueProblemReason.Descriptor instead.
+func (CatalogueProblemReason) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_catalogue_proto_rawDescGZIP(), []int{1}
+}
+
 // Fit is advice computed per call from the current eval places; StartRun decides again.
 type Fit struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -254,8 +307,11 @@ type ListCatalogueResponse struct {
 	// Where ProvisionRepository puts a repository when the call names no parent.
 	RepositoriesDirectory string            `protobuf:"bytes,2,opt,name=repositories_directory,json=repositoriesDirectory,proto3" json:"repositories_directory,omitempty"`
 	Entries               []*CatalogueEntry `protobuf:"bytes,3,rep,name=entries,proto3" json:"entries,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// Set, with entries empty, when the host has no release or an incomplete one: the catalogue is
+	// legible in degraded form rather than a plain call failure.
+	Problem       *CatalogueProblem `protobuf:"bytes,4,opt,name=problem,proto3" json:"problem,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListCatalogueResponse) Reset() {
@@ -309,6 +365,66 @@ func (x *ListCatalogueResponse) GetEntries() []*CatalogueEntry {
 	return nil
 }
 
+func (x *ListCatalogueResponse) GetProblem() *CatalogueProblem {
+	if x != nil {
+		return x.Problem
+	}
+	return nil
+}
+
+type CatalogueProblem struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Reason CatalogueProblemReason `protobuf:"varint,1,opt,name=reason,proto3,enum=vibesys.orchestrator.v1.CatalogueProblemReason" json:"reason,omitempty"`
+	// Display only: the host's own words.
+	Detail        string `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CatalogueProblem) Reset() {
+	*x = CatalogueProblem{}
+	mi := &file_vibesys_orchestrator_v1_catalogue_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CatalogueProblem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CatalogueProblem) ProtoMessage() {}
+
+func (x *CatalogueProblem) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_catalogue_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CatalogueProblem.ProtoReflect.Descriptor instead.
+func (*CatalogueProblem) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_catalogue_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *CatalogueProblem) GetReason() CatalogueProblemReason {
+	if x != nil {
+		return x.Reason
+	}
+	return CatalogueProblemReason_CATALOGUE_PROBLEM_REASON_UNSPECIFIED
+}
+
+func (x *CatalogueProblem) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 var File_vibesys_orchestrator_v1_catalogue_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_catalogue_proto_rawDesc = "" +
@@ -325,17 +441,26 @@ const file_vibesys_orchestrator_v1_catalogue_proto_rawDesc = "" +
 	"\vneeds_clone\x18\x03 \x01(\bR\n" +
 	"needsClone\x126\n" +
 	"\x03fit\x18\x04 \x01(\v2\x1c.vibesys.orchestrator.v1.FitB\x06\xbaH\x03\xc8\x01\x01R\x03fit\"\x16\n" +
-	"\x14ListCatalogueRequest\"\xd4\x01\n" +
+	"\x14ListCatalogueRequest\"\x99\x02\n" +
 	"\x15ListCatalogueResponse\x12\"\n" +
 	"\arelease\x18\x01 \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\arelease\x12I\n" +
 	"\x16repositories_directory\x18\x02 \x01(\tB\x12\xbaH\x0fr\r2\v^/[^\\x00]*$R\x15repositoriesDirectory\x12L\n" +
-	"\aentries\x18\x03 \x03(\v2'.vibesys.orchestrator.v1.CatalogueEntryB\t\xbaH\x06\x92\x01\x03\x10\xd0\x0fR\aentries*\x9b\x01\n" +
+	"\aentries\x18\x03 \x03(\v2'.vibesys.orchestrator.v1.CatalogueEntryB\t\xbaH\x06\x92\x01\x03\x10\xd0\x0fR\aentries\x12C\n" +
+	"\aproblem\x18\x04 \x01(\v2).vibesys.orchestrator.v1.CatalogueProblemR\aproblem\"\x89\x01\n" +
+	"\x10CatalogueProblem\x12S\n" +
+	"\x06reason\x18\x01 \x01(\x0e2/.vibesys.orchestrator.v1.CatalogueProblemReasonB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06reason\x12 \n" +
+	"\x06detail\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x06detail*\x9b\x01\n" +
 	"\bFitState\x12\x19\n" +
 	"\x15FIT_STATE_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eFIT_STATE_FITS\x10\x01\x12\x1c\n" +
 	"\x18FIT_STATE_NO_ACCELERATOR\x10\x02\x12!\n" +
 	"\x1dFIT_STATE_UNKNOWN_ACCELERATOR\x10\x03\x12\x1f\n" +
-	"\x1bFIT_STATE_PLACES_UNREADABLE\x10\x04BTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
+	"\x1bFIT_STATE_PLACES_UNREADABLE\x10\x04*\x9c\x01\n" +
+	"\x16CatalogueProblemReason\x12(\n" +
+	"$CATALOGUE_PROBLEM_REASON_UNSPECIFIED\x10\x00\x12'\n" +
+	"#CATALOGUE_PROBLEM_REASON_NO_RELEASE\x10\x01\x12/\n" +
+	"+CATALOGUE_PROBLEM_REASON_RELEASE_INCOMPLETE\x10\x02BTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
 	file_vibesys_orchestrator_v1_catalogue_proto_rawDescOnce sync.Once
@@ -349,26 +474,30 @@ func file_vibesys_orchestrator_v1_catalogue_proto_rawDescGZIP() []byte {
 	return file_vibesys_orchestrator_v1_catalogue_proto_rawDescData
 }
 
-var file_vibesys_orchestrator_v1_catalogue_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vibesys_orchestrator_v1_catalogue_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_vibesys_orchestrator_v1_catalogue_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_vibesys_orchestrator_v1_catalogue_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_vibesys_orchestrator_v1_catalogue_proto_goTypes = []any{
 	(FitState)(0),                 // 0: vibesys.orchestrator.v1.FitState
-	(*Fit)(nil),                   // 1: vibesys.orchestrator.v1.Fit
-	(*CatalogueEntry)(nil),        // 2: vibesys.orchestrator.v1.CatalogueEntry
-	(*ListCatalogueRequest)(nil),  // 3: vibesys.orchestrator.v1.ListCatalogueRequest
-	(*ListCatalogueResponse)(nil), // 4: vibesys.orchestrator.v1.ListCatalogueResponse
-	(*v1.TaskCard)(nil),           // 5: vibesys.cli.v1.TaskCard
+	(CatalogueProblemReason)(0),   // 1: vibesys.orchestrator.v1.CatalogueProblemReason
+	(*Fit)(nil),                   // 2: vibesys.orchestrator.v1.Fit
+	(*CatalogueEntry)(nil),        // 3: vibesys.orchestrator.v1.CatalogueEntry
+	(*ListCatalogueRequest)(nil),  // 4: vibesys.orchestrator.v1.ListCatalogueRequest
+	(*ListCatalogueResponse)(nil), // 5: vibesys.orchestrator.v1.ListCatalogueResponse
+	(*CatalogueProblem)(nil),      // 6: vibesys.orchestrator.v1.CatalogueProblem
+	(*v1.TaskCard)(nil),           // 7: vibesys.cli.v1.TaskCard
 }
 var file_vibesys_orchestrator_v1_catalogue_proto_depIdxs = []int32{
 	0, // 0: vibesys.orchestrator.v1.Fit.state:type_name -> vibesys.orchestrator.v1.FitState
-	5, // 1: vibesys.orchestrator.v1.CatalogueEntry.card:type_name -> vibesys.cli.v1.TaskCard
-	1, // 2: vibesys.orchestrator.v1.CatalogueEntry.fit:type_name -> vibesys.orchestrator.v1.Fit
-	2, // 3: vibesys.orchestrator.v1.ListCatalogueResponse.entries:type_name -> vibesys.orchestrator.v1.CatalogueEntry
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	7, // 1: vibesys.orchestrator.v1.CatalogueEntry.card:type_name -> vibesys.cli.v1.TaskCard
+	2, // 2: vibesys.orchestrator.v1.CatalogueEntry.fit:type_name -> vibesys.orchestrator.v1.Fit
+	3, // 3: vibesys.orchestrator.v1.ListCatalogueResponse.entries:type_name -> vibesys.orchestrator.v1.CatalogueEntry
+	6, // 4: vibesys.orchestrator.v1.ListCatalogueResponse.problem:type_name -> vibesys.orchestrator.v1.CatalogueProblem
+	1, // 5: vibesys.orchestrator.v1.CatalogueProblem.reason:type_name -> vibesys.orchestrator.v1.CatalogueProblemReason
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_catalogue_proto_init() }
@@ -381,8 +510,8 @@ func file_vibesys_orchestrator_v1_catalogue_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_catalogue_proto_rawDesc), len(file_vibesys_orchestrator_v1_catalogue_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   4,
+			NumEnums:      2,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

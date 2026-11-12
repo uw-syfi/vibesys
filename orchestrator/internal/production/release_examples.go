@@ -20,15 +20,16 @@ type ReleaseCatalogue struct {
 
 var _ daemon.CatalogueSource = ReleaseCatalogue{}
 
-// Catalogue implements daemon.CatalogueSource. Its entries carry no fit.
+// Catalogue implements daemon.CatalogueSource. Its entries carry no fit. RepositoriesDirectory is
+// set even on a failure, so a caller that turns the error into a classified problem still has it.
 func (c ReleaseCatalogue) Catalogue(context.Context) (daemon.Catalogue, error) {
 	rel, err := c.Find()
 	if err != nil {
-		return daemon.Catalogue{}, err
+		return daemon.Catalogue{RepositoriesDirectory: c.RepositoriesDirectory}, err
 	}
 	file, err := rel.Catalogue()
 	if err != nil {
-		return daemon.Catalogue{}, err
+		return daemon.Catalogue{RepositoriesDirectory: c.RepositoriesDirectory}, err
 	}
 	out := daemon.Catalogue{Release: rel.Version(), RepositoriesDirectory: c.RepositoriesDirectory}
 	for _, e := range file.GetExamples() {

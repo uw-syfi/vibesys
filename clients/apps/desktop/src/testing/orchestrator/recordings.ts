@@ -22,6 +22,8 @@ import {
   type IdentifyResponse,
   IdentifyResponseSchema,
   ItemsPageSchema,
+  type ListCatalogueResponse,
+  ListCatalogueResponseSchema,
   ListDirectoryRequestSchema,
   ListDirectoryResponseSchema,
   ListItemsRequestSchema,
@@ -90,6 +92,8 @@ export interface DaemonOptions {
    * otherwise; without it `ListDirectory` is unknown, as an older host's is, and no path has tasks.
    */
   readonly files?: FakeFiles;
+  /** What `ListCatalogue` answers; the fixture's rich catalogue (see `new-run-fixtures`) by default. */
+  readonly catalogue?: ListCatalogueResponse;
 }
 
 const PREFIX = `/${OrchestratorService.typeName}/`;
@@ -431,6 +435,9 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
         case methodPathOf('CheckRepository'):
           return checkRepositorySteps(options, target);
         case methodPathOf('ListCatalogue'):
+          return options.catalogue === undefined
+            ? newRun('ListCatalogue', target.request)
+            : [{frame: toBinary(ListCatalogueResponseSchema, options.catalogue)}];
         case methodPathOf('ListEvalPlaces'):
         case methodPathOf('ProvisionRepository'):
           return newRun(target.method.slice(PREFIX.length), target.request);

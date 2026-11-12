@@ -11,6 +11,8 @@ import {
   AcceleratorVendor,
   type CatalogueEntry,
   CatalogueEntrySchema,
+  type CatalogueProblemReason,
+  CatalogueProblemSchema,
   type EvalPlace,
   EvalPlaceKind,
   EvalPlaceSchema,
@@ -187,6 +189,16 @@ export const fixtureCatalogueResponse = () =>
           fit: fitOf(entryCard, fixturePlaces()),
         }),
     ),
+  });
+
+/**
+ * The fake host's answer to `ListCatalogue` when it names a classified problem instead of entries:
+ * still a successful reply, still naming its repositories directory, as the real host's does.
+ */
+export const fixtureCatalogueProblemResponse = (reason: CatalogueProblemReason, detail: string) =>
+  create(ListCatalogueResponseSchema, {
+    repositoriesDirectory: FIXTURE_REPOSITORIES_DIRECTORY,
+    problem: create(CatalogueProblemSchema, {reason, detail}),
   });
 
 /**
