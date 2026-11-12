@@ -1,0 +1,3007 @@
+From 64ce2e898583469bb0b9368c9ab5d24ddb768a62 Mon Sep 17 00:00:00 2001
+From: vic-lsh <40274755+vic-shihang-li@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 04:14:09 +0000
+Subject: [PATCH 1/2] loadgen_perf_server: pace streams, inject failures, serve
+ /v1/completions
+
+The windowed-measurement tests need a server whose timing and failures are
+fixed by construction. --prefill-delay-ms and --chunk-delay-ms pace the
+stream segment by segment (zero keeps the single-write profiling path),
+--fail-request-id-containing answers HTTP 500 to matching measured
+requests, and /v1/completions serves the OpenAI-compatible shape of the
+same stream so the openai backend can be exercised.
+
+Also match the client's current preflight request id: the server still
+expected the old name, so the preflight could never pass against it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01DCNRKVzTz7MNsHuoM9wwFh
+---
+ src/bin/loadgen_perf_server.rs | 179 +++++++++++++++++++++++++++++----
+ 1 file changed, 162 insertions(+), 17 deletions(-)
+
+diff --git a/src/bin/loadgen_perf_server.rs b/src/bin/loadgen_perf_server.rs
+index 8d270c6..b9e84b8 100644
+--- a/src/bin/loadgen_perf_server.rs
++++ b/src/bin/loadgen_perf_server.rs
+@@ -4,6 +4,12 @@
+ //! needs in order to measure its own ceiling: persistent HTTP/1.1, chunked SSE, exact token
+ //! counts, and the two-request prefix-cache preflight. Measured requests remain stateless so
+ //! server-side bookkeeping cannot become the benchmark's bottleneck.
++//!
++//! The same responder also serves the windowed-measurement integration tests, which need a
++//! server whose timing and failures are fixed by construction: `--prefill-delay-ms` and
++//! `--chunk-delay-ms` pace the stream (both default to 0, which keeps the single-write fast
++//! path), `--fail-request-id-containing S` answers HTTP 500 to every measured request whose id
++//! contains `S`, and `/v1/completions` speaks the OpenAI-compatible shape of the same stream.
+ 
+ #[cfg(feature = "runtime")]
+ mod runtime {
+@@ -13,18 +19,35 @@ mod runtime {
+     use std::net::SocketAddr;
+     use std::sync::atomic::{AtomicUsize, Ordering};
+     use std::sync::Arc;
++    use std::time::Duration;
+     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+     use tokio::net::{TcpListener, TcpStream};
+ 
+     const DEFAULT_BIND: &str = "127.0.0.1:18080";
+     const DEFAULT_MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
+-    const PREFLIGHT_ID: &str = "req-frontend-prefix-cache-preflight";
++    // Must match `PREFLIGHT_REQUEST_ID` in `src/backend/preflight.rs`.
++    const PREFLIGHT_ID: &str = "req-frontend-preflight";
++    const SERVED_PATHS: [&str; 2] = ["/inference/v1/generate", "/v1/completions"];
+ 
+-    #[derive(Debug, Clone, Copy)]
++    #[derive(Debug, Clone)]
+     struct Config {
+         bind: SocketAddr,
+         tokens_per_chunk: usize,
+         max_body_bytes: usize,
++        prefill_delay: Duration,
++        chunk_delay: Duration,
++        fail_request_id_containing: Option<String>,
++    }
++
++    /// OpenAI-compatible `/v1/completions` body, normalized into [`GenerateBody`].
++    #[derive(Debug, Deserialize)]
++    struct CompletionsBody {
++        #[serde(default)]
++        rid: Option<String>,
++        prompt: Vec<u32>,
++        max_tokens: usize,
++        #[serde(default)]
++        stream: bool,
+     }
+ 
+     #[derive(Debug, Deserialize, PartialEq, Eq)]
+@@ -67,8 +90,9 @@ mod runtime {
+         loop {
+             let (socket, _) = listener.accept().await?;
+             let state = Arc::clone(&state);
++            let config = config.clone();
+             tokio::spawn(async move {
+-                if let Err(error) = serve_connection(socket, config, state).await {
++                if let Err(error) = serve_connection(socket, &config, state).await {
+                     // One line per broken connection is useful; the successful hot path is silent.
+                     eprintln!("loadgen-perf-server connection error: {error}");
+                 }
+@@ -80,16 +104,25 @@ mod runtime {
+         let mut bind = DEFAULT_BIND.parse()?;
+         let mut tokens_per_chunk = 1usize;
+         let mut max_body_bytes = DEFAULT_MAX_BODY_BYTES;
++        let mut prefill_delay_ms = 0u64;
++        let mut chunk_delay_ms = 0u64;
++        let mut fail_request_id_containing = None;
+         let mut args = std::env::args().skip(1);
+         while let Some(arg) = args.next() {
+             let value = match arg.as_str() {
+-                "--bind" | "--tokens-per-chunk" | "--max-body-bytes" => args
++                "--bind"
++                | "--tokens-per-chunk"
++                | "--max-body-bytes"
++                | "--prefill-delay-ms"
++                | "--chunk-delay-ms"
++                | "--fail-request-id-containing" => args
+                     .next()
+                     .ok_or_else(|| anyhow::anyhow!("{arg} requires a value"))?,
+                 "--help" | "-h" => {
+                     println!(
+                         "Usage: loadgen_perf_server [--bind ADDR] [--tokens-per-chunk N] \
+-                         [--max-body-bytes N]"
++                         [--max-body-bytes N] [--prefill-delay-ms MS] [--chunk-delay-ms MS] \
++                         [--fail-request-id-containing S]"
+                     );
+                     std::process::exit(0);
+                 }
+@@ -99,6 +132,9 @@ mod runtime {
+                 "--bind" => bind = value.parse()?,
+                 "--tokens-per-chunk" => tokens_per_chunk = value.parse()?,
+                 "--max-body-bytes" => max_body_bytes = value.parse()?,
++                "--prefill-delay-ms" => prefill_delay_ms = value.parse()?,
++                "--chunk-delay-ms" => chunk_delay_ms = value.parse()?,
++                "--fail-request-id-containing" => fail_request_id_containing = Some(value),
+                 _ => unreachable!(),
+             }
+         }
+@@ -108,12 +144,15 @@ mod runtime {
+             bind,
+             tokens_per_chunk,
+             max_body_bytes,
++            prefill_delay: Duration::from_millis(prefill_delay_ms),
++            chunk_delay: Duration::from_millis(chunk_delay_ms),
++            fail_request_id_containing,
+         })
+     }
+ 
+     async fn serve_connection(
+         mut socket: TcpStream,
+-        config: Config,
++        config: &Config,
+         state: Arc<State>,
+     ) -> io::Result<()> {
+         socket.set_nodelay(true)?;
+@@ -126,15 +165,38 @@ mod runtime {
+             };
+             let frame: Vec<u8> = input.drain(..frame_len).collect();
+             match parse_request(&frame) {
+-                Ok(request) if request.path == "/inference/v1/generate" => {
+-                    let cached = if request.request_id.as_deref() == Some(PREFLIGHT_ID) {
++                Ok(request) if SERVED_PATHS.contains(&request.path.as_str()) => {
++                    let preflight = request.request_id.as_deref() == Some(PREFLIGHT_ID);
++                    let fails = !preflight
++                        && config
++                            .fail_request_id_containing
++                            .as_deref()
++                            .is_some_and(|needle| {
++                                request
++                                    .request_id
++                                    .as_deref()
++                                    .is_some_and(|id| id.contains(needle))
++                            });
++                    if fails {
++                        write_error(&mut socket, 500, "injected failure").await?;
++                        return Ok(());
++                    }
++                    let cached = if preflight {
+                         let ordinal = state.preflight_requests.fetch_add(1, Ordering::Relaxed);
+                         usize::from(ordinal > 0) * request.body.token_ids.len()
+                     } else {
+                         0
+                     };
+-                    let response = response_bytes(&request.body, config.tokens_per_chunk, cached);
+-                    socket.write_all(&response).await?;
++                    let response =
++                        response_segments(&request.body, config.tokens_per_chunk, cached);
++                    // Preflight is answered at full speed so a paced test server does
++                    // not slow every run's setup.
++                    if preflight || (config.prefill_delay.is_zero() && config.chunk_delay.is_zero())
++                    {
++                        socket.write_all(&response.concat()).await?;
++                    } else {
++                        write_paced(&mut socket, &response, config).await?;
++                    }
+                     if request.close {
+                         return Ok(());
+                     }
+@@ -228,8 +290,22 @@ mod runtime {
+                 close = true;
+             }
+         }
+-        let body: GenerateBody = serde_json::from_slice(&frame[header_end + 4..])
+-            .map_err(|error| format!("invalid vLLM request JSON: {error}"))?;
++        let payload = &frame[header_end + 4..];
++        let body: GenerateBody = if path == "/v1/completions" {
++            let body: CompletionsBody = serde_json::from_slice(payload)
++                .map_err(|error| format!("invalid completions request JSON: {error}"))?;
++            GenerateBody {
++                rid: body.rid,
++                token_ids: body.prompt,
++                sampling_params: SamplingParams {
++                    max_tokens: body.max_tokens,
++                },
++                stream: body.stream,
++            }
++        } else {
++            serde_json::from_slice(payload)
++                .map_err(|error| format!("invalid vLLM request JSON: {error}"))?
++        };
+         let request_id = request_id.or_else(|| body.rid.clone());
+         Ok(Request {
+             path,
+@@ -239,13 +315,47 @@ mod runtime {
+         })
+     }
+ 
++    /// Write a response segment by segment: headers, then the first token chunk
++    /// after the prefill delay, then each later segment after the chunk delay.
++    async fn write_paced(
++        socket: &mut TcpStream,
++        segments: &[Vec<u8>],
++        config: &Config,
++    ) -> io::Result<()> {
++        let (headers, events) = segments.split_first().expect("a response has headers");
++        socket.write_all(headers).await?;
++        socket.flush().await?;
++        tokio::time::sleep(config.prefill_delay).await;
++        for (index, segment) in events.iter().enumerate() {
++            if index > 0 {
++                tokio::time::sleep(config.chunk_delay).await;
++            }
++            socket.write_all(segment).await?;
++            socket.flush().await?;
++        }
++        Ok(())
++    }
++
++    #[cfg(test)]
+     fn response_bytes(body: &GenerateBody, tokens_per_chunk: usize, cached: usize) -> Vec<u8> {
++        response_segments(body, tokens_per_chunk, cached).concat()
++    }
++
++    /// The response as separately writable segments: headers, one segment per
++    /// token chunk, and a final segment carrying usage, `[DONE]` and the
++    /// chunked-encoding terminator.
++    fn response_segments(
++        body: &GenerateBody,
++        tokens_per_chunk: usize,
++        cached: usize,
++    ) -> Vec<Vec<u8>> {
+         let token_count = body.sampling_params.max_tokens;
+         let prompt_tokens = body.token_ids.len();
+-        let mut response = Vec::with_capacity(512 + token_count * 12);
+-        response.extend_from_slice(
++        let mut segments = Vec::with_capacity(2 + token_count / tokens_per_chunk + 1);
++        segments.push(
+             b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\
+-              transfer-encoding: chunked\r\nconnection: keep-alive\r\n\r\n",
++              transfer-encoding: chunked\r\nconnection: keep-alive\r\n\r\n"
++                .to_vec(),
+         );
+ 
+         for (index, start) in (0..token_count).step_by(tokens_per_chunk).enumerate() {
+@@ -261,8 +371,11 @@ mod runtime {
+                 }],
+                 "usage": null,
+             });
+-            push_chunk(&mut response, format!("data: {event}\n\n").as_bytes());
++            let mut segment = Vec::with_capacity(64 + token_ids.len() * 8);
++            push_chunk(&mut segment, format!("data: {event}\n\n").as_bytes());
++            segments.push(segment);
+         }
++        let mut response = Vec::with_capacity(256);
+         let usage = json!({
+             "choices": [],
+             "usage": {
+@@ -275,7 +388,8 @@ mod runtime {
+         push_chunk(&mut response, format!("data: {usage}\n\n").as_bytes());
+         push_chunk(&mut response, b"data: [DONE]\n\n");
+         response.extend_from_slice(b"0\r\n\r\n");
+-        response
++        segments.push(response);
++        segments
+     }
+ 
+     fn push_chunk(output: &mut Vec<u8>, bytes: &[u8]) {
+@@ -356,6 +470,37 @@ mod runtime {
+             assert!(response.ends_with("0\r\n\r\n"));
+         }
+ 
++        #[test]
++        fn the_openai_completions_route_reads_the_same_generation() {
++            let body = json!({
++                "model": "m",
++                "rid": "req-9",
++                "prompt": [5, 6],
++                "max_tokens": 3,
++                "stream": true,
++                "return_token_ids": true,
++            })
++            .to_string();
++            let frame = format!(
++                "POST /v1/completions HTTP/1.1\r\nx-request-id: req-9\r\n\
++                 Content-Length: {}\r\n\r\n{body}",
++                body.len()
++            );
++            let parsed = parse_request(frame.as_bytes()).unwrap();
++            assert_eq!(parsed.path, "/v1/completions");
++            assert_eq!(parsed.body.token_ids, vec![5, 6]);
++            assert_eq!(parsed.body.sampling_params.max_tokens, 3);
++        }
++
++        #[test]
++        fn paced_segments_are_the_unpaced_response_split_at_chunk_boundaries() {
++            let body = parse_request(&request("req-17", 5)).unwrap().body;
++            let segments = response_segments(&body, 2, 0);
++            // Headers, three token chunks, and the usage/[DONE]/terminator tail.
++            assert_eq!(segments.len(), 5);
++            assert_eq!(segments.concat(), response_bytes(&body, 2, 0));
++        }
++
+         #[test]
+         fn preflight_state_hits_only_after_the_warmup_and_never_tracks_measured_requests() {
+             let state = State::default();
+-- 
+2.39.5
+
+
+From 4b979d8bd9bb64a0dea3ccf62494e2a04854dc0e Mon Sep 17 00:00:00 2001
+From: vic-lsh <40274755+vic-shihang-li@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 04:14:09 +0000
+Subject: [PATCH 2/2] window: measure a fixed wall-clock window instead of a
+ fixed amount of work
+
+--warmup-secs W --duration-secs D (YAML replay.window) bound a run by time:
+t0 is when measured replay starts, after the prefix-cache preflight, and the
+window is [t0+W, t0+W+D). At its end admission stops, sessions release no
+further rounds, tool waits are abandoned, and every in-flight request is
+dropped mid-stream, closing its connection. Abandoned requests are logged
+as CANCELLED_AT_WINDOW_END and are not failures; real failures still are.
+
+Each request is stamped on the window's clock (send time, first output,
+every token-id event with its own token count) and a pure fold derives:
+throughput from tokens whose event arrived in the window, TTFT over
+requests sent in the window with still-waiting ones censored at window end,
+and TPOT as token_delivery_tpot_ms restricted to in-window events. These
+replace the run-wide values in replay.common; replay.window carries W, D
+and the counts. Step counts cover steps that reached a verdict inside the
+window. Accepted only for saturated text replay in one process.
+
+Without the flags nothing changes: no window block, no new status, and the
+JSONL record contract is untouched.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01DCNRKVzTz7MNsHuoM9wwFh
+---
+ ARCHITECTURE.md                     |  16 +-
+ ARCHITECTURE.zh-CN.md               |   1 +
+ README.md                           |  73 +++-
+ configs/run.example.yaml            |   6 +
+ docs/CONFIGURATION.md               |   2 +
+ docs/TESTING.md                     |   3 +-
+ launcher/config.py                  |  42 ++
+ launcher/ui.py                      |  10 +
+ skills/coding-trace-replay/SKILL.md |   8 +
+ src/backend/client.rs               |  85 +++-
+ src/backend/stream.rs               |  30 ++
+ src/cli.rs                          |  34 ++
+ src/executor/independent.rs         |  48 ++-
+ src/executor/mod.rs                 |  22 +-
+ src/executor/session.rs             |  59 ++-
+ src/lib.rs                          |   2 +
+ src/record.rs                       |  24 ++
+ src/runner.rs                       |  85 +++-
+ src/summary.rs                      | 191 ++++++++-
+ src/window.rs                       | 591 ++++++++++++++++++++++++++++
+ tests/test_launcher.py              |  83 ++++
+ tests/test_windowed_replay.py       | 457 +++++++++++++++++++++
+ 22 files changed, 1817 insertions(+), 55 deletions(-)
+ create mode 100644 src/window.rs
+ create mode 100644 tests/test_windowed_replay.py
+
+diff --git a/ARCHITECTURE.md b/ARCHITECTURE.md
+index 9f28077..f964b1d 100644
+--- a/ARCHITECTURE.md
++++ b/ARCHITECTURE.md
+@@ -367,6 +367,16 @@ proportional to active concurrency rather than trace length. For saturated
+ scale-out, launcher processes partition canonical top-level ordinals; sessions
+ remain indivisible.
+ 
++A time-boxed run (`--warmup-secs` / `--duration-secs`, saturated text replay in
++one process) anchors its window at t0, the instant measured replay starts after
++the preflight. Every await that could outlast the window races its end:
++admission stops pulling units, a session checks before each round, a tool wait
++is abandoned, and `GenerationClient::run_step_windowed` drops the in-flight HTTP
++future, which closes the connection. The abandoned request is logged as
++`CANCELLED_AT_WINDOW_END`, not as a failure. `window.rs` owns the clock and the
++pure fold that turns per-request token-event times into windowed throughput,
++censored TTFT and windowed TPOT; the executor only stamps what it saw.
++
+ ## 8. `tokens.rs` materializes actual prompts
+ 
+ Input rows carry lengths and prefix relationships, not concrete token ids for
+@@ -467,7 +477,10 @@ GenerationOutcome
+ Two output paths avoid blocking request execution:
+ 
+ - the log channel lets `summary::write_logs` fold replay metrics, prefix-cache
+-  metrics, and optional SLO attainment, and optionally persist per-step JSONL;
++  metrics, and optional SLO attainment, and optionally persist per-step JSONL.
++  In a time-boxed run every record also carries an unserialized
++  `WindowObservation`, which the same pass folds into `replay.window` and the
++  windowed values of `replay.common`;
+ - the optional timeline channel encodes per-event Parquet in a separate
+   blocking writer. A full channel drops timeline samples instead of applying
+   disk or Arrow backpressure to the measured submission path.
+@@ -542,6 +555,7 @@ execution policy.
+ | `record.rs` | per-step source-plus-outcome JSONL contract |
+ | `timeline.rs` | optional per-event recording |
+ | `summary.rs` | replay, runtime, timeline, and run-level aggregation |
++| `window.rs` | time-boxed measurement: window clock, per-request observation, windowed fold |
+ | `slo.rs` | optional declared-versus-measured SLO evaluation |
+ 
+ The shortest useful mental model is:
+diff --git a/ARCHITECTURE.zh-CN.md b/ARCHITECTURE.zh-CN.md
+index 109d1b8..13a903b 100644
+--- a/ARCHITECTURE.zh-CN.md
++++ b/ARCHITECTURE.zh-CN.md
+@@ -473,6 +473,7 @@ timings，并不是 schema loader 或 executor 的 owner。
+ | `record.rs` | per-step source + outcome JSONL contract |
+ | `timeline.rs` | optional per-event recording |
+ | `summary.rs` | replay、runtime、timeline 与 run-level aggregation |
++| `window.rs` | time-boxed measurement：window clock、per-request observation 与 windowed fold |
+ | `slo.rs` | 可选的 declared-vs-measured SLO evaluation |
+ 
+ 最短的心智模型是：
+diff --git a/README.md b/README.md
+index 78265e3..e51b910 100644
+--- a/README.md
++++ b/README.md
+@@ -151,6 +151,7 @@ This axis has two sub-axes that compose freely — *when* a unit may start, and
+ | `replay.rate: N` | Rescale all arrivals to `N` units/s, preserving relative gaps and simultaneous-arrival bursts. Needs at least two distinct arrival times |
+ | `replay.max_concurrency: N` | Bound concurrently active units under either arrival mode. One session holds its slot across all rounds **and tool waits** |
+ | `replay.max_items: N` | Keep the first `N` units in trace order after the complete file has been validated |
++| `replay.window: {warmup_seconds: W, duration_seconds: D}` | Time-boxed measurement: measure `[t0+W, t0+W+D)` and stop at its end instead of finishing the trace. Saturated text replay in one process only; see [Time-boxed measurement](#time-boxed-measurement) |
+ | `replay.runtime_worker_threads: N` | Override the profiled default cap of 16 Tokio workers per process |
+ | `replay.processes: N` | Partition whole top-level units across `N` processes for saturated capacity tests |
+ 
+@@ -1183,6 +1184,12 @@ What remains on the record is the run's own behaviour:
+ - `derived_prefix_len` / `derived_append_len` — the split actually built. Equal
+   to the trace's own numbers unless `prefix_shortfall_tokens` is nonzero.
+ 
++A time-boxed run adds one `outcome.status` value without changing any field:
++`CANCELLED_AT_WINDOW_END`, a request still streaming (or not yet answered) when
++the measurement window ended and was abandoned. It is neither `SUCCESS` nor
++`FAILED`, and a run without window flags never produces it. See
++[Time-boxed measurement](#time-boxed-measurement).
++
+ v7 added `outcome.echoed_prompt_tokens`: leading generated IDs that repeated the
+ prompt tail and were dropped before carry-forward. It is `0` on every server
+ that does not echo, which is all of them today apart from the SGLang case
+@@ -1270,6 +1277,8 @@ is the same string in the trace, the client log, and the server log.
+ - `workload`: parsed shape and optional trace-target overflow information;
+ - `replay.common`: success/failure counts, throughput, TTFT, TPOT, and E2E;
+ - `replay.prefix_cache`: session-only planned-versus-server cache accounting;
++- `replay.window`: present only for a [time-boxed run](#time-boxed-measurement),
++  and absent (not null) otherwise;
+ - `client_runtime`: Tokio worker count and sampled global injection-queue peak;
+ - `timeline`: what the per-event timeline recorded, and what it had to drop;
+ - `slo`: attainment against the declared objective, or `null` when none was.
+@@ -1673,6 +1682,65 @@ throughput rather than as an error. Check `failed_steps` and
+ a server-side serving window: it includes trace arrival gaps, tool waits, and
+ any time spent blocked on `--max-concurrency`.
+ 
++### Time-boxed measurement
++
++A trace far longer than any run can replay has no natural end, and engines that
++differ by orders of magnitude in speed would cover different amounts of it in
++any fixed budget. `--warmup-secs W --duration-secs D` (YAML `replay.window`)
++therefore measures a fixed span of wall clock instead of a fixed amount of work:
++
++```text
++t0     = measured replay starts, after the prefix-cache preflight
++window = [t0 + W, t0 + W + D)       W >= 0, D > 0, both or neither
++```
++
++At `t0 + W + D` the run stops releasing rounds and sessions, abandons every
++in-flight request by dropping its HTTP stream (closing the connection is how an
++OpenAI-compatible server learns to abort it), stops waiting on tool sleeps,
++writes the summary, and exits 0. Those abandoned requests are logged with status
++`CANCELLED_AT_WINDOW_END` and are never failures; a real failure (HTTP error,
++malformed stream, integrity failure) is still `FAILED` and still counts.
++
++It is accepted only for text replay (sessions or independent requests) under
++`--arrival-mode saturated`, in one process. Under `trace-timed` the offered load
++is the trace's own timeline, so a window would measure whichever slice of the
++schedule it happened to cover; multimodal surfaces report whole outputs rather
++than token events; a dry run measures nothing; and process shards would each
++open their own window after their own preflight.
++
++Every measurement is on one monotonic clock, in milliseconds since t0:
++
++| Field | Windowed definition |
++|---|---|
++| `output_token_throughput_per_s` | Output tokens whose stream event arrived inside the window, divided by D. Each event's tokens all take that event's arrival time, so a multi-token (speculative) chunk counts in full at its own instant. Tokens of requests that later failed are excluded, as in the run-wide metric. Completed requests are *not* what is counted, which would favour short requests |
++| `ttft_ms_*` | Over requests whose HTTP send was inside the window. A request with a first output inside the window contributes its own TTFT (the same token-id-preferred value as its record). One still waiting at window end is **censored**: `window end - send` enters the percentiles as a lower bound and is counted in `window.ttft_censored_requests`, so a server cannot look fast by starving long prompts. A request that failed before any output has no TTFT, as without a window |
++| `tpot_ms_*` | Per request that did not fail, from its token-id events inside the window only: `(last - first in-window event) / tokens in the in-window events after the first`. At least two in-window events are needed. This is `token_delivery_tpot_ms` restricted to the window, so a stream wholly inside it gets exactly its own TPOT |
++| `ttft_token_id_steps` / `ttft_text_fallback_steps` | Uncensored windowed TTFTs by clock |
++| `run_duration_ms` | `D * 1000` |
++| `request_throughput_per_s` | `success_steps / D` |
++| `output_byte_throughput_per_s`, `audio_throughput_s_per_s` | `null`: both count completed responses |
++| `attempted_steps`, `success_steps`, `failed_steps` | Steps that reached a verdict *inside* the window, whenever sent. `attempted = success + failed` still holds, because a cancelled request never reached one; cancellations are counted in `window` |
++| other per-step fields, `prefix_cache`, `slo` | The same verdict population as the step counts |
++
++`replay.window` holds the configuration and the counts:
++
++| Field | Meaning |
++|---|---|
++| `warmup_s`, `duration_s` | W and D |
++| `output_tokens` | Numerator of the windowed throughput |
++| `requests_submitted` | HTTP sends inside the window (the TTFT population) |
++| `requests_first_token` | Requests whose first output arrived inside the window, whenever sent |
++| `ttft_censored_requests` | Submitted inside the window, no first output by its end |
++| `requests_cancelled_at_window_end` | In flight at window end and abandoned; not failures |
++| `requests_failed` | Real failures that reached that verdict inside the window |
++| `requests_output_length_mismatch` | Succeeded inside the window with an output length other than the target; reported, not failed, exactly as `output_mismatch_steps` |
++| `warmup_requests_failed` | Real failures during warmup, outside every windowed metric but never invisible |
++| `sessions_started` | Sessions whose first round was issued inside the window; `null` for independent requests |
++| `requests_without_token_ids` | Requests that streamed text but no token ids, whose tokens therefore cannot be placed in time and are missing from `output_tokens`. Nonzero prints a warning: use a server that returns token ids |
++
++Without the two flags none of this exists: no `window` block, no cancelled
++status, and every field keeps the run-wide definition above.
++
+ ### Offered units against delivered steps
+ 
+ The two sides of a saturation test are counted in different things, and the
+@@ -1766,6 +1834,8 @@ binary. The axis columns map back to [Configuration axes](#configuration-axes).
+ |---|---|---|
+ | `--arrival-mode` | `trace-timed` | `trace-timed`, `saturated`. `saturated` is rejected with `--rate` |
+ | `--max-items N` | unlimited | Alias `--max-sessions`. See the axis-3 table for its per-frontend selection order |
++| `--warmup-secs W` | unset | Time-boxed measurement; requires `--duration-secs`. `W >= 0`. Text replay, `saturated`, one shard, not `--dry-run` |
++| `--duration-secs D` | unset | Window length; requires `--warmup-secs`. `D > 0`. See [Time-boxed measurement](#time-boxed-measurement) |
+ | `--rate N` | trace arrivals unchanged | Units/s. Needs at least two distinct arrival times after `--max-items` |
+ | `--max-concurrency N` | unlimited | Must be greater than `0`; `0` is rejected at startup. Caps active units — a session counts while it waits on a tool |
+ | `--runtime-worker-threads N` | min(host CPUs, 16) | Tokio workers in this load-generator process; override only after profiling |
+@@ -1874,7 +1944,8 @@ A context-limit skip always ends its session, independently of this flag.
+ │   │   ├── mod.rs            per-event vocabulary + the non-blocking handoff
+ │   │   └── writer.rs         Arrow/Parquet, entirely off the request path
+ │   ├── summary.rs            run-level metric aggregation
+-│   └── util.rs               shared timing/ratio helpers
++│   ├── util.rs               shared timing/ratio helpers
++│   └── window.rs             time-boxed measurement: window clock and fold
+ ├── pyproject.toml            launcher Python dependencies and test config
+ └── Cargo.toml                Rust library and execution binaries
+ ```
+diff --git a/configs/run.example.yaml b/configs/run.example.yaml
+index d4f74ce..56c1a92 100644
+--- a/configs/run.example.yaml
++++ b/configs/run.example.yaml
+@@ -24,6 +24,12 @@ replay:
+   processes: 1
+   stop_session_on_error: true
+   stream_idle_timeout_seconds: 600
++  # Time-boxed measurement for traces too long to finish: measure
++  # [t0 + warmup, t0 + warmup + duration) and stop there. Requires
++  # arrival_mode: saturated and processes: 1.
++  # window:
++  #   warmup_seconds: 120
++  #   duration_seconds: 600
+   context:
+     max_model_len: 131072
+     on_limit: skip
+diff --git a/docs/CONFIGURATION.md b/docs/CONFIGURATION.md
+index 92c121d..6b6746a 100644
+--- a/docs/CONFIGURATION.md
++++ b/docs/CONFIGURATION.md
+@@ -65,6 +65,8 @@ See the support matrix in the [README](../README.md#serverdialect-which-vocabula
+ | `replay.max_items` | all | Keep the first N units after validating the full file |
+ | `replay.max_concurrency` | unlimited | Active top-level units; a session holds its slot across rounds and tool waits |
+ | `replay.processes` | `1` | Process shards; values above one require a saturated `run` |
++| `replay.window.warmup_seconds` | unset | Time-boxed measurement: seconds after t0 (measured replay start, after preflight) before the window opens; `>= 0`. Requires `duration_seconds` |
++| `replay.window.duration_seconds` | unset | Window length in seconds; `> 0`. At its end the run abandons in-flight work and exits. Requires `saturated`, text replay, `processes: 1`, and is unavailable in `sweep`; see the README's *Time-boxed measurement* |
+ | `replay.runtime_worker_threads` | min(host CPUs, 16) | Tokio workers per process |
+ | `replay.stream_idle_timeout_seconds` | `600` | Fail after this many seconds without a stream chunk |
+ | `replay.stop_session_on_error` | `true` | Stop later rounds after the first failed session round |
+diff --git a/docs/TESTING.md b/docs/TESTING.md
+index bdc2de7..ce4844e 100644
+--- a/docs/TESTING.md
++++ b/docs/TESTING.md
+@@ -23,7 +23,7 @@ validation, scheduling/admission, wire serialization and parsing, dialect
+ profiles, stream integrity, records, summaries, sweeps, and trace generation.
+ The no-default-features run protects the lightweight schema-only library.
+ 
+-Python tests cover four boundaries:
++Python tests cover five boundaries:
+ 
+ | Area | Main tests | What is proved |
+ |---|---|---|
+@@ -31,6 +31,7 @@ Python tests cover four boundaries:
+ | Materializers | `test_*_benchmark.py`, `test_synthetic_content.py` | Deterministic selection, manifests, hashes, canonical request shapes |
+ | HTTP media surfaces | `test_mock_server.py`, `test_multimodal_replay.py` | Dialect enforcement plus chat, image, speech, edit, video, transcription, and translation request/response paths |
+ | Realtime | `tests/test_realtime.py` | OpenAI, vLLM-Omni, and SGLang-Omni event names, payload fields, turn styles, and loud failure for a mismatched dialect |
++| Time-boxed measurement | `tests/test_windowed_replay.py` | Against `loadgen_perf_server` with fixed pacing (`--prefill-delay-ms`, `--chunk-delay-ms`) and injected failures (`--fail-request-id-containing`): the run stops at window end, cancellation is not failure, a real failure still counts, an unanswered request is a censored TTFT, tool waits are abandoned, flags are validated, and a run without them keeps its summary shape |
+ 
+ `tools/mock_multimodal_server.py` is intentionally stricter than a permissive
+ OpenAI-compatible server: it rejects the wrong media encoding or knob envelope.
+diff --git a/launcher/config.py b/launcher/config.py
+index 962c3ec..e8e85e3 100644
+--- a/launcher/config.py
++++ b/launcher/config.py
+@@ -289,6 +289,7 @@ def _build_common_run_arguments(
+             "stop_session_on_error",
+             "dry_run",
+             "context",
++            "window",
+         },
+         "replay",
+     )
+@@ -308,6 +309,25 @@ def _build_common_run_arguments(
+     if on_limit not in {"send", "skip"}:
+         raise ConfigError("replay.context.on_limit must be 'send' or 'skip'")
+ 
++    window = replay.get("window")
++    if window is not None and not isinstance(window, dict):
++        raise ConfigError("replay.window must be a mapping")
++    window = window or {}
++    _reject_unknown(window, {"warmup_seconds", "duration_seconds"}, "replay.window")
++    if window:
++        for key in ("warmup_seconds", "duration_seconds"):
++            if key not in window:
++                raise ConfigError(f"replay.window.{key} is required")
++        warmup = _optional_number(window, "warmup_seconds", "replay.window")
++        assert warmup is not None
++        if warmup < 0:
++            raise ConfigError("replay.window.warmup_seconds must be zero or greater")
++        _optional_number(window, "duration_seconds", "replay.window", positive=True)
++        if replay.get("arrival_mode", "trace-timed") != "saturated":
++            raise ConfigError("replay.window requires replay.arrival_mode: saturated")
++        if replay.get("dry_run"):
++            raise ConfigError("replay.window cannot measure a dry run")
++
+     timeline_enabled = _optional_bool(measurement, "timeline", "measurement", True)
+     slo = measurement.get("slo")
+     if slo is not None and not isinstance(slo, dict):
+@@ -343,6 +363,10 @@ def _build_common_run_arguments(
+             raise ConfigError(
+                 "replay.context is text-replay-only and must be omitted for multimodal-independent-v1"
+             )
++        if window:
++            raise ConfigError(
++                "replay.window is text-replay-only and must be omitted for multimodal-independent-v1"
++            )
+     elif not corpus:
+         raise ConfigError("required 'corpus' must be a mapping for text replay")
+ 
+@@ -433,6 +457,15 @@ def _build_common_run_arguments(
+         "--max-model-len",
+         _optional_integer(context, "max_model_len", "replay.context", positive=True),
+     )
++    if window:
++        arguments.extend(
++            [
++                "--warmup-secs",
++                str(window["warmup_seconds"]),
++                "--duration-secs",
++                str(window["duration_seconds"]),
++            ]
++        )
+     if on_limit == "skip":
+         arguments.append("--skip-when-reaching-limit")
+     if _optional_bool(replay, "dry_run", "replay", False):
+@@ -459,6 +492,11 @@ def _build_run(root: dict[str, Any], config_path: Path) -> LaunchSpec:
+         raise ConfigError(
+             "replay.processes greater than 1 currently requires replay.arrival_mode: saturated"
+         )
++    if processes > 1 and replay.get("window"):
++        raise ConfigError(
++            "replay.window requires replay.processes: 1; every process would open its own "
++            "window after its own preflight"
++        )
+     return LaunchSpec(
+         task="run",
+         binary="session_runner",
+@@ -521,6 +559,10 @@ def _build_sweep(root: dict[str, Any], config_path: Path) -> LaunchSpec:
+         )
+     if replay.get("processes", 1) != 1:
+         raise ConfigError("replay.processes is supported by run, not sweep")
++    if replay.get("window") is not None:
++        raise ConfigError(
++            "replay.window is supported by run, not sweep: a sweep offers trace-timed rates"
++        )
+ 
+     arguments = [
+         "--out",
+diff --git a/launcher/ui.py b/launcher/ui.py
+index 8efc1d3..6781191 100644
+--- a/launcher/ui.py
++++ b/launcher/ui.py
+@@ -41,6 +41,7 @@ def should_echo_engine_line(task: str, line: str) -> bool:
+                 "sessions ",
+                 "requests ",
+                 "prefix hit rate summary",
++                "window summary",
+                 "slo attainment",
+             )
+         )
+@@ -131,6 +132,15 @@ def _render_run(specification: LaunchSpec) -> None:
+         "success",
+         f"{common.get('success_steps', 'n/a')} / {common.get('attempted_steps', 'n/a')} steps",
+     )
++    window = replay.get("window") if isinstance(replay, dict) else None
++    if isinstance(window, dict):
++        row(
++            "window",
++            f"{window.get('duration_s', 'n/a')} s after {window.get('warmup_s', 'n/a')} s warmup"
++            f"  |  censored TTFT {window.get('ttft_censored_requests', 'n/a')}"
++            f"  |  cancelled {window.get('requests_cancelled_at_window_end', 'n/a')}"
++            f"  |  failed {window.get('requests_failed', 'n/a')}",
++        )
+     row(
+         "throughput",
+         f"{_format_number(common.get('request_throughput_per_s'))} requests/s  |  "
+diff --git a/skills/coding-trace-replay/SKILL.md b/skills/coding-trace-replay/SKILL.md
+index 4522056..9c9c308 100644
+--- a/skills/coding-trace-replay/SKILL.md
++++ b/skills/coding-trace-replay/SKILL.md
+@@ -97,6 +97,14 @@ Keep arrival and capacity separate:
+ - `max_concurrency` caps top-level units. A session holds its slot across all
+   rounds and tool waits.
+ 
++When the trace is too long to finish, or engines of very different speed must
++be compared on equal footing, bound the run by time rather than work with
++`replay.window` (`warmup_seconds`, `duration_seconds`; saturated, one process).
++Read its throughput, TTFT and TPOT from `replay.common` as usual; they are
++windowed. Check `replay.window` for censored TTFTs, cancellations at window end
++(not failures), real failures, and `requests_without_token_ids` (nonzero means
++the throughput undercounts).
++
+ A sweep owns `rate`; omit `replay.rate`. Choose the question precisely:
+ 
+ - `max-sustainable-rate`: highest offered rate whose delivered step throughput
+diff --git a/src/backend/client.rs b/src/backend/client.rs
+index dee9c80..ddca392 100644
+--- a/src/backend/client.rs
++++ b/src/backend/client.rs
+@@ -11,8 +11,9 @@ use tokenizers::Tokenizer;
+ use tokio::time::timeout;
+ 
+ use crate::cli::{Args, BackendKind};
+-use crate::record::{GenerationOutcome, ServerUsageLog};
++use crate::record::{GenerationOutcome, ServerUsageLog, CANCELLED_STATUS};
+ use crate::util::{elapsed_ms, ratio, unix_seconds_now};
++use crate::window::{WindowClock, WindowObservation};
+ 
+ use super::integrity::{classify_prompt_echo, PromptEcho};
+ use super::stream::StreamAccumulator;
+@@ -89,6 +90,43 @@ impl GenerationClient {
+         prompt: Prompt<'_>,
+         max_tokens: usize,
+     ) -> GenerationResult {
++        self.run_step_observed(request_id, prompt, max_tokens, None)
++            .await
++            .0
++    }
++
++    /// [`Self::run_step`] inside a measurement window: the response is
++    /// abandoned at window end, and the request is placed on the window's
++    /// clock.
++    ///
++    /// Abandoning means dropping the in-flight HTTP future, which closes the
++    /// connection, which is how an OpenAI-compatible server learns to abort the
++    /// request. A request cut off this way is `CANCELLED`, not `FAILED`: nothing
++    /// went wrong with it, the run just stopped looking. A failure the stream
++    /// had already produced before the deadline stays a failure.
++    pub(crate) async fn run_step_windowed(
++        &self,
++        request_id: String,
++        prompt: Prompt<'_>,
++        max_tokens: usize,
++        window: &WindowClock,
++    ) -> (GenerationResult, WindowObservation) {
++        let (result, observation) = self
++            .run_step_observed(request_id, prompt, max_tokens, Some(window))
++            .await;
++        (
++            result,
++            observation.expect("a windowed step is always observed"),
++        )
++    }
++
++    async fn run_step_observed(
++        &self,
++        request_id: String,
++        prompt: Prompt<'_>,
++        max_tokens: usize,
++        window: Option<&WindowClock>,
++    ) -> (GenerationResult, Option<WindowObservation>) {
+         let submit_timestamp = unix_seconds_now();
+         let start = Instant::now();
+ 
+@@ -103,7 +141,12 @@ impl GenerationClient {
+             stream: true,
+         }) {
+             Ok(payload) => payload,
+-            Err(error) => return request_build_failure_result(request_id, error),
++            Err(error) => {
++                return (
++                    request_build_failure_result(request_id, error),
++                    window.map(|window| WindowObservation::unsent(window.ms_since_t0(start))),
++                )
++            }
+         };
+ 
+         let post_timestamp = Some(unix_seconds_now());
+@@ -111,8 +154,20 @@ impl GenerationClient {
+         let send_instant = Instant::now();
+ 
+         let mut fold = StreamAccumulator::new(max_tokens, self.record_timeline);
+-        self.fold_response(&request_id, payload, send_instant, &mut fold)
+-            .await;
++        let cancelled = match window {
++            None => {
++                self.fold_response(&request_id, payload, send_instant, &mut fold)
++                    .await;
++                false
++            }
++            Some(window) => {
++                fold = fold.recording_arrivals();
++                tokio::select! {
++                    () = self.fold_response(&request_id, payload, send_instant, &mut fold) => false,
++                    () = window.until_end() => true,
++                }
++            }
++        };
+ 
+         // Stop the wire-response clock before output re-tokenization and log shaping.
+         let response_complete_ms = post_timestamp.map(|_| elapsed_ms(send_instant));
+@@ -136,12 +191,27 @@ impl GenerationClient {
+             timeline,
+             finish_reason,
+             failure,
++            token_arrivals,
+             ..
+         } = fold;
+         // The fold reports what went wrong, not what it means for the round; the
+         // integrity repair below can still fail an otherwise clean stream.
+         let mut error = failure;
+-        let mut status = if error.is_some() { "FAILED" } else { "SUCCESS" }.to_string();
++        let mut status = match (&error, cancelled) {
++            (Some(_), _) => "FAILED",
++            (None, true) => CANCELLED_STATUS,
++            (None, false) => "SUCCESS",
++        }
++        .to_string();
++        let observation = window.map(|window| WindowObservation {
++            issued_ms: window.ms_since_t0(start),
++            sent_ms: Some(window.ms_since_t0(send_instant)),
++            first_output_after_send_ms: first_token_id_ms.or(first_text_ms),
++            first_output_is_token_id: first_token_id_ms.is_some(),
++            text_without_token_ids: token_event_count == 0 && first_text_ms.is_some(),
++            token_arrivals,
++            resolved_ms: window.now_ms(),
++        });
+ 
+         // Re-encode the output text for a diagnostic token count and as a carry-forward fallback.
+         let reencoded_output_ids: Vec<u32> = self
+@@ -231,7 +301,7 @@ impl GenerationClient {
+             prefix_hit_rate: server_prefix_hit_rate,
+         });
+ 
+-        GenerationResult {
++        let result = GenerationResult {
+             outcome: GenerationOutcome {
+                 request_id,
+                 output_modality: crate::schema::Modality::Text,
+@@ -267,7 +337,8 @@ impl GenerationClient {
+             },
+             output_ids,
+             timeline,
+-        }
++        };
++        (result, observation)
+     }
+ 
+     /// Send one request and drive its response into `fold`.
+diff --git a/src/backend/stream.rs b/src/backend/stream.rs
+index 41fe5c3..43f5044 100644
+--- a/src/backend/stream.rs
++++ b/src/backend/stream.rs
+@@ -60,7 +60,13 @@ pub(super) struct StreamAccumulator {
+     /// Set when the stream itself is unusable. `None` means nothing went wrong
+     /// *during* the fold; later checks may still fail the round.
+     pub(super) failure: Option<String>,
++    /// `(at_ms, tokens)` per token-id event, kept only for a windowed run,
++    /// which places every token on the clock by its own event. Unlike the
++    /// timeline it is never subsampled or narrowed to `f32`, so a windowed TPOT
++    /// is computed from exactly the values [`Self::token_delivery_tpot_ms`] uses.
++    pub(super) token_arrivals: Vec<(f64, usize)>,
+     record_timeline: bool,
++    record_arrivals: bool,
+ }
+ 
+ impl StreamAccumulator {
+@@ -93,9 +99,18 @@ impl StreamAccumulator {
+             record_timeline,
+             finish_reason: None,
+             failure: None,
++            token_arrivals: Vec::new(),
++            record_arrivals: false,
+         }
+     }
+ 
++    /// Also keep every token-id event's arrival, for windowed accounting.
++    pub(super) fn recording_arrivals(mut self) -> Self {
++        self.record_arrivals = true;
++        self.token_arrivals = Vec::with_capacity(self.output_token_ids.capacity());
++        self
++    }
++
+     /// Fold one parsed response object that arrived `at_ms` after the send.
+     ///
+     /// Returns `Break` when the stream must stop being read at all — reserved
+@@ -128,6 +143,9 @@ impl StreamAccumulator {
+             }
+             self.last_token_id_ms = Some(at_ms);
+             self.token_event_count += 1;
++            if self.record_arrivals {
++                self.token_arrivals.push((at_ms, token_ids.len()));
++            }
+             self.output_token_ids.extend(token_ids);
+         }
+ 
+@@ -358,6 +376,18 @@ mod tests {
+         assert_eq!(fold.timeline.len(), 1);
+     }
+ 
++    #[test]
++    fn arrivals_keep_each_token_events_own_count_and_instant() {
++        let mut fold = StreamAccumulator::new(8, false).recording_arrivals();
++        feed(&mut fold, tokens(&[1, 2, 3]), 100.0);
++        feed(&mut fold, usage(Some(4), Some(4), None), 110.0);
++        feed(&mut fold, tokens(&[4]), 120.0);
++
++        // Usage-only events place no tokens on the clock.
++        assert_eq!(fold.token_arrivals, vec![(100.0, 3), (120.0, 1)]);
++        assert!(StreamAccumulator::new(8, false).token_arrivals.is_empty());
++    }
++
+     #[test]
+     fn a_run_that_is_not_recording_never_allocates_the_timeline() {
+         let mut fold = StreamAccumulator::new(64, false);
+diff --git a/src/cli.rs b/src/cli.rs
+index a1cb42f..6c4698f 100644
+--- a/src/cli.rs
++++ b/src/cli.rs
+@@ -194,6 +194,23 @@ pub struct Args {
+     #[arg(long, default_value = "session_runner_timeline.parquet")]
+     pub timeline_path: String,
+ 
++    /// Time-boxed measurement: seconds of warmup after measured replay starts
++    /// (after the prefix-cache preflight) before the window opens. Requires
++    /// `--duration-secs`; may be 0.
++    ///
++    /// A windowed run measures a fixed span of wall clock rather than a fixed
++    /// amount of work: at warmup + duration it stops releasing work, abandons
++    /// every in-flight request and tool wait, writes the summary, and exits 0.
++    /// Session and independent text replay under `--arrival-mode saturated`
++    /// only.
++    #[arg(long, requires = "duration_secs")]
++    pub warmup_secs: Option<f64>,
++
++    /// Length of the measurement window in seconds; must be greater than 0.
++    /// Requires `--warmup-secs`.
++    #[arg(long, requires = "warmup_secs")]
++    pub duration_secs: Option<f64>,
++
+     /// Service-level objective for this run: `ttft_ms=500,tpot_ms=50`.
+     ///
+     /// Per-metric upper bounds. The summary reports the fraction of steps that
+@@ -231,6 +248,23 @@ mod tests {
+         assert_eq!(parsed.input_file_format, "image-to-text-independent");
+     }
+ 
++    #[test]
++    fn window_flags_are_accepted_only_as_a_pair() {
++        let mut both = required_arguments();
++        both.extend(["--warmup-secs", "0", "--duration-secs", "30"]);
++        let parsed = Args::try_parse_from(both).unwrap();
++        assert_eq!(parsed.warmup_secs, Some(0.0));
++        assert_eq!(parsed.duration_secs, Some(30.0));
++
++        let mut warmup_only = required_arguments();
++        warmup_only.extend(["--warmup-secs", "5"]);
++        assert!(Args::try_parse_from(warmup_only).is_err());
++
++        let mut duration_only = required_arguments();
++        duration_only.extend(["--duration-secs", "5"]);
++        assert!(Args::try_parse_from(duration_only).is_err());
++    }
++
+     #[test]
+     fn retired_split_format_and_family_flags_are_rejected() {
+         let mut old_format = required_arguments();
+diff --git a/src/executor/independent.rs b/src/executor/independent.rs
+index bf414b7..a5339b6 100644
+--- a/src/executor/independent.rs
++++ b/src/executor/independent.rs
+@@ -9,6 +9,7 @@ use crate::release::ArrivalMode;
+ use crate::schema::format::text_generation::independent::IndependentRequest;
+ use crate::timeline::{RequestTimeline, TimelineSink};
+ use crate::tokens::TokenProvider;
++use crate::window::WindowObservation;
+ 
+ /// Replay one independent request. This is deliberately separate from the session
+ /// executor: independent requests have no round ordering, prefix carry-forward,
+@@ -22,6 +23,11 @@ pub(crate) async fn run_independent_request(
+     request: IndependentRequest,
+ ) {
+     let arrival_release_lag_ms = wait_for_arrival(&state, request.arrival_time).await;
++    let window = state.common.window;
++    if window.is_some_and(|window| window.has_ended()) {
++        state.common.stats.record_unit_done();
++        return;
++    }
+     let mut token_provider = match TokenProvider::new(
+         state.token_pool.clone(),
+         request_ordinal.wrapping_mul(9_973),
+@@ -38,22 +44,34 @@ pub(crate) async fn run_independent_request(
+     let prompt = Prompt::Tokens(&prompt_ids);
+     let request_id = format!("independent_{}", request.id);
+     state.common.stats.record_submit();
+-    let result = if state
++    let (result, observation) = if state
+         .common
+         .policy
+         .skips_at_context_limit(prompt_len, request.output_len)
+     {
+-        context_limit_skip_result(
+-            request_id,
+-            prompt_len,
+-            request.output_len,
+-            state.common.policy.max_model_len(),
++        (
++            context_limit_skip_result(
++                request_id,
++                prompt_len,
++                request.output_len,
++                state.common.policy.max_model_len(),
++            ),
++            window.map(|window| WindowObservation::unsent(window.now_ms())),
+         )
+-    } else {
+-        state
++    } else if let Some(window) = &window {
++        let (result, observation) = state
+             .client
+-            .run_step(request_id, prompt, request.output_len)
+-            .await
++            .run_step_windowed(request_id, prompt, request.output_len, window)
++            .await;
++        (result, Some(observation))
++    } else {
++        (
++            state
++                .client
++                .run_step(request_id, prompt, request.output_len)
++                .await,
++            None,
++        )
+     };
+     if let Some(sink) = &timeline_sink {
+         sink.offer(RequestTimeline {
+@@ -62,11 +80,17 @@ pub(crate) async fn run_independent_request(
+         });
+     }
+     let log =
+-        StepLog::independent_request(&request, prompt_len, arrival_release_lag_ms, result.outcome);
++        StepLog::independent_request(&request, prompt_len, arrival_release_lag_ms, result.outcome)
++            .with_window(observation);
+     let success = log.outcome.is_success();
++    let cancelled = log.outcome.is_cancelled();
+     let output_tokens = log.outcome.output_len_actual;
+     let _ = log_tx.send(log).await;
+-    state.common.stats.record_result(success, output_tokens);
++    if cancelled {
++        state.common.stats.record_cancelled(output_tokens);
++    } else {
++        state.common.stats.record_result(success, output_tokens);
++    }
+     state.common.stats.record_unit_done();
+ }
+ 
+diff --git a/src/executor/mod.rs b/src/executor/mod.rs
+index 5e678fa..64ee1e9 100644
+--- a/src/executor/mod.rs
++++ b/src/executor/mod.rs
+@@ -11,6 +11,7 @@ use crate::backend::GenerationClient;
+ use crate::cli::Args;
+ use crate::release::ArrivalMode;
+ use crate::util::reaches_context_limit;
++use crate::window::WindowClock;
+ 
+ pub(crate) use admission::drive_bounded;
+ pub(crate) use independent::run_independent_request;
+@@ -74,6 +75,8 @@ pub(crate) struct CommonState {
+     pub(crate) policy: RunPolicy,
+     pub(crate) stats: Arc<Stats>,
+     pub(crate) run_start: Instant,
++    /// The measurement window, anchored at `run_start`, for a time-boxed run.
++    pub(crate) window: Option<WindowClock>,
+ }
+ 
+ /// State used only by the existing token-id text replay executors.
+@@ -89,6 +92,7 @@ pub(crate) struct Stats {
+     submitted: AtomicUsize,
+     completed: AtomicUsize,
+     failed: AtomicUsize,
++    cancelled: AtomicUsize,
+     output_tokens: AtomicUsize,
+     finished_units: AtomicUsize,
+     runtime_global_queue_depth_peak: AtomicUsize,
+@@ -111,6 +115,13 @@ impl Stats {
+         }
+     }
+ 
++    /// A request abandoned at window end: neither completed nor failed.
++    pub(crate) fn record_cancelled(&self, output_tokens: usize) {
++        self.output_tokens
++            .fetch_add(output_tokens, Ordering::Relaxed);
++        self.cancelled.fetch_add(1, Ordering::Relaxed);
++    }
++
+     pub(crate) fn record_unit_done(&self) {
+         self.finished_units.fetch_add(1, Ordering::Relaxed);
+     }
+@@ -155,7 +166,8 @@ impl ProgressLine {
+     }
+ }
+ 
+-/// Periodic stderr progress reporter; exits once all workload units are finished.
++/// Periodic stderr progress reporter; exits once all workload units are
++/// finished, or once the measurement window has ended.
+ ///
+ /// Prints the human status line every tick and the `progress |` line every
+ /// [`PROGRESS_INTERVAL`] and once more when the run ends.
+@@ -165,6 +177,7 @@ pub(crate) async fn status_task(
+     total_steps: usize,
+     unit_label: &'static str,
+     start: Instant,
++    stop_at: Option<Instant>,
+ ) {
+     let mut last_progress = Duration::ZERO;
+     loop {
+@@ -173,7 +186,8 @@ pub(crate) async fn status_task(
+         let completed = stats.completed.load(Ordering::Relaxed);
+         let failed = stats.failed.load(Ordering::Relaxed);
+         let finished_units = stats.finished_units.load(Ordering::Relaxed);
+-        let active = submitted.saturating_sub(completed + failed);
++        let cancelled = stats.cancelled.load(Ordering::Relaxed);
++        let active = submitted.saturating_sub(completed + failed + cancelled);
+         let finished_steps = completed + failed;
+         let runtime_global_queue_depth = tokio::runtime::Handle::current()
+             .metrics()
+@@ -198,7 +212,9 @@ pub(crate) async fn status_task(
+             elapsed.as_secs_f64(),
+         );
+ 
+-        let done = finished_units >= total_units;
++        // A windowed run is never meant to finish its trace.
++        let done = finished_units >= total_units
++            || stop_at.is_some_and(|stop_at| Instant::now() >= stop_at);
+         if done || elapsed.saturating_sub(last_progress) >= PROGRESS_INTERVAL {
+             last_progress = elapsed;
+             // `eprintln!` writes to unbuffered stderr, so the line is visible
+diff --git a/src/executor/session.rs b/src/executor/session.rs
+index bc68578..80c7497 100644
+--- a/src/executor/session.rs
++++ b/src/executor/session.rs
+@@ -9,6 +9,7 @@ use crate::release::ArrivalMode;
+ use crate::schema::format::text_generation::session::SessionRound;
+ use crate::timeline::{RequestTimeline, TimelineSink};
+ use crate::tokens::{PromptBuild, PromptBuilder, TokenProvider};
++use crate::window::WindowObservation;
+ 
+ /// Replay one session as an ordered, closed-loop chain of rounds.
+ pub(crate) async fn run_session(
+@@ -36,8 +37,14 @@ pub(crate) async fn run_session(
+         }
+     };
+     let mut prompt_builder = PromptBuilder::new(token_provider);
++    let window = state.common.window;
+ 
+     for step in steps {
++        // Past window end nothing new is released, not even the next round of
++        // a session that is already running.
++        if window.is_some_and(|window| window.has_ended()) {
++            break;
++        }
+         let PromptBuild {
+             prompt_ids,
+             derived_prefix_len,
+@@ -52,18 +59,30 @@ pub(crate) async fn run_session(
+             .common
+             .policy
+             .skips_at_context_limit(prompt_len, step.output_len);
+-        let result = if context_limit_skipped {
+-            context_limit_skip_result(
+-                request_id,
+-                prompt_len,
+-                step.output_len,
+-                state.common.policy.max_model_len(),
++        let (result, observation) = if context_limit_skipped {
++            (
++                context_limit_skip_result(
++                    request_id,
++                    prompt_len,
++                    step.output_len,
++                    state.common.policy.max_model_len(),
++                ),
++                window.map(|window| WindowObservation::unsent(window.now_ms())),
+             )
+-        } else {
+-            state
++        } else if let Some(window) = &window {
++            let (result, observation) = state
+                 .client
+-                .run_step(request_id, prompt, step.output_len)
+-                .await
++                .run_step_windowed(request_id, prompt, step.output_len, window)
++                .await;
++            (result, Some(observation))
++        } else {
++            (
++                state
++                    .client
++                    .run_step(request_id, prompt, step.output_len)
++                    .await,
++                None,
++            )
+         };
+         let GenerationResult {
+             outcome,
+@@ -83,11 +102,17 @@ pub(crate) async fn run_session(
+             derived_append_len,
+             prefix_shortfall_len,
+             outcome,
+-        );
++        )
++        .with_window(observation);
+         let success = log.outcome.is_success();
++        let cancelled = log.outcome.is_cancelled();
+         let output_tokens = log.outcome.output_len_actual;
+         let _ = log_tx.send(log).await;
+ 
++        if cancelled {
++            state.common.stats.record_cancelled(output_tokens);
++            break;
++        }
+         state.common.stats.record_result(success, output_tokens);
+         if context_limit_skipped || (!success && state.common.policy.stop_session_on_error) {
+             break;
+@@ -98,7 +123,17 @@ pub(crate) async fn run_session(
+         prompt_builder.commit_output(prompt_ids, output_ids);
+ 
+         if step.tool_wait_after_ms > 0.0 {
+-            tokio::time::sleep(Duration::from_secs_f64(step.tool_wait_after_ms / 1000.0)).await;
++            let tool_wait =
++                tokio::time::sleep(Duration::from_secs_f64(step.tool_wait_after_ms / 1000.0));
++            match &window {
++                None => tool_wait.await,
++                Some(window) => {
++                    tokio::select! {
++                        () = tool_wait => {}
++                        () = window.until_end() => break,
++                    }
++                }
++            }
+         }
+     }
+ 
+diff --git a/src/lib.rs b/src/lib.rs
+index c8385ff..17af63b 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -55,6 +55,8 @@ mod tokens;
+ #[cfg(feature = "runtime")]
+ mod util;
+ #[cfg(feature = "runtime")]
++mod window;
++#[cfg(feature = "runtime")]
+ mod workload;
+ 
+ #[cfg(feature = "runtime")]
+diff --git a/src/record.rs b/src/record.rs
+index 4d7ffcc..0e7cae0 100644
+--- a/src/record.rs
++++ b/src/record.rs
+@@ -5,6 +5,7 @@ use crate::schema::format::text_generation::session::SessionRound;
+ use crate::schema::{Modality, OutputSpec, RequestPriority, RequestSlo, RequestSpec};
+ use crate::slo::SloMeasurement;
+ use crate::util::prefix_hit_rate;
++use crate::window::WindowObservation;
+ 
+ const STEP_LOG_SCHEMA_VERSION: u32 = 15;
+ 
+@@ -18,6 +19,11 @@ pub(crate) struct StepLog {
+     schema_version: u32,
+     pub(crate) source: SourceRecord,
+     pub(crate) outcome: GenerationOutcome,
++    /// The step on a windowed run's clock. Never serialized: it exists for the
++    /// summary fold, and the record contract is the same with or without a
++    /// window.
++    #[serde(skip)]
++    pub(crate) window: Option<WindowObservation>,
+ }
+ 
+ #[derive(Debug, Serialize)]
+@@ -239,6 +245,7 @@ impl StepLog {
+                 priority: step.priority.into(),
+             }),
+             outcome,
++            window: None,
+         }
+     }
+ 
+@@ -261,6 +268,7 @@ impl StepLog {
+                 priority: request.priority.into(),
+             }),
+             outcome,
++            window: None,
+         }
+     }
+ 
+@@ -288,6 +296,7 @@ impl StepLog {
+                 slo: DeclaredSlo::default(),
+             }),
+             outcome,
++            window: None,
+         }
+     }
+ }
+@@ -330,11 +339,26 @@ impl StepLog {
+     }
+ }
+ 
++/// Status of a request abandoned because the measurement window ended. Only a
++/// windowed run produces it, and it is neither a success nor a failure.
++pub(crate) const CANCELLED_STATUS: &str = "CANCELLED_AT_WINDOW_END";
++
++impl StepLog {
++    pub(crate) fn with_window(mut self, window: Option<WindowObservation>) -> Self {
++        self.window = window;
++        self
++    }
++}
++
+ impl GenerationOutcome {
+     pub(crate) fn is_success(&self) -> bool {
+         self.status == "SUCCESS"
+     }
+ 
++    pub(crate) fn is_cancelled(&self) -> bool {
++        self.status == CANCELLED_STATUS
++    }
++
+     pub(crate) fn is_context_overflow(&self) -> bool {
+         self.status == "SKIPPED_CONTEXT_OVERFLOW"
+     }
+diff --git a/src/runner.rs b/src/runner.rs
+index a3eb0d4..3858750 100644
+--- a/src/runner.rs
++++ b/src/runner.rs
+@@ -28,6 +28,7 @@ use crate::summary::{
+ };
+ use crate::timeline::{self, TimelineSummary};
+ use crate::tokens::{build_token_pool, load_tokenizer};
++use crate::window::WindowSpec;
+ use crate::workload::WorkloadSummary;
+ use crate::workload::{load_workload, ReplayWorkload};
+ 
+@@ -103,6 +104,7 @@ pub async fn run_once_reusing(args: Args, corpus: &mut CorpusCache) -> Result<Ru
+     // descriptor limit.
+     fdlimit::raise_fd_limit().ok();
+     validate(&args)?;
++    let window = WindowSpec::from_flags(args.warmup_secs, args.duration_secs)?;
+ 
+     // What the file says it is, before it is opened. Every reader below checks
+     // its header against this rather than trusting whatever columns turn up.
+@@ -237,13 +239,18 @@ pub async fn run_once_reusing(args: Args, corpus: &mut CorpusCache) -> Result<Ru
+         (None, None)
+     };
+ 
++    // t0. Everything above -- corpus, client, preflight -- is setup, and a
++    // window's warmup is measured from here, not from process start.
++    let run_start = Instant::now();
++    let window_clock = window.map(|window| window.start_at(run_start));
+     let state = Arc::new(TextGenerationState {
+         client,
+         token_pool,
+         common: CommonState {
+             policy: RunPolicy::from_args(&args),
+             stats: Arc::new(Stats::default()),
+-            run_start: Instant::now(),
++            run_start,
++            window: window_clock,
+         },
+     });
+ 
+@@ -251,7 +258,14 @@ pub async fn run_once_reusing(args: Args, corpus: &mut CorpusCache) -> Result<Ru
+     let log_path = args.log_path.clone();
+     let request_log = args.request_log;
+     let log_task = tokio::task::spawn_blocking(move || {
+-        write_logs(log_path, request_log, log_rx, replay_summary, slo_summary)
++        write_logs(
++            log_path,
++            request_log,
++            log_rx,
++            replay_summary,
++            slo_summary,
++            window,
++        )
+     });
+     let status_handle = tokio::spawn(status_task(
+         state.common.stats.clone(),
+@@ -259,12 +273,16 @@ pub async fn run_once_reusing(args: Args, corpus: &mut CorpusCache) -> Result<Ru
+         total_steps,
+         unit_label,
+         state.common.run_start,
++        window_clock.map(|clock| clock.end()),
+     ));
++    // Admission pulls the next unit only when a slot frees, so cutting the
++    // iterator off at window end is what stops new sessions from starting.
++    let admitting = move || !window_clock.is_some_and(|clock| clock.has_ended());
+ 
+     match workload {
+         ReplayWorkload::Sessions(sessions) => {
+             drive_bounded(
+-                sessions,
++                sessions.into_iter().take_while(move |_| admitting()),
+                 args.max_concurrency,
+                 |session_ordinal, (session_id, steps)| {
+                     let session_ordinal =
+@@ -289,7 +307,7 @@ pub async fn run_once_reusing(args: Args, corpus: &mut CorpusCache) -> Result<Ru
+         }
+         ReplayWorkload::IndependentRequests(requests) => {
+             drive_bounded(
+-                requests,
++                requests.into_iter().take_while(move |_| admitting()),
+                 args.max_concurrency,
+                 |request_ordinal, request| {
+                     let request_ordinal =
+@@ -355,6 +373,7 @@ async fn run_multimodal(
+         policy: RunPolicy::from_args(args),
+         stats: Arc::new(Stats::default()),
+         run_start: Instant::now(),
++        window: None,
+     };
+     // Media encoding is the one thing every serving system spells differently,
+     // and a server that does not recognize the field answers the text alone.
+@@ -400,7 +419,14 @@ async fn run_multimodal(
+     let log_path = args.log_path.clone();
+     let request_log = args.request_log;
+     let log_task = tokio::task::spawn_blocking(move || {
+-        write_logs(log_path, request_log, log_rx, replay_summary, slo_summary)
++        write_logs(
++            log_path,
++            request_log,
++            log_rx,
++            replay_summary,
++            slo_summary,
++            None,
++        )
+     });
+     let status_handle = tokio::spawn(status_task(
+         state.common.stats.clone(),
+@@ -408,6 +434,7 @@ async fn run_multimodal(
+         total_steps,
+         "requests",
+         state.common.run_start,
++        None,
+     ));
+ 
+     drive_bounded(
+@@ -484,6 +511,7 @@ fn validate(args: &Args) -> Result<()> {
+         ));
+     }
+     let format = InputFileFormat::parse(&args.input_file_format)?;
++    validate_window(args, format)?;
+     if format == InputFileFormat::MultimodalIndependentV1 {
+         if !matches!(
+             args.backend,
+@@ -518,6 +546,53 @@ fn validate(args: &Args) -> Result<()> {
+     Ok(())
+ }
+ 
++/// Where a measurement window means something, and where it does not.
++///
++/// Supported: text replay (sessions or independent requests) under
++/// `--arrival-mode saturated`, which is a closed-loop generator whose offered
++/// load is set by `--max-concurrency` and the server's own speed -- the case a
++/// fixed wall-clock window is for. Rejected, each for its own reason:
++///
++/// - `trace-timed`: the offered load is the trace's recorded timeline, so a
++///   window would measure whichever slice of that schedule it happened to
++///   cover, and the arrival waits are not window-aware;
++/// - multimodal replay: the media surfaces report whole outputs, not token
++///   events that can be placed on the window's clock;
++/// - `--dry-run`: nothing is sent, so nothing is measured;
++/// - `--shard-count > 1`: every process would anchor its own t0 after its own
++///   preflight, so the shards' windows would not line up, and the sharded
++///   summary merge knows nothing of window blocks.
++fn validate_window(args: &Args, format: InputFileFormat) -> Result<()> {
++    if WindowSpec::from_flags(args.warmup_secs, args.duration_secs)?.is_none() {
++        return Ok(());
++    }
++    if args.arrival_mode != ArrivalMode::Saturated {
++        return Err(anyhow!(
++            "--warmup-secs/--duration-secs measure a closed-loop run and require \
++             --arrival-mode saturated; under trace-timed the trace's own timeline sets the load, \
++             and a fixed window would measure whichever slice of it the window covered"
++        ));
++    }
++    if format == InputFileFormat::MultimodalIndependentV1 {
++        return Err(anyhow!(
++            "--warmup-secs/--duration-secs count streamed tokens and are text-replay-only; \
++             multimodal-independent-v1 is not supported"
++        ));
++    }
++    if args.dry_run {
++        return Err(anyhow!(
++            "--warmup-secs/--duration-secs cannot be used with --dry-run, which measures nothing"
++        ));
++    }
++    if args.shard_count > 1 {
++        return Err(anyhow!(
++            "--warmup-secs/--duration-secs require a single process (--shard-count 1): each shard \
++             would start its own window after its own preflight, and the windows would not align"
++        ));
++    }
++    Ok(())
++}
++
+ fn global_shard_ordinal(local_ordinal: usize, shard_count: usize, shard_index: usize) -> usize {
+     local_ordinal
+         .saturating_mul(shard_count)
+diff --git a/src/summary.rs b/src/summary.rs
+index 7994316..a25c3eb 100644
+--- a/src/summary.rs
++++ b/src/summary.rs
+@@ -8,6 +8,10 @@ use crate::record::{GenerationOutcome, SessionRoundSource, SourceRecord, StepLog
+ use crate::slo::SloSummary;
+ use crate::timeline::TimelineSummary;
+ use crate::util::ratio;
++use crate::window::{
++    Verdict, WindowFold, WindowObservation, WindowSpec, WindowSummary, WindowedLatencies,
++    WindowedStep,
++};
+ use crate::workload::ReplayWorkload;
+ use crate::workload::WorkloadSummary;
+ 
+@@ -19,9 +23,14 @@ pub(crate) enum ReplaySummary {
+     Sessions {
+         common: CommonReplaySummary,
+         prefix_cache: PrefixCacheSummary,
++        /// Present only for a windowed run; see [`crate::window`].
++        #[serde(skip_serializing_if = "Option::is_none")]
++        window: Option<WindowSummary>,
+     },
+     IndependentRequests {
+         common: CommonReplaySummary,
++        #[serde(skip_serializing_if = "Option::is_none")]
++        window: Option<WindowSummary>,
+     },
+     MultimodalRequests {
+         common: CommonReplaySummary,
+@@ -119,9 +128,11 @@ impl ReplaySummary {
+             ReplayWorkload::Sessions(_) => Self::Sessions {
+                 common: CommonReplaySummary::default(),
+                 prefix_cache: PrefixCacheSummary::default(),
++                window: None,
+             },
+             ReplayWorkload::IndependentRequests(_) => Self::IndependentRequests {
+                 common: CommonReplaySummary::default(),
++                window: None,
+             },
+             ReplayWorkload::MultimodalRequests(_) => Self::MultimodalRequests {
+                 common: CommonReplaySummary::default(),
+@@ -135,15 +146,17 @@ impl ReplaySummary {
+                 Self::Sessions {
+                     common,
+                     prefix_cache,
++                    ..
+                 },
+                 SourceRecord::SessionRound(source),
+             ) => {
+                 common.add(source.output_len_target, &record.outcome);
+                 prefix_cache.add(source, &record.outcome);
+             }
+-            (Self::IndependentRequests { common }, SourceRecord::IndependentRequest(source)) => {
+-                common.add(source.output_len_target, &record.outcome)
+-            }
++            (
++                Self::IndependentRequests { common, .. },
++                SourceRecord::IndependentRequest(source),
++            ) => common.add(source.output_len_target, &record.outcome),
+             (Self::MultimodalRequests { common }, SourceRecord::MultimodalRequest(source)) => {
+                 common.add(source.output_len_target, &record.outcome)
+             }
+@@ -151,18 +164,55 @@ impl ReplaySummary {
+         }
+     }
+ 
+-    fn finalize(&mut self, measurements: &mut ReplayMeasurements) {
++    fn finalize(&mut self, measurements: &mut ReplayMeasurements, window: Option<WindowFold>) {
+         let common = match self {
+             Self::Sessions { common, .. }
+-            | Self::IndependentRequests { common }
++            | Self::IndependentRequests { common, .. }
+             | Self::MultimodalRequests { common } => common,
+         };
+         common.finalize(measurements);
++        if let Some(fold) = window {
++            let duration_s = fold.duration_s();
++            let (window_summary, latencies) = fold.finish();
++            common.apply_window(duration_s, &window_summary, latencies);
++            match self {
++                Self::Sessions { window, .. } | Self::IndependentRequests { window, .. } => {
++                    *window = Some(window_summary)
++                }
++                Self::MultimodalRequests { .. } => {
++                    unreachable!("a measurement window is rejected for multimodal replay")
++                }
++            }
++        }
+ 
+         if let Self::Sessions { prefix_cache, .. } = self {
+             prefix_cache.finalize();
+         }
+     }
++
++    fn window(&self) -> Option<&WindowSummary> {
++        match self {
++            Self::Sessions { window, .. } | Self::IndependentRequests { window, .. } => {
++                window.as_ref()
++            }
++            Self::MultimodalRequests { .. } => None,
++        }
++    }
++}
++
++/// Distribution summary of an unsorted sample: (avg, p50, p90, max).
++fn describe(values: &mut [f64]) -> Option<(f64, f64, f64, f64)> {
++    if values.is_empty() {
++        return None;
++    }
++    values.sort_by(|left, right| left.total_cmp(right));
++    let average = values.iter().sum::<f64>() / values.len() as f64;
++    Some((
++        average,
++        percentile_sorted(values, 0.50),
++        percentile_sorted(values, 0.90),
++        values[values.len() - 1],
++    ))
+ }
+ 
+ impl CommonReplaySummary {
+@@ -299,6 +349,43 @@ impl CommonReplaySummary {
+     }
+ }
+ 
++impl CommonReplaySummary {
++    /// Replace every rate and latency distribution with its windowed
++    /// counterpart. See README "Time-boxed measurement" for the population of
++    /// each field; the step counts and per-step audit fields keep the population
++    /// that [`WindowFold::reaches_verdict_in_window`] admitted.
++    fn apply_window(
++        &mut self,
++        duration_s: f64,
++        window: &WindowSummary,
++        mut latencies: WindowedLatencies,
++    ) {
++        self.run_duration_ms = Some(duration_s * 1_000.0);
++        self.request_throughput_per_s = Some(self.success_steps as f64 / duration_s);
++        self.output_token_throughput_per_s = Some(window.output_tokens as f64 / duration_s);
++        // Bytes and audio seconds are counted per completed response, which is
++        // exactly the accounting a window exists to avoid. Text replay only
++        // ever carries tokens, so nothing measurable is lost.
++        self.output_byte_throughput_per_s = None;
++        self.audio_throughput_s_per_s = None;
++
++        let ttft = describe(&mut latencies.ttfts_ms);
++        self.ttft_ms_avg = ttft.map(|(avg, ..)| avg);
++        self.ttft_ms_p50 = ttft.map(|(_, p50, ..)| p50);
++        self.ttft_ms_p90 = ttft.map(|(_, _, p90, _)| p90);
++        self.ttft_ms_max = ttft.map(|(.., max)| max);
++        self.ttft_token_id_steps = latencies.ttft_token_id_steps;
++        self.ttft_text_fallback_steps = latencies.ttft_text_fallback_steps;
++
++        self.tpot_measured_steps = latencies.tpots_ms.len();
++        let tpot = describe(&mut latencies.tpots_ms);
++        self.tpot_ms_avg = tpot.map(|(avg, ..)| avg);
++        self.tpot_ms_p50 = tpot.map(|(_, p50, ..)| p50);
++        self.tpot_ms_p90 = tpot.map(|(_, _, p90, _)| p90);
++        self.tpot_ms_max = tpot.map(|(.., max)| max);
++    }
++}
++
+ impl ReplayMeasurements {
+     fn add(&mut self, outcome: &GenerationOutcome) {
+         self.total_durations_ms.push(outcome.total_duration_ms);
+@@ -447,7 +534,7 @@ impl RunSummary {
+     pub fn metrics(&self) -> RunMetrics {
+         let common = match &self.replay {
+             ReplaySummary::Sessions { common, .. }
+-            | ReplaySummary::IndependentRequests { common }
++            | ReplaySummary::IndependentRequests { common, .. }
+             | ReplaySummary::MultimodalRequests { common } => common,
+         };
+         RunMetrics {
+@@ -504,24 +591,45 @@ pub(crate) struct ClientRuntimeSummary {
+ /// SLO attainment folds in the same pass rather than in a second one: every step
+ /// is already in hand here, and a separate statistics path over the same records
+ /// is how two numbers that must agree stop agreeing.
++///
++/// With a measurement window, every record also feeds the window fold, and only
++/// the records that reached a verdict inside the window feed the run-wide
++/// statistics, prefix-cache accounting and SLO attainment.
+ pub(crate) fn write_logs(
+     path: String,
+     persist_records: bool,
+     mut rx: mpsc::Receiver<StepLog>,
+     mut summary: ReplaySummary,
+     mut slo: Option<SloSummary>,
++    window: Option<WindowSpec>,
+ ) -> LogFold {
+     let mut writer = persist_records.then(|| {
+         let file = File::create(&path).expect("failed to create log file");
+         std::io::BufWriter::with_capacity(1024 * 1024, file)
+     });
+     let mut measurements = ReplayMeasurements::default();
+-
+-    while let Some(record) = rx.blocking_recv() {
+-        summary.add(&record);
+-        measurements.add(&record.outcome);
+-        if let Some(slo) = slo.as_mut() {
+-            slo.add(&record.slo_measurement());
++    let mut window_fold =
++        window.map(|spec| WindowFold::new(spec, matches!(summary, ReplaySummary::Sessions { .. })));
++
++    while let Some(mut record) = rx.blocking_recv() {
++        let counts = match window_fold.as_mut() {
++            None => true,
++            Some(fold) => {
++                let observation = record
++                    .window
++                    .take()
++                    .expect("a windowed run observes every step it logs");
++                let step = windowed_step(&record, &observation);
++                fold.add(&step);
++                fold.reaches_verdict_in_window(&step)
++            }
++        };
++        if counts {
++            summary.add(&record);
++            measurements.add(&record.outcome);
++            if let Some(slo) = slo.as_mut() {
++                slo.add(&record.slo_measurement());
++            }
+         }
+         if let Some(writer) = writer.as_mut() {
+             if serde_json::to_writer(&mut *writer, &record).is_ok() {
+@@ -532,8 +640,9 @@ pub(crate) fn write_logs(
+     if let Some(writer) = writer.as_mut() {
+         let _ = writer.flush();
+     }
+-    summary.finalize(&mut measurements);
++    summary.finalize(&mut measurements, window_fold);
+     log_server_prefix_hit_rate_summary(&summary);
++    log_window_summary(&summary);
+     if let Some(slo) = slo.as_ref() {
+         eprintln!("{}", slo.describe());
+     }
+@@ -543,6 +652,62 @@ pub(crate) fn write_logs(
+     }
+ }
+ 
++fn windowed_step<'a>(record: &StepLog, observation: &'a WindowObservation) -> WindowedStep<'a> {
++    let outcome = &record.outcome;
++    let verdict = if outcome.is_success() {
++        Verdict::Success
++    } else if outcome.is_cancelled() {
++        Verdict::Cancelled
++    } else if outcome.is_context_overflow() {
++        Verdict::Skipped
++    } else {
++        Verdict::Failed
++    };
++    let (output_len_target, round_idx) = match &record.source {
++        SourceRecord::SessionRound(source) => (source.output_len_target, Some(source.round_idx)),
++        SourceRecord::IndependentRequest(source) => (source.output_len_target, None),
++        SourceRecord::MultimodalRequest(source) => (source.output_len_target, None),
++    };
++    WindowedStep {
++        verdict,
++        output_len_actual: outcome.output_len_actual,
++        output_len_target,
++        round_idx,
++        observation,
++    }
++}
++
++fn log_window_summary(summary: &ReplaySummary) {
++    let Some(window) = summary.window() else {
++        return;
++    };
++    eprintln!(
++        "window summary | warmup_s={} duration_s={} output_tokens={} submitted={} first_token={} \
++         ttft_censored={} cancelled_at_end={} failed={} warmup_failed={} sessions_started={}",
++        window.warmup_s,
++        window.duration_s,
++        window.output_tokens,
++        window.requests_submitted,
++        window.requests_first_token,
++        window.ttft_censored_requests,
++        window.requests_cancelled_at_window_end,
++        window.requests_failed,
++        window.warmup_requests_failed,
++        window
++            .sessions_started
++            .map_or_else(|| "n/a".to_string(), |count| count.to_string()),
++    );
++    if window.requests_without_token_ids > 0 {
++        eprintln!(
++            "warning: {} requests in the window streamed text without token ids, so their tokens \
++             could not be placed in time and are missing from the windowed throughput. Use a \
++             server/backend that returns token ids (vLLM: return_token_ids; or vllm-tokens / \
++             sglang-tokens).",
++            window.requests_without_token_ids
++        );
++    }
++}
++
+ fn log_server_prefix_hit_rate_summary(summary: &ReplaySummary) {
+     let ReplaySummary::Sessions { prefix_cache, .. } = summary else {
+         return;
+diff --git a/src/window.rs b/src/window.rs
+new file mode 100644
+index 0000000..c38a4b2
+--- /dev/null
++++ b/src/window.rs
+@@ -0,0 +1,591 @@
++//! Time-boxed measurement: `--warmup-secs W --duration-secs D`.
++//!
++//! A trace far larger than any run can finish has no natural end, and servers
++//! that differ by orders of magnitude in speed would finish different amounts
++//! of it in any fixed budget. So a windowed run measures a fixed span of wall
++//! clock instead of a fixed amount of work: t0 is the moment measured replay
++//! starts (after the prefix-cache preflight), the window is
++//! `[t0 + W, t0 + W + D)`, and at its end every unit of in-flight work is
++//! abandoned rather than awaited.
++//!
++//! Everything here is measured on one monotonic clock, in milliseconds since
++//! t0. The executor stamps what it saw ([`WindowObservation`]); the fold
++//! ([`WindowFold`]) is a pure function of those stamps and the window bounds,
++//! which is what lets the edge cases be tested without a server.
++
++use std::time::{Duration, Instant};
++
++use anyhow::{bail, Result};
++use serde::Serialize;
++
++/// The validated pair of window flags.
++#[derive(Clone, Copy, Debug, PartialEq)]
++pub(crate) struct WindowSpec {
++    warmup_s: f64,
++    duration_s: f64,
++}
++
++impl WindowSpec {
++    /// `None` when neither flag was given. Pairing is enforced by clap; the
++    /// values are checked here because clap cannot say "finite and positive".
++    pub(crate) fn from_flags(
++        warmup_s: Option<f64>,
++        duration_s: Option<f64>,
++    ) -> Result<Option<Self>> {
++        match (warmup_s, duration_s) {
++            (None, None) => Ok(None),
++            (Some(warmup_s), Some(duration_s)) => {
++                if !warmup_s.is_finite() || warmup_s < 0.0 {
++                    bail!("--warmup-secs must be a finite number of seconds >= 0, got {warmup_s}");
++                }
++                if !duration_s.is_finite() || duration_s <= 0.0 {
++                    bail!(
++                        "--duration-secs must be a finite number of seconds > 0, got {duration_s}"
++                    );
++                }
++                Ok(Some(Self {
++                    warmup_s,
++                    duration_s,
++                }))
++            }
++            _ => bail!("--warmup-secs and --duration-secs must be given together"),
++        }
++    }
++
++    pub(crate) fn bounds(&self) -> WindowBounds {
++        WindowBounds {
++            start_ms: self.warmup_s * 1_000.0,
++            end_ms: (self.warmup_s + self.duration_s) * 1_000.0,
++        }
++    }
++
++    /// Anchor the window at t0.
++    pub(crate) fn start_at(&self, t0: Instant) -> WindowClock {
++        WindowClock {
++            t0,
++            end: t0 + Duration::from_secs_f64(self.warmup_s + self.duration_s),
++        }
++    }
++}
++
++/// The window in milliseconds since t0. Half-open: `[start_ms, end_ms)`.
++#[derive(Clone, Copy, Debug, PartialEq)]
++pub(crate) struct WindowBounds {
++    pub(crate) start_ms: f64,
++    pub(crate) end_ms: f64,
++}
++
++impl WindowBounds {
++    fn contains(&self, at_ms: f64) -> bool {
++        at_ms >= self.start_ms && at_ms < self.end_ms
++    }
++
++    fn duration_s(&self) -> f64 {
++        (self.end_ms - self.start_ms) / 1_000.0
++    }
++}
++
++/// The run's clock, as the executors see it: where t0 is, and when to stop.
++#[derive(Clone, Copy, Debug)]
++pub(crate) struct WindowClock {
++    t0: Instant,
++    end: Instant,
++}
++
++impl WindowClock {
++    pub(crate) fn ms_since_t0(&self, at: Instant) -> f64 {
++        at.saturating_duration_since(self.t0).as_secs_f64() * 1_000.0
++    }
++
++    pub(crate) fn now_ms(&self) -> f64 {
++        self.ms_since_t0(Instant::now())
++    }
++
++    pub(crate) fn end(&self) -> Instant {
++        self.end
++    }
++
++    pub(crate) fn has_ended(&self) -> bool {
++        Instant::now() >= self.end
++    }
++
++    /// Resolves at window end. Every await that could outlast the window races
++    /// this, so nothing the run started is still waited on afterwards.
++    pub(crate) async fn until_end(&self) {
++        tokio::time::sleep_until(tokio::time::Instant::from_std(self.end)).await;
++    }
++}
++
++/// What one text request looked like on the window's clock.
++///
++/// Carried beside the step record and never serialized: the per-request JSONL
++/// contract does not change with windowing, and the arrivals list is only
++/// needed until the summary fold has reduced it.
++#[derive(Clone, Debug, Default, PartialEq)]
++pub(crate) struct WindowObservation {
++    /// When the executor issued the request. Always present.
++    pub(crate) issued_ms: f64,
++    /// When the HTTP request was sent: the anchor of the record's own TTFT.
++    /// `None` for a request that never reached the wire.
++    pub(crate) sent_ms: Option<f64>,
++    /// First output after the send, on the same clock and with the same
++    /// preference as the record's TTFT: the first token-id event, else the
++    /// first text event.
++    pub(crate) first_output_after_send_ms: Option<f64>,
++    /// Whether that first output was a token-id event rather than text.
++    pub(crate) first_output_is_token_id: bool,
++    /// One entry per stream event that carried token ids: milliseconds after
++    /// the send, and how many tokens that one event delivered.
++    pub(crate) token_arrivals: Vec<(f64, usize)>,
++    /// Text streamed but never a token id, so tokens cannot be placed in time.
++    pub(crate) text_without_token_ids: bool,
++    /// When the request reached its verdict, or was abandoned.
++    pub(crate) resolved_ms: f64,
++}
++
++impl WindowObservation {
++    /// A request the executor decided not to send at all.
++    pub(crate) fn unsent(now_ms: f64) -> Self {
++        Self {
++            issued_ms: now_ms,
++            resolved_ms: now_ms,
++            ..Self::default()
++        }
++    }
++}
++
++/// How a request ended, as far as the window cares.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub(crate) enum Verdict {
++    Success,
++    /// HTTP error, malformed stream, integrity failure: a real failure.
++    Failed,
++    /// Abandoned because the window ended. Not a failure.
++    Cancelled,
++    /// Never sent (context-limit skip).
++    Skipped,
++}
++
++/// One request as the fold consumes it.
++pub(crate) struct WindowedStep<'a> {
++    pub(crate) verdict: Verdict,
++    pub(crate) output_len_actual: usize,
++    pub(crate) output_len_target: usize,
++    /// `Some(round)` for a session round, `None` for an independent request.
++    pub(crate) round_idx: Option<usize>,
++    pub(crate) observation: &'a WindowObservation,
++}
++
++/// The `replay.window` block of the run summary.
++#[derive(Clone, Debug, Default, PartialEq, Serialize)]
++pub(crate) struct WindowSummary {
++    pub(crate) warmup_s: f64,
++    pub(crate) duration_s: f64,
++    /// Output tokens whose stream event arrived inside the window, from
++    /// requests that did not fail. The numerator of
++    /// `common.output_token_throughput_per_s`.
++    pub(crate) output_tokens: usize,
++    /// Requests whose HTTP send happened inside the window: the TTFT population.
++    pub(crate) requests_submitted: usize,
++    /// Requests whose first output arrived inside the window, whenever sent.
++    pub(crate) requests_first_token: usize,
++    /// Requests submitted inside the window that were still waiting for their
++    /// first output when it ended. Their TTFT enters the percentiles as the
++    /// lower bound `window end - send`.
++    pub(crate) ttft_censored_requests: usize,
++    /// Requests in flight when the window ended, abandoned. Not failures.
++    pub(crate) requests_cancelled_at_window_end: usize,
++    /// Requests that really failed and reached that verdict inside the window.
++    pub(crate) requests_failed: usize,
++    /// Requests that succeeded inside the window with an output length other
++    /// than the trace's target. Reported, not failed: the record status is
++    /// `SUCCESS`, exactly as `common.output_mismatch_steps` counts them.
++    pub(crate) requests_output_length_mismatch: usize,
++    /// Real failures during warmup. Outside every windowed metric, and counted
++    /// here so a failure is never invisible just because of when it happened.
++    pub(crate) warmup_requests_failed: usize,
++    /// Sessions whose first round was issued inside the window. `null` for an
++    /// independent-request workload.
++    pub(crate) sessions_started: Option<usize>,
++    /// Requests active in the window that streamed text but no token ids, so
++    /// their tokens could not be placed in time and are not in `output_tokens`.
++    /// Nonzero means the throughput is an undercount.
++    pub(crate) requests_without_token_ids: usize,
++}
++
++/// Window-derived distributions that replace the run-wide ones in
++/// `replay.common`.
++#[derive(Debug, Default)]
++pub(crate) struct WindowedLatencies {
++    /// Real and censored TTFTs together.
++    pub(crate) ttfts_ms: Vec<f64>,
++    pub(crate) ttft_token_id_steps: usize,
++    pub(crate) ttft_text_fallback_steps: usize,
++    pub(crate) tpots_ms: Vec<f64>,
++}
++
++/// The fold over every step a windowed run logged.
++#[derive(Debug)]
++pub(crate) struct WindowFold {
++    bounds: WindowBounds,
++    summary: WindowSummary,
++    latencies: WindowedLatencies,
++    is_sessions: bool,
++}
++
++impl WindowFold {
++    pub(crate) fn new(spec: WindowSpec, is_sessions: bool) -> Self {
++        Self {
++            bounds: spec.bounds(),
++            summary: WindowSummary {
++                warmup_s: spec.warmup_s,
++                duration_s: spec.duration_s,
++                ..WindowSummary::default()
++            },
++            latencies: WindowedLatencies::default(),
++            is_sessions,
++        }
++    }
++
++    pub(crate) fn duration_s(&self) -> f64 {
++        self.bounds.duration_s()
++    }
++
++    /// Whether a step belongs to the verdict population that the per-request
++    /// fields of `replay.common`, the prefix-cache block and the SLO fold
++    /// count: it reached a verdict (success, failure, or skip) inside the
++    /// window. A cancelled request never reached one.
++    pub(crate) fn reaches_verdict_in_window(&self, step: &WindowedStep) -> bool {
++        step.verdict != Verdict::Cancelled && self.bounds.contains(step.observation.resolved_ms)
++    }
++
++    pub(crate) fn add(&mut self, step: &WindowedStep) {
++        let bounds = self.bounds;
++        let observation = step.observation;
++        let summary = &mut self.summary;
++
++        match step.verdict {
++            Verdict::Cancelled => summary.requests_cancelled_at_window_end += 1,
++            Verdict::Failed if bounds.contains(observation.resolved_ms) => {
++                summary.requests_failed += 1
++            }
++            Verdict::Failed if observation.resolved_ms < bounds.start_ms => {
++                summary.warmup_requests_failed += 1
++            }
++            Verdict::Success
++                if bounds.contains(observation.resolved_ms)
++                    && step.output_len_actual != step.output_len_target =>
++            {
++                summary.requests_output_length_mismatch += 1
++            }
++            _ => {}
++        }
++
++        if step.round_idx == Some(0) && bounds.contains(observation.issued_ms) {
++            *summary.sessions_started.get_or_insert(0) += 1;
++        }
++
++        let Some(sent_ms) = observation.sent_ms else {
++            return;
++        };
++        let first_output_at = observation
++            .first_output_after_send_ms
++            .map(|after_send| sent_ms + after_send);
++        if first_output_at.is_some_and(|at| bounds.contains(at)) {
++            summary.requests_first_token += 1;
++        }
++
++        if bounds.contains(sent_ms) {
++            summary.requests_submitted += 1;
++            match (observation.first_output_after_send_ms, first_output_at) {
++                // The record's own TTFT, bit for bit.
++                (Some(ttft_ms), Some(at)) if at < bounds.end_ms => {
++                    self.latencies.ttfts_ms.push(ttft_ms);
++                    if observation.first_output_is_token_id {
++                        self.latencies.ttft_token_id_steps += 1;
++                    } else {
++                        self.latencies.ttft_text_fallback_steps += 1;
++                    }
++                }
++                // Still waiting when the window closed: the wait so far is a
++                // lower bound, and leaving it out would let a server look fast
++                // by never answering its slowest requests.
++                _ if step.verdict == Verdict::Cancelled
++                    || observation.resolved_ms >= bounds.end_ms =>
++                {
++                    summary.ttft_censored_requests += 1;
++                    self.latencies.ttfts_ms.push(bounds.end_ms - sent_ms);
++                }
++                // Failed (or finished empty) before any output: no TTFT,
++                // exactly as a run without a window treats it.
++                _ => {}
++            }
++        }
++
++        // A failed request's tokens are not delivered output, as in the
++        // run-wide throughput.
++        if step.verdict == Verdict::Failed {
++            return;
++        }
++        if observation.text_without_token_ids && observation.resolved_ms >= bounds.start_ms {
++            summary.requests_without_token_ids += 1;
++        }
++        let in_window = observation
++            .token_arrivals
++            .iter()
++            .filter(|(after_send, _)| bounds.contains(sent_ms + after_send));
++        let mut first: Option<f64> = None;
++        let mut last = 0.0;
++        let mut tokens_after_first = 0usize;
++        for &(after_send, tokens) in in_window {
++            // Every token in a chunk shares that chunk's arrival instant.
++            summary.output_tokens += tokens;
++            if first.is_none() {
++                first = Some(after_send);
++            } else {
++                tokens_after_first += tokens;
++            }
++            last = after_send;
++        }
++        // The same formula as the per-request `token_delivery_tpot_ms`, applied
++        // to the in-window events only: span between the first and last
++        // in-window event, over the tokens that arrived after the first. A
++        // stream wholly inside the window therefore gets exactly its own TPOT.
++        if let Some(first) = first {
++            if tokens_after_first > 0 && last >= first {
++                self.latencies
++                    .tpots_ms
++                    .push((last - first) / tokens_after_first as f64);
++            }
++        }
++    }
++
++    pub(crate) fn finish(mut self) -> (WindowSummary, WindowedLatencies) {
++        if self.is_sessions {
++            self.summary.sessions_started.get_or_insert(0);
++        }
++        (self.summary, self.latencies)
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    /// Window [1000, 3000) ms.
++    fn fold() -> WindowFold {
++        WindowFold::new(
++            WindowSpec::from_flags(Some(1.0), Some(2.0))
++                .unwrap()
++                .unwrap(),
++            true,
++        )
++    }
++
++    fn sent(sent_ms: f64, arrivals: &[(f64, usize)], resolved_ms: f64) -> WindowObservation {
++        WindowObservation {
++            issued_ms: sent_ms,
++            sent_ms: Some(sent_ms),
++            first_output_after_send_ms: arrivals.first().map(|(at, _)| *at),
++            first_output_is_token_id: !arrivals.is_empty(),
++            token_arrivals: arrivals.to_vec(),
++            text_without_token_ids: false,
++            resolved_ms,
++        }
++    }
++
++    fn step(verdict: Verdict, observation: &WindowObservation) -> WindowedStep<'_> {
++        let output_len = observation.token_arrivals.iter().map(|(_, n)| n).sum();
++        WindowedStep {
++            verdict,
++            output_len_actual: output_len,
++            output_len_target: output_len,
++            round_idx: Some(1),
++            observation,
++        }
++    }
++
++    #[test]
++    fn flags_must_come_in_a_pair_with_a_positive_duration() {
++        assert_eq!(WindowSpec::from_flags(None, None).unwrap(), None);
++        assert!(WindowSpec::from_flags(Some(0.0), Some(5.0))
++            .unwrap()
++            .is_some());
++        for (warmup, duration) in [
++            (Some(1.0), None),
++            (None, Some(1.0)),
++            (Some(1.0), Some(0.0)),
++            (Some(-1.0), Some(1.0)),
++            (Some(1.0), Some(f64::NAN)),
++            (Some(f64::INFINITY), Some(1.0)),
++        ] {
++            assert!(
++                WindowSpec::from_flags(warmup, duration).is_err(),
++                "{warmup:?} {duration:?}"
++            );
++        }
++    }
++
++    #[test]
++    fn tokens_count_by_their_chunks_arrival_and_every_token_in_a_chunk_shares_it() {
++        let mut fold = fold();
++        // Sent at 500 ms; arrivals at 900 (before), 1000 (start, inclusive),
++        // 2999 (inside), 3000 (end, exclusive) ms since t0.
++        let observation = sent(
++            500.0,
++            &[(400.0, 4), (500.0, 3), (2499.0, 5), (2500.0, 7)],
++            3000.0,
++        );
++        fold.add(&step(Verdict::Cancelled, &observation));
++        let (summary, latencies) = fold.finish();
++
++        // A multi-token chunk counts in full at its own timestamp: 3 + 5.
++        assert_eq!(summary.output_tokens, 8);
++        assert_eq!(summary.requests_cancelled_at_window_end, 1);
++        assert_eq!(summary.requests_failed, 0);
++        // Sent during warmup: not in the TTFT population, but its in-window
++        // cadence is still a TPOT sample: 1999 ms over the 5 tokens after the
++        // first in-window event.
++        assert_eq!(summary.requests_submitted, 0);
++        assert!(latencies.ttfts_ms.is_empty());
++        assert_eq!(latencies.tpots_ms, vec![1999.0 / 5.0]);
++    }
++
++    #[test]
++    fn a_stream_wholly_inside_the_window_gets_exactly_its_own_tpot() {
++        // Same shape as the stream fold's own test: a 3-token first chunk then
++        // two single tokens, 20 ms apart -> 20 ms per token after the first event.
++        let mut fold = fold();
++        let observation = sent(1200.0, &[(100.0, 3), (120.0, 1), (140.0, 1)], 1400.0);
++        fold.add(&step(Verdict::Success, &observation));
++        let (summary, latencies) = fold.finish();
++
++        assert_eq!(latencies.tpots_ms, vec![20.0]);
++        assert_eq!(latencies.ttfts_ms, vec![100.0]);
++        assert_eq!(latencies.ttft_token_id_steps, 1);
++        assert_eq!(summary.requests_submitted, 1);
++        assert_eq!(summary.requests_first_token, 1);
++        assert_eq!(summary.output_tokens, 5);
++    }
++
++    #[test]
++    fn one_in_window_arrival_is_not_enough_for_tpot() {
++        let mut fold = fold();
++        let observation = sent(2900.0, &[(50.0, 4), (150.0, 1)], 3000.0);
++        fold.add(&step(Verdict::Cancelled, &observation));
++        let (summary, latencies) = fold.finish();
++
++        assert_eq!(summary.output_tokens, 4);
++        assert!(latencies.tpots_ms.is_empty());
++    }
++
++    #[test]
++    fn a_request_still_waiting_at_window_end_is_censored_not_dropped() {
++        let mut fold = fold();
++        let waiting = sent(2500.0, &[], 3000.0);
++        fold.add(&step(Verdict::Cancelled, &waiting));
++        let answered = sent(1500.0, &[(200.0, 1), (210.0, 1)], 1800.0);
++        fold.add(&step(Verdict::Success, &answered));
++        // Sent in warmup and still waiting: censored requests are only those
++        // submitted inside the window.
++        let warmup_waiting = sent(900.0, &[], 3000.0);
++        fold.add(&step(Verdict::Cancelled, &warmup_waiting));
++        let (summary, latencies) = fold.finish();
++
++        assert_eq!(summary.requests_submitted, 2);
++        assert_eq!(summary.ttft_censored_requests, 1);
++        assert_eq!(summary.requests_first_token, 1);
++        assert_eq!(summary.requests_cancelled_at_window_end, 2);
++        // The lower bound is window end minus send: 3000 - 2500.
++        let mut ttfts = latencies.ttfts_ms.clone();
++        ttfts.sort_by(f64::total_cmp);
++        assert_eq!(ttfts, vec![200.0, 500.0]);
++        assert_eq!(latencies.ttft_token_id_steps, 1);
++    }
++
++    #[test]
++    fn a_first_token_after_window_end_is_censored_too() {
++        let mut fold = fold();
++        // The stream raced the deadline and delivered at 3001 ms.
++        let late = sent(2800.0, &[(201.0, 2)], 3002.0);
++        fold.add(&step(Verdict::Success, &late));
++        let (summary, latencies) = fold.finish();
++
++        assert_eq!(summary.ttft_censored_requests, 1);
++        assert_eq!(latencies.ttfts_ms, vec![200.0]);
++        assert_eq!(summary.output_tokens, 0);
++    }
++
++    #[test]
++    fn a_real_failure_counts_and_contributes_no_tokens() {
++        let mut fold = fold();
++        let failed = sent(1500.0, &[(100.0, 2), (110.0, 2)], 1600.0);
++        fold.add(&step(Verdict::Failed, &failed));
++        let http_error = sent(1700.0, &[], 1705.0);
++        fold.add(&step(Verdict::Failed, &http_error));
++        let in_warmup = sent(10.0, &[], 20.0);
++        fold.add(&step(Verdict::Failed, &in_warmup));
++        let (summary, latencies) = fold.finish();
++
++        assert_eq!(summary.requests_failed, 2);
++        assert_eq!(summary.warmup_requests_failed, 1);
++        assert_eq!(summary.requests_cancelled_at_window_end, 0);
++        assert_eq!(summary.output_tokens, 0);
++        assert!(latencies.tpots_ms.is_empty());
++        // A failure that did produce a first token keeps its real TTFT, as a
++        // run without a window does; one that produced nothing has none and is
++        // not censored either.
++        assert_eq!(latencies.ttfts_ms, vec![100.0]);
++        assert_eq!(summary.ttft_censored_requests, 0);
++    }
++
++    #[test]
++    fn cancellation_is_outside_the_verdict_population() {
++        let fold = fold();
++        let cancelled = sent(1500.0, &[(100.0, 1)], 3000.0);
++        let done = sent(500.0, &[(100.0, 1)], 1200.0);
++        let warmup_done = sent(100.0, &[(100.0, 1)], 900.0);
++        assert!(!fold.reaches_verdict_in_window(&step(Verdict::Cancelled, &cancelled)));
++        assert!(fold.reaches_verdict_in_window(&step(Verdict::Success, &done)));
++        assert!(!fold.reaches_verdict_in_window(&step(Verdict::Success, &warmup_done)));
++    }
++
++    #[test]
++    fn sessions_started_counts_first_rounds_issued_inside_the_window() {
++        let mut fold = fold();
++        for (round_idx, issued_ms) in [(0, 500.0), (0, 1500.0), (1, 1600.0), (0, 2999.0)] {
++            let observation = WindowObservation::unsent(issued_ms);
++            fold.add(&WindowedStep {
++                verdict: Verdict::Skipped,
++                output_len_actual: 0,
++                output_len_target: 4,
++                round_idx: Some(round_idx),
++                observation: &observation,
++            });
++        }
++        assert_eq!(fold.finish().0.sessions_started, Some(2));
++
++        let independent = WindowFold::new(
++            WindowSpec::from_flags(Some(0.0), Some(1.0))
++                .unwrap()
++                .unwrap(),
++            false,
++        );
++        assert_eq!(independent.finish().0.sessions_started, None);
++    }
++
++    #[test]
++    fn text_without_token_ids_is_reported_rather_than_silently_dropped() {
++        let mut fold = fold();
++        let mut observation = sent(1500.0, &[], 1700.0);
++        observation.first_output_after_send_ms = Some(50.0);
++        observation.first_output_is_token_id = false;
++        observation.text_without_token_ids = true;
++        fold.add(&step(Verdict::Success, &observation));
++        let (summary, latencies) = fold.finish();
++
++        assert_eq!(summary.requests_without_token_ids, 1);
++        assert_eq!(summary.output_tokens, 0);
++        assert_eq!(latencies.ttft_text_fallback_steps, 1);
++    }
++}
+diff --git a/tests/test_launcher.py b/tests/test_launcher.py
+index c1f9612..1d0dd32 100644
+--- a/tests/test_launcher.py
++++ b/tests/test_launcher.py
+@@ -127,6 +127,62 @@ def test_process_shards_require_saturated_arrivals(tmp_path: Path) -> None:
+         load_task_config("run", write_config(tmp_path, config_text))
+ 
+ 
++def test_run_config_lowers_a_measurement_window(tmp_path: Path) -> None:
++    config_text = minimal_run_yaml().replace(
++        "  max_concurrency: 4\n",
++        "  max_concurrency: 4\n  window:\n    warmup_seconds: 0\n    duration_seconds: 300\n",
++    )
++    arguments = list(load_task_config("run", write_config(tmp_path, config_text)).arguments)
++
++    assert arguments[arguments.index("--warmup-secs") + 1] == "0"
++    assert arguments[arguments.index("--duration-secs") + 1] == "300"
++    assert "--warmup-secs" not in load_task_config(
++        "run", write_config(tmp_path, minimal_run_yaml(), "plain.yaml")
++    ).arguments
++
++
++@pytest.mark.parametrize(
++    ("replacement", "message"),
++    [
++        ("  window:\n    warmup_seconds: 10\n", "duration_seconds is required"),
++        ("  window:\n    duration_seconds: 10\n", "warmup_seconds is required"),
++        (
++            "  window:\n    warmup_seconds: 0\n    duration_seconds: 0\n",
++            "greater than zero",
++        ),
++        (
++            "  window:\n    warmup_seconds: -1\n    duration_seconds: 5\n",
++            "zero or greater",
++        ),
++        (
++            "  window:\n    warmup_seconds: 0\n    duration_seconds: 5\n    slack: 1\n",
++            "replay.window.slack",
++        ),
++        (
++            "  window:\n    warmup_seconds: 0\n    duration_seconds: 5\n  processes: 2\n",
++            "replay.processes: 1",
++        ),
++    ],
++)
++def test_measurement_window_is_validated(
++    tmp_path: Path, replacement: str, message: str
++) -> None:
++    config_text = minimal_run_yaml().replace(
++        "  max_concurrency: 4\n", "  max_concurrency: 4\n" + replacement
++    )
++    with pytest.raises(ConfigError, match=message):
++        load_task_config("run", write_config(tmp_path, config_text))
++
++
++def test_measurement_window_requires_saturated_arrivals(tmp_path: Path) -> None:
++    config_text = minimal_run_yaml().replace(
++        "  arrival_mode: saturated\n",
++        "  arrival_mode: trace-timed\n  window:\n    warmup_seconds: 0\n    duration_seconds: 5\n",
++    )
++    with pytest.raises(ConfigError, match="requires replay.arrival_mode: saturated"):
++        load_task_config("run", write_config(tmp_path, config_text))
++
++
+ def test_shard_commands_isolate_every_output(tmp_path: Path) -> None:
+     specification = LaunchSpec(
+         task="run",
+@@ -359,6 +415,33 @@ def test_terminal_filter_keeps_progress_but_hides_per_request_noise() -> None:
+     assert not ui.should_echo_engine_line(
+         "run", "prefix hit rate | request_id=session_0_round_0"
+     )
++    assert ui.should_echo_engine_line("run", "window summary | warmup_s=0 duration_s=5")
++
++
++def test_run_result_names_the_measurement_window(
++    tmp_path: Path, capsys: pytest.CaptureFixture[str]
++) -> None:
++    summary = tmp_path / "summary.json"
++    summary.write_text(
++        '{"workload": {"kind": "sessions", "sessions": 2, "rounds": 4},'
++        ' "replay": {"kind": "sessions", "common": {"success_steps": 3},'
++        ' "window": {"warmup_s": 1.0, "duration_s": 5.0, "ttft_censored_requests": 2,'
++        ' "requests_cancelled_at_window_end": 2, "requests_failed": 0}}}'
++    )
++    specification = LaunchSpec(
++        task="run",
++        binary="session_runner",
++        arguments=(),
++        output_directory=tmp_path,
++        terminal_log=tmp_path / "terminal.log",
++        result_file=summary,
++    )
++    ui.render_result(specification)
++
++    assert (
++        "5.0 s after 1.0 s warmup  |  censored TTFT 2  |  cancelled 2  |  failed 0"
++        in capsys.readouterr().out
++    )
+ 
+ 
+ def test_dialect_defaults_to_openai_and_is_validated(tmp_path: Path) -> None:
+diff --git a/tests/test_windowed_replay.py b/tests/test_windowed_replay.py
+new file mode 100644
+index 0000000..56aca18
+--- /dev/null
++++ b/tests/test_windowed_replay.py
+@@ -0,0 +1,457 @@
++"""Time-boxed measurement (`--warmup-secs` / `--duration-secs`), end to end.
++
++The pure window fold is tested beside its code in `src/window.rs`. What only a
++real run can show is the part that touches time: that the run really stops at
++window end with work still in flight, that what it abandons is reported as
++cancelled rather than failed, that a server failure inside the window still
++counts, that a request the server never answers enters TTFT as a censored lower
++bound, and that a run without the flags is the run it always was.
++
++The server is `src/bin/loadgen_perf_server.rs` with fixed pacing, so every
++expected number is arithmetic on its flags.
++"""
++
++from __future__ import annotations
++
++import json
++import socket
++import subprocess
++import time
++from contextlib import contextmanager
++from pathlib import Path
++
++import pytest
++
++REPO_ROOT = Path(__file__).resolve().parents[1]
++TARGET = REPO_ROOT / "target" / "debug"
++
++# `replay.common` exactly as a run without window flags has always written it:
++# a windowed run may change values, never this shape.
++COMMON_FIELDS = [
++    "attempted_steps",
++    "success_steps",
++    "failed_steps",
++    "target_output_tokens",
++    "actual_output_tokens",
++    "output_mismatch_steps",
++    "output_token_delta",
++    "total_duration_ms_sum",
++    "total_duration_ms_avg",
++    "total_duration_ms_p50",
++    "total_duration_ms_p90",
++    "total_duration_ms_max",
++    "ttft_ms_avg",
++    "ttft_ms_p50",
++    "ttft_ms_p90",
++    "ttft_ms_max",
++    "ttft_token_id_steps",
++    "ttft_text_fallback_steps",
++    "run_duration_ms",
++    "request_throughput_per_s",
++    "output_token_throughput_per_s",
++    "output_bytes",
++    "output_byte_throughput_per_s",
++    "media_output_steps",
++    "first_output_ms_avg",
++    "first_output_ms_p50",
++    "first_output_ms_p90",
++    "first_output_ms_max",
++    "audio_duration_s",
++    "audio_throughput_s_per_s",
++    "real_time_factor_measured_steps",
++    "real_time_factor_avg",
++    "real_time_factor_p50",
++    "real_time_factor_p90",
++    "real_time_factor_max",
++    "tpot_measured_steps",
++    "tpot_ms_avg",
++    "tpot_ms_p50",
++    "tpot_ms_p90",
++    "tpot_ms_max",
++    "completion_amortized_tpot_measured_steps",
++    "completion_amortized_tpot_ms_avg",
++    "completion_amortized_tpot_ms_p50",
++    "completion_amortized_tpot_ms_p90",
++    "completion_amortized_tpot_ms_max",
++    "context_overflow_steps",
++]
++
++WINDOW_FIELDS = [
++    "warmup_s",
++    "duration_s",
++    "output_tokens",
++    "requests_submitted",
++    "requests_first_token",
++    "ttft_censored_requests",
++    "requests_cancelled_at_window_end",
++    "requests_failed",
++    "requests_output_length_mismatch",
++    "warmup_requests_failed",
++    "sessions_started",
++    "requests_without_token_ids",
++]
++
++
++@pytest.fixture(scope="module", autouse=True)
++def _built() -> None:
++    subprocess.run(
++        ["cargo", "build", "--bin", "session_runner", "--bin", "loadgen_perf_server"],
++        cwd=REPO_ROOT,
++        check=True,
++        capture_output=True,
++        text=True,
++    )
++
++
++@pytest.fixture(scope="module")
++def corpus(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
++    """A word-level tokenizer and a corpus it covers: any ids will do."""
++
++    directory = tmp_path_factory.mktemp("corpus")
++    words = [f"w{index}" for index in range(997)]
++    vocab = {"[UNK]": 0} | {word: index + 1 for index, word in enumerate(words)}
++    tokenizer = directory / "tokenizer.json"
++    tokenizer.write_text(
++        json.dumps(
++            {
++                "version": "1.0",
++                "truncation": None,
++                "padding": None,
++                "added_tokens": [],
++                "normalizer": None,
++                "pre_tokenizer": {"type": "Whitespace"},
++                "post_processor": None,
++                "decoder": None,
++                "model": {"type": "WordLevel", "vocab": vocab, "unk_token": "[UNK]"},
++            }
++        )
++    )
++    text = directory / "corpus.txt"
++    text.write_text(
++        "\n".join(
++            " ".join(words[(line * 7 + column) % len(words)] for column in range(50))
++            for line in range(4000)
++        )
++        + "\n"
++    )
++    return tokenizer, text
++
++
++def write_trace(
++    path: Path,
++    sessions: int,
++    rounds: int,
++    input_len: int = 16,
++    output_len: int = 30,
++    tool_wait_ms: float = 0.0,
++) -> Path:
++    lines = [
++        "request_id,session_id,round_idx,arrival_time_ms,prefix_len,input_len,output_len,tool_wait_after_ms"
++    ]
++    for session in range(sessions):
++        session_id = f"s{session}"
++        context = 0
++        for round_idx in range(rounds):
++            lines.append(
++                f"session_{session_id}_round_{round_idx:06d},{session_id},{round_idx},"
++                f"{session:.6f},{context},{input_len},{output_len},{tool_wait_ms:.6f}"
++            )
++            context += input_len + output_len
++    path.write_text("\n".join(lines) + "\n")
++    return path
++
++
++def free_port() -> int:
++    with socket.socket() as probe:
++        probe.bind(("127.0.0.1", 0))
++        return probe.getsockname()[1]
++
++
++@contextmanager
++def server(*flags: str):
++    port = free_port()
++    process = subprocess.Popen(
++        [
++            str(TARGET / "loadgen_perf_server"),
++            "--bind",
++            f"127.0.0.1:{port}",
++            *flags,
++        ],
++        stdout=subprocess.DEVNULL,
++        stderr=subprocess.DEVNULL,
++    )
++    try:
++        deadline = time.monotonic() + 10
++        while True:
++            try:
++                socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
++                break
++            except OSError:
++                if time.monotonic() > deadline:
++                    raise
++                time.sleep(0.05)
++        yield port
++    finally:
++        process.kill()
++        process.wait()
++
++
++def run(
++    tmp_path: Path,
++    corpus: tuple[Path, Path],
++    port: int,
++    trace: Path,
++    *flags: str,
++) -> tuple[subprocess.CompletedProcess[str], float, dict | None, list[dict]]:
++    tokenizer, text = corpus
++    summary = tmp_path / "summary.json"
++    log = tmp_path / "requests.jsonl"
++    started = time.monotonic()
++    completed = subprocess.run(
++        [
++            str(TARGET / "session_runner"),
++            "--trace",
++            str(trace),
++            "--input-file-format",
++            "text-generation-session-execution-v2",
++            "--text-file",
++            str(text),
++            "--tokenizer",
++            str(tokenizer),
++            "--token-pool-limit",
++            "100000",
++            "--model",
++            "fake",
++            "--backend",
++            "openai",
++            "--base-url",
++            f"http://127.0.0.1:{port}/v1",
++            "--temperature",
++            "0",
++            "--timeline",
++            "false",
++            "--log-path",
++            str(log),
++            "--summary-path",
++            str(summary),
++            *flags,
++        ],
++        capture_output=True,
++        text=True,
++        timeout=120,
++        check=False,
++    )
++    elapsed = time.monotonic() - started
++    report = json.loads(summary.read_text()) if summary.exists() else None
++    records = (
++        [json.loads(line) for line in log.read_text().splitlines()]
++        if log.exists()
++        else []
++    )
++    return completed, elapsed, report, records
++
++
++def saturated(concurrency: int, warmup: float, duration: float) -> list[str]:
++    return [
++        "--arrival-mode",
++        "saturated",
++        "--max-concurrency",
++        str(concurrency),
++        "--warmup-secs",
++        str(warmup),
++        "--duration-secs",
++        str(duration),
++    ]
++
++
++def test_a_window_stops_in_flight_work_and_counts_a_real_failure(
++    tmp_path: Path, corpus: tuple[Path, Path]
++) -> None:
++    # Each request: 50 ms to its first chunk, then ten 3-token chunks 10 ms
++    # apart -> 140 ms for 30 tokens. Session s1's fifth round is sent at about
++    # 4 x 140 ms = 0.56 s, inside the [0.5, 2.0) s window, and fails.
++    trace = write_trace(tmp_path / "trace.csv", sessions=6, rounds=200)
++    with server(
++        "--tokens-per-chunk",
++        "3",
++        "--prefill-delay-ms",
++        "50",
++        "--chunk-delay-ms",
++        "10",
++        "--fail-request-id-containing",
++        "session_s1_round_000004",
++    ) as port:
++        completed, elapsed, report, records = run(
++            tmp_path, corpus, port, trace, *saturated(3, 0.5, 1.5)
++        )
++
++    assert completed.returncode == 0, completed.stderr
++    # 6 x 200 rounds at 140 ms each would take most of a minute.
++    assert elapsed < 20, elapsed
++    replay = report["replay"]
++    common, window = replay["common"], replay["window"]
++    assert list(common) == COMMON_FIELDS
++    assert list(window) == WINDOW_FIELDS
++    assert window["warmup_s"] == 0.5 and window["duration_s"] == 1.5
++
++    # Abandoned at window end: in the window block, never in failures.
++    statuses = [record["outcome"]["status"] for record in records]
++    cancelled = statuses.count("CANCELLED_AT_WINDOW_END")
++    assert 1 <= cancelled <= 3
++    assert window["requests_cancelled_at_window_end"] == cancelled
++    assert statuses.count("FAILED") == 1
++    assert window["requests_failed"] == 1
++    assert common["failed_steps"] == 1
++    assert window["warmup_requests_failed"] == 0
++    assert common["attempted_steps"] == common["success_steps"] + common["failed_steps"]
++
++    # Three sessions streaming 30 tokens per 140 ms, minus the one-off gaps
++    # around the failure and the session that replaced the failed one.
++    ideal = 3 * 30 / 0.140
++    assert common["run_duration_ms"] == 1500.0
++    assert window["output_tokens"] == pytest.approx(
++        common["output_token_throughput_per_s"] * 1.5
++    )
++    assert 0.6 * ideal < common["output_token_throughput_per_s"] < 1.1 * ideal
++    # 10 ms per 3-token chunk: the first chunk's three tokens are excluded.
++    assert 10 / 3 <= common["tpot_ms_p50"] < 6
++    assert 50 <= common["ttft_ms_p50"] < 150
++    # Whatever was still in its 50 ms prefill when the window closed is
++    # censored, and its lower bound is shorter than that prefill.
++    assert window["ttft_censored_requests"] <= cancelled
++    assert common["ttft_ms_max"] < 150
++    assert window["requests_submitted"] >= 3
++    assert window["requests_first_token"] >= window["requests_submitted"] - 3
++    # s3 replaced the failed s1 inside the window; s0-s2 started in warmup.
++    assert window["sessions_started"] == 1
++
++
++def test_a_request_never_answered_enters_ttft_as_a_censored_lower_bound(
++    tmp_path: Path, corpus: tuple[Path, Path]
++) -> None:
++    # The server sits on every request for 30 s, far past a 1 s window. A
++    # summary that dropped these requests would report no TTFT at all, or only
++    # the fast ones; censoring reports the wait so far.
++    trace = write_trace(tmp_path / "trace.csv", sessions=2, rounds=3)
++    with server("--prefill-delay-ms", "30000") as port:
++        completed, elapsed, report, records = run(
++            tmp_path, corpus, port, trace, *saturated(2, 0, 1)
++        )
++
++    assert completed.returncode == 0, completed.stderr
++    assert elapsed < 20, elapsed
++    common, window = report["replay"]["common"], report["replay"]["window"]
++    assert window["requests_submitted"] == 2
++    assert window["ttft_censored_requests"] == 2
++    assert window["requests_cancelled_at_window_end"] == 2
++    assert window["requests_failed"] == 0 and common["failed_steps"] == 0
++    assert window["output_tokens"] == 0
++    assert common["output_token_throughput_per_s"] == 0
++    # Both were sent within milliseconds of t0 and censored at t0 + 1 s.
++    assert 900 < common["ttft_ms_p50"] <= 1000
++    assert common["ttft_token_id_steps"] == 0
++    assert [record["outcome"]["status"] for record in records] == [
++        "CANCELLED_AT_WINDOW_END"
++    ] * 2
++
++
++def test_a_tool_wait_is_not_waited_out_past_window_end(
++    tmp_path: Path, corpus: tuple[Path, Path]
++) -> None:
++    trace = write_trace(tmp_path / "trace.csv", sessions=4, rounds=3, tool_wait_ms=60_000)
++    with server() as port:
++        completed, elapsed, report, records = run(
++            tmp_path, corpus, port, trace, *saturated(2, 0, 1)
++        )
++
++    assert completed.returncode == 0, completed.stderr
++    assert elapsed < 20, elapsed
++    window = report["replay"]["window"]
++    # Both sessions finished round 0 and then sat in a minute-long tool wait,
++    # holding their slots, so nobody else started and nothing was in flight.
++    assert window["sessions_started"] == 2
++    assert window["requests_cancelled_at_window_end"] == 0
++    assert [record["source"]["data"]["round_idx"] for record in records] == [0, 0]
++
++
++def test_without_window_flags_the_run_and_its_summary_are_unchanged(
++    tmp_path: Path, corpus: tuple[Path, Path]
++) -> None:
++    trace = write_trace(tmp_path / "trace.csv", sessions=3, rounds=4)
++    with server("--tokens-per-chunk", "2") as port:
++        completed, _, report, records = run(
++            tmp_path,
++            corpus,
++            port,
++            trace,
++            "--arrival-mode",
++            "saturated",
++            "--max-concurrency",
++            "2",
++        )
++
++    assert completed.returncode == 0, completed.stderr
++    replay = report["replay"]
++    assert list(replay) == ["kind", "common", "prefix_cache"]
++    assert list(report) == ["workload", "replay", "client_runtime", "timeline", "slo"]
++    common = replay["common"]
++    assert list(common) == COMMON_FIELDS
++    assert common["attempted_steps"] == common["success_steps"] == 12
++    assert common["failed_steps"] == 0
++    assert common["actual_output_tokens"] == 12 * 30
++    assert all(record["outcome"]["status"] == "SUCCESS" for record in records)
++    assert all(record["schema_version"] == 15 for record in records)
++    assert "window summary" not in completed.stderr
++
++
++@pytest.mark.parametrize(
++    ("flags", "message"),
++    [
++        (["--warmup-secs", "1"], "--duration-secs"),
++        (["--duration-secs", "1"], "--warmup-secs"),
++        (
++            ["--arrival-mode", "saturated", "--warmup-secs", "1", "--duration-secs", "0"],
++            "> 0",
++        ),
++        (
++            ["--arrival-mode", "saturated", "--warmup-secs=-1", "--duration-secs", "1"],
++            ">= 0",
++        ),
++        (["--warmup-secs", "1", "--duration-secs", "1"], "saturated"),
++        (
++            [
++                "--arrival-mode",
++                "saturated",
++                "--warmup-secs",
++                "0",
++                "--duration-secs",
++                "1",
++                "--dry-run",
++            ],
++            "dry-run",
++        ),
++        (
++            [
++                "--arrival-mode",
++                "saturated",
++                "--warmup-secs",
++                "0",
++                "--duration-secs",
++                "1",
++                "--shard-count",
++                "2",
++            ],
++            "shard-count",
++        ),
++    ],
++)
++def test_window_flags_are_rejected_where_they_mean_nothing(
++    tmp_path: Path, corpus: tuple[Path, Path], flags: list[str], message: str
++) -> None:
++    trace = write_trace(tmp_path / "trace.csv", sessions=1, rounds=1)
++    # Rejected before any connection: nothing listens on this port.
++    completed, _, report, _ = run(tmp_path, corpus, free_port(), trace, *flags)
++
++    assert completed.returncode != 0
++    assert message in completed.stderr, completed.stderr
++    assert report is None
+-- 
+2.39.5
+

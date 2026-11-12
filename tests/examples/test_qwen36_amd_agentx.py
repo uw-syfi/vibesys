@@ -157,6 +157,68 @@ def test_agentx_bench_replays_the_agentx_v1_recipe(task: str, mode: str, tmp_pat
     assert _agentx.command(replay, tmp_path, python=expected[0]) == expected
 
 
+_SCALE = "mi2508x-tracelab-scale"
+
+
+def test_tracelab_scale_task_is_a_two_image_task_of_the_baseline_engine() -> None:
+    manifest = _manifest(_SCALE)
+    assert manifest["version"] == "0.2"
+    assert manifest["backends"] == ["rocm"]
+    assert "evaluator" not in manifest
+    # Development runs are `submit command` jobs in the task image, not a [profile] section.
+    assert "profile" not in manifest
+    assert set(manifest["environment"]["needs"]) == {"rocm", "mounts"}
+    candidate = manifest["candidate"]
+    assert (candidate["dockerfile"], candidate["context"]) == ("Dockerfile.rocm", ".")
+    assert (_PROJECT / candidate["dockerfile"]).is_file()
+    assert candidate["serve"] == [
+        "python", "-m", "engine.server", "--host", "127.0.0.1", "--port", "${PORT}",
+    ]  # fmt: skip
+    assert (candidate["ready"], candidate["startup_timeout_seconds"]) == ("/health", 1800)
+    assert manifest["accuracy"] == {
+        "command": ["sh", "-c", 'exec python3 -I /task/checker.py --url "$VIBESYS_SERVICE_URL"'],
+        "timeout_seconds": 300,
+    }
+    assert manifest["benchmark"] == {
+        "command": [
+            "python", "-I", "/task/tracelab/replay.py",
+            "--request-factory-engine", "/usr/local/bin/session_runner",
+        ],
+        "timeout_seconds": 3600,
+        "result_protocol": 2,
+    }  # fmt: skip
+    hardware = manifest["catalogue"]["hardware"]
+    assert (hardware["accelerator"], hardware["count"], hardware["vendor"]) == (
+        "AMD MI250",
+        8,
+        "amd",
+    )
+
+
+def test_tracelab_scale_task_image_carries_the_checker_and_the_adapter() -> None:
+    root = task_root(_PROJECT, _SCALE)
+    shared = _PROJECT / ".vibesys/tasks/default/accuracy_checker/checker.py"
+    assert (root / "checker.py").read_bytes() == shared.read_bytes()
+    dockerfile = (root / "Dockerfile").read_text()
+    assert "HF_HOME=/vibesys/mounts/hf HF_HUB_OFFLINE=1" in dockerfile
+    assert "COPY request-factory/windowed.patch" in dockerfile
+    scale = SimpleNamespace(**runpy.run_path(str(root / "tracelab/replay.py")))
+    objectives = tomllib.loads((root / "objectives.toml").read_text())
+    assert [item["name"] for item in objectives["objective"]] == scale.OBJECTIVES
+    assert scale.REVISION in (root / "reference/meta.json").read_text()
+    trace = root / "tracelab/trace.csv"
+    assert hashlib.sha256(trace.read_bytes()).hexdigest() == scale.TRACE_SHA256
+
+
+def test_tracelab_scale_task_publishes_no_held_out_material() -> None:
+    root = task_root(_PROJECT, _SCALE)
+    for path in root.rglob("*"):
+        if path.is_file() and path.name != "windowed.patch" and path.suffix != ".csv":
+            text = path.read_text(errors="ignore").lower()
+            assert "holdout-private" not in text, path
+            assert "qwen36-scale-holdout" not in text, path
+
+
 def test_the_baseline_engine_serves_the_checkpoint_every_task_pins() -> None:
     pinned = json.loads((_PROJECT / "engine/checkpoint.json").read_text())
     assert pinned == {"model": _REPLAY.MODEL, "revision": _REPLAY.REVISION}
