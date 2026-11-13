@@ -1,0 +1,3 @@
+[[rule]]
+path = "skills"
+domains = ["fpga-hls"]

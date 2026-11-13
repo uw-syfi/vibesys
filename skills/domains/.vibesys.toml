@@ -36,3 +36,15 @@ domains = ["database"]
 [[rule]]
 path = "custom-rpc-optimization"
 domains = ["microservices"]
+
+[[rule]]
+path = "fpga-hls-workflow"
+domains = ["fpga-hls"]
+
+[[rule]]
+path = "fpga-hls-feasibility"
+domains = ["fpga-hls"]
+
+[[rule]]
+path = "fpga-llm-operators"
+domains = ["fpga-hls"]

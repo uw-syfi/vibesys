@@ -42,6 +42,12 @@ PLUGIN_SKILLS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "./domains/kernel-performance",
             "./domains/neuron-agentic-development",
         ),
+        "vibesys-fpga-hls": (
+            "./domains/fpga-hls-workflow",
+            "./domains/fpga-hls-feasibility",
+            "./domains/fpga-llm-operators",
+            "./domains/amd-hls",
+        ),
     }
 )
 """Plugin name to the skill-folder prefixes it lists, relative to ``skills/``."""

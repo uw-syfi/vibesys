@@ -11,6 +11,7 @@ The domain skills ship in their own plugins. Read `[agent] domain` and `backends
 | `domain = "kernel-writing"`, backend `cuda` | `vibesys-kernels-cuda` | `kernel-performance` |
 | `domain = "kernel-writing"`, backend `rocm` | `vibesys-kernels-rocm` | `kernel-performance` |
 | `domain = "kernel-writing"`, backend `trainium` | `vibesys-kernels-trainium` | `kernel-performance` |
+| `domain = "fpga-hls"` | `vibesys-fpga-hls` | `fpga-hls-workflow` |
 
 A `llm-serving` task on backend `trainium` needs both `vibesys-llm-serving` and
 `vibesys-kernels-trainium`. Any other domain or backend (for example `generic` on `cpu`) needs

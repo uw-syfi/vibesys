@@ -22,6 +22,7 @@ domain = "llm-serving"
 | `microservices` | Microservice workload context: service lifecycle, protocol correctness, and workload-specific evaluator guidance. |
 | `database`    | Database / dataflow engine context: in-place optimization of a vendored engine, judged by output-equivalence against a pristine round-0 copy of the same engine. |
 | `kernel-writing` | Compute-kernel implementation and optimization against a task-owned reference, accuracy checker, and scored benchmark. |
+| `fpga-hls` | FPGA accelerators written in high-level synthesis C++ (Vitis HLS), judged on correctness, feasibility on the target device and clock, and the task's measured performance. |
 | `generic`     | Empty: no domain prose injected. The neutral baseline; copy it to start your own. |
 
 ## Anatomy of a domain package
