@@ -376,6 +376,7 @@ class PlanWorld:
             merge_ids=frozenset(merges | running_merges),
             merging=bool(running_merges),
             merge_options=self.merge_options,
+            max_continuation_rounds=self.config.max_continuation_rounds,
         )
 
     def _waiting_ids(self) -> frozenset[str]:

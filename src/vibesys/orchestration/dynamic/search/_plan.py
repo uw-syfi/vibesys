@@ -99,6 +99,8 @@ class PlanLedger:
     merge_ids: frozenset[str] = frozenset()
     merging: bool = False
     merge_options: MergeOptions = field(default_factory=MergeOptions)
+    max_continuation_rounds: int | None = None
+    """Times one hypothesis may be continued after its first round; None leaves it unbounded."""
 
     def hypothesis(self, identifier: str) -> HypothesisRecord | None:
         """The record of a hypothesis ID, if one exists."""
@@ -182,17 +184,30 @@ def _implement_identity(
     if code is not None:
         return PlanViolation(path=path, code=code, subject=identifier)
     repairing = ledger.repairable is not None and identifier in ledger.repairable
-    return None if prior is None else _continuation(position, plan, prior, repairing=repairing)
+    if prior is None:
+        return None
+    return _continuation(
+        position, plan, prior, repairing=repairing, limit=ledger.max_continuation_rounds
+    )
 
 
 def _continuation(
-    position: int, plan: WorkstreamPlan, prior: HypothesisRecord, *, repairing: bool
+    position: int,
+    plan: WorkstreamPlan,
+    prior: HypothesisRecord,
+    *,
+    repairing: bool,
+    limit: int | None,
 ) -> PlanViolation | None:
-    """Why ``plan`` may not continue ``prior``; a failed plan step is never terminal."""
+    """Why ``plan`` may not continue ``prior``; a failed plan step is never terminal.
+
+    A hypothesis continued ``limit`` times already is terminal too.
+    """
     last = prior.rounds[-1] if prior.rounds else None
     if last is None:
         return None
-    if last.outcome in _TERMINAL_OUTCOMES and not repairing:
+    exhausted = limit is not None and prior.continuation_rounds >= limit
+    if (last.outcome in _TERMINAL_OUTCOMES or exhausted) and not repairing:
         return PlanViolation(
             path=("workstreams", position, "hypothesis_id"),
             code=ViolationCode.HYPOTHESIS_TERMINAL,
