@@ -58,7 +58,7 @@ Then ask your agent to create a task describing your optimization goal and corre
 ```
 
 See the [skills installation guide](skills/README.md#install) for Codex,
-`npx skills`, and domain plugins for databases, microservices, and kernels.
+`npx skills`, and domain plugins for databases, microservices, native command-line tools, and kernels.
 
 To run managed optimizations with `vibesys-client` instead, see
 [Install for managed runs](orchestrator/README.md#install-for-managed-runs). To remove it, see

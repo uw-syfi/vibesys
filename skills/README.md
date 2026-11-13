@@ -1,6 +1,6 @@
 # Skills
 
-Everything in this directory is published as seven plugins and as a set of Agent Skills, and
+Everything in this directory is published as eight plugins and as a set of Agent Skills, and
 nothing outside it is. Claude Code and Codex copy a plugin's source directory when they
 install it, so a skill that lives elsewhere in the repository cannot reach a user.
 
@@ -25,6 +25,7 @@ Every plugin installs from the one source directory and differs only by the skil
 | `vibesys-kernels-cuda` | `kernel-correctness`, `kernel-performance`, `kernel-ncu-analysis`, `kernel-timeline-analysis` |
 | `vibesys-kernels-rocm` | `kernel-correctness`, `kernel-performance`, `kernel-rocprof-analysis` |
 | `vibesys-kernels-trainium` | `kernel-correctness`, `kernel-performance`, the Neuron NKI pack |
+| `vibesys-cli-tools` | `cli-tool-optimization` |
 
 Install `vibesys` plus the domain plugin the task needs, chosen by the task's `[agent] domain` and
 `backends` (a Trainium LLM-serving task needs `vibesys-llm-serving` and `vibesys-kernels-trainium`);
@@ -81,8 +82,8 @@ short section in the harness file.
 
 ## Layout
 
-- `domains/`: domain skills for kernels, LLM serving, microservices, Tokio services and
-  Neuron. Both the plugin and VibeSys runs use them: a run reads only this tree, and the
+- `domains/`: domain skills for kernels, LLM serving, microservices, Tokio services, native
+  command-line tools and Neuron. Both the plugin and VibeSys runs use them: a run reads only this tree, and the
   sidecar in it decides which skills a run installs for its backend and domain
   ([skill metadata](../docs/contributing/skill-metadata.md)).
 - `search/`: the optimization loop for the plugin alone. VibeSys runs never install it,
@@ -102,7 +103,7 @@ them is published.
 
 ## Manifest
 
-`.claude-plugin/marketplace.json` declares the seven plugins above, each with the source `./skills`.
+`.claude-plugin/marketplace.json` declares the eight plugins above, each with the source `./skills`.
 Claude Code and Codex install from it, and `npx skills` uses it to find the skills inside vendored
 packs. Each plugin's `skills` list is generated from the tree and the plugin table in
 `scripts/published_skills/plugins.py`: a skill belongs to a plugin when its folder is, or lies

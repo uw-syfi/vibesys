@@ -1,6 +1,6 @@
 {
   "name": "vibesys",
-  "description": "Skills that run VibeSys-style, measurement-driven optimization inside Claude Code, with domain skills for kernels, LLM serving, databases and microservices.",
+  "description": "Skills that run VibeSys-style, measurement-driven optimization inside Claude Code, with domain skills for kernels, LLM serving, databases, microservices and native command-line tools.",
   "owner": {
     "name": "uw-syfi"
   },
@@ -8,8 +8,8 @@
     {
       "name": "vibesys",
       "source": "./skills",
-      "description": "Resumable, measurement-driven optimization loop with parallel hypotheses, measurements and independent judging; the domain skills are in the vibesys-llm-serving, vibesys-database, vibesys-microservices and vibesys-kernels-<backend> plugins.",
-      "version": "0.11.1",
+      "description": "Resumable, measurement-driven optimization loop with parallel hypotheses, measurements and independent judging; the domain skills are in the vibesys-llm-serving, vibesys-database, vibesys-microservices, vibesys-cli-tools and vibesys-kernels-<backend> plugins.",
+      "version": "0.12.0",
       "strict": false,
       "skills": [
         "./search/allocations",
