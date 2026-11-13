@@ -90,6 +90,8 @@ Three things hold throughout:
 When planners, workers, judges and profilers are separate agents, each reads this
 skill for its own part:
 
+- **Lead:** steps 2 and 5. Confirm the scope, and record the correct baseline
+  and its measurement that every candidate is compared with.
 - **Planner:** steps 3 to 10. Plan hypotheses from profiles and ceilings, and do
   not re-propose one the record shows failed.
 - **Worker:** steps 11 to 14 on one hypothesis. Commit a small change and hand
