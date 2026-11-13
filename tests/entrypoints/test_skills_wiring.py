@@ -21,6 +21,7 @@ from vibesys.orchestration.skill_selection import (
     validate_platform_layout,
 )
 from vibesys.run.skill_sources import resolve_skill_source_dirs, validate_skill_tree
+from vs_agent.api import materialize_skills
 from vs_runtime.api.infrastructure import (
     SkillMetadataError as RuntimeSkillMetadataError,
 )
@@ -354,6 +355,8 @@ def test_all_repository_skill_metadata_is_valid() -> None:
     assert metadata["kernel-timeline-analysis"].backends == (ComputeBackend.CUDA,)
     assert metadata["kernel-rocprof-analysis"].domains == (DomainName.KERNEL_WRITING,)
     assert metadata["kernel-rocprof-analysis"].backends == (ComputeBackend.ROCM,)
+    assert metadata["cli-tool-optimization"].domains == (DomainName.CLI_TOOLS,)
+    assert metadata["cli-tool-optimization"].backends == (ComputeBackend.CPU,)
     assert set(metadata) >= NKI_SKILL_NAMES
 
 
@@ -577,3 +580,89 @@ def test_custom_rpc_skill_is_selected_only_for_microservices(
     assert ("custom-rpc-optimization" in _skill_names(selected)) == (
         domain is DomainName.MICROSERVICES
     )
+
+
+_CLI_SKILL = "cli-tool-optimization"
+
+
+def test_cli_tool_skill_is_selected_for_cli_tools_on_cpu(tmp_path: Path) -> None:
+    _, selected, _ = load_config_and_skills(
+        _args(tmp_path, ComputeBackend.CPU), domain=DomainName.CLI_TOOLS
+    )
+
+    assert _CLI_SKILL in _skill_names(selected)
+
+
+@pytest.mark.parametrize("domain", [d for d in DomainName if d is not DomainName.CLI_TOOLS])
+def test_cli_tool_skill_is_not_selected_for_any_other_domain_on_cpu(
+    tmp_path: Path, domain: DomainName
+) -> None:
+    _, selected, _ = load_config_and_skills(_args(tmp_path, ComputeBackend.CPU), domain=domain)
+
+    assert _CLI_SKILL not in _skill_names(selected)
+
+
+@pytest.mark.parametrize("backend", [b for b in ComputeBackend if b is not ComputeBackend.CPU])
+def test_cli_tool_skill_is_not_selected_on_an_accelerator_backend(
+    tmp_path: Path, backend: ComputeBackend
+) -> None:
+    _, selected, _ = load_config_and_skills(_args(tmp_path, backend), domain=DomainName.CLI_TOOLS)
+
+    assert _CLI_SKILL not in _skill_names(selected)
+
+
+@pytest.mark.parametrize("domain", list(DomainName))
+@pytest.mark.parametrize("backend", list(ComputeBackend))
+def test_cli_tool_skill_is_selected_exactly_for_cli_tools_on_cpu(
+    domain: DomainName, backend: ComputeBackend
+) -> None:
+    selected = resolve_skill_source_dirs(
+        [PROJECT_ROOT / "skills" / "domains"], backend=backend, domain=domain
+    )
+
+    assert (_CLI_SKILL in _skill_names(selected)) == (
+        domain is DomainName.CLI_TOOLS and backend is ComputeBackend.CPU
+    )
+
+
+_LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
+
+
+def _relative_links(markdown: Path) -> list[Path]:
+    return [
+        markdown.parent / target
+        for target in _LINK.findall(markdown.read_text(encoding="utf-8"))
+        if "://" not in target and not target.startswith(("mailto:", "/"))
+    ]
+
+
+def test_cli_tool_skill_links_resolve_and_every_reference_is_linked() -> None:
+    skill = PROJECT_ROOT / "skills" / "domains" / _CLI_SKILL
+    references = sorted((skill / "references").glob("*.md"))
+    assert references
+
+    for markdown in [skill / "SKILL.md", *references]:
+        for link in _relative_links(markdown):
+            assert link.exists(), f"{markdown.relative_to(skill)} links to missing {link}"
+    linked = {link.resolve() for link in _relative_links(skill / "SKILL.md")}
+    assert {path.resolve() for path in references} <= linked
+
+
+def test_selected_cli_tool_skill_materializes_every_file_and_every_link(tmp_path: Path) -> None:
+    _, selected, _ = load_config_and_skills(
+        _args(tmp_path, ComputeBackend.CPU), domain=DomainName.CLI_TOOLS
+    )
+    assert selected is not None
+    source = next(Path(path) for path in selected if Path(path).name == _CLI_SKILL)
+    workspace = tmp_path / "workspace"
+
+    materialize_skills(workspace, [source])
+
+    installed = workspace / ".agents" / "skills" / _CLI_SKILL
+    expected = {path.relative_to(source) for path in source.rglob("*") if path.is_file()}
+    copied = {path.relative_to(installed) for path in installed.rglob("*") if path.is_file()}
+    assert expected
+    assert copied == expected
+    for markdown in [installed / "SKILL.md", *sorted((installed / "references").glob("*.md"))]:
+        for link in _relative_links(markdown):
+            assert link.is_file(), f"{markdown.relative_to(installed)} links to missing {link}"
