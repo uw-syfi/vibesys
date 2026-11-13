@@ -24,6 +24,13 @@ from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+# lint-waiver: LW-389003 [E402]; Path-invoked runs need the repo root on sys.path before this import.
+from scripts.repo_files import tracked_files  # noqa: E402
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
@@ -66,8 +73,13 @@ class SourceWaiver:
     reason: str
 
 
-def discover_ruff_files(repo_root: Path) -> tuple[list[Path], str | None]:
-    """Discover Python files using Ruff's configured exclusion patterns."""
+def discover_ruff_files(
+    repo_root: Path, *, names: Iterable[str] | None = None
+) -> tuple[list[Path], str | None]:
+    """Discover Python files using Ruff's configured exclusion patterns.
+
+    ``names`` injects a tracked listing for tests (see ``scripts.repo_files``).
+    """
     try:
         pyproject = tomllib.loads((repo_root / DEFAULT_PYPROJECT).read_text(encoding="utf-8"))
         excluded = pyproject.get("tool", {}).get("ruff", {}).get("extend-exclude", [])
@@ -76,7 +88,7 @@ def discover_ruff_files(repo_root: Path) -> tuple[list[Path], str | None]:
     if not isinstance(excluded, list) or any(not isinstance(item, str) for item in excluded):
         return [], "[tool.ruff].extend-exclude must be a list of path patterns"
     files = []
-    for path in repo_root.rglob("*.py"):
+    for path in tracked_files(repo_root, suffixes=(".py",), names=names):
         relative = path.relative_to(repo_root).as_posix()
         if DEFAULT_EXCLUDED_DIRS.intersection(path.relative_to(repo_root).parts):
             continue

@@ -37,6 +37,13 @@ from importlib.metadata import packages_distributions
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+# lint-waiver: LW-389004 [E402]; Path-invoked runs need the repo root on sys.path before this import.
+from scripts.repo_files import tracked_files  # noqa: E402
+
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
@@ -167,21 +174,30 @@ def _check_member(
     return failures
 
 
-def imported_top_level_names(source_root: Path) -> frozenset[str]:
-    """Return the absolute top-level module names imported anywhere under ``source_root``."""
-    names: set[str] = set()
-    for path in sorted(source_root.rglob("*.py")):
+def imported_top_level_names(
+    repo_root: Path, source_root: Path, *, names: Sequence[str] | None = None
+) -> frozenset[str]:
+    """Return the absolute top-level module names imported anywhere under ``source_root``.
+
+    ``names`` injects a tracked listing for tests (see ``scripts.repo_files``).
+    """
+    found: set[str] = set()
+    under = source_root.relative_to(repo_root).as_posix()
+    for path in tracked_files(repo_root, suffixes=(".py",), under=(under,), names=names):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                names.update(alias.name.partition(".")[0] for alias in node.names)
+                found.update(alias.name.partition(".")[0] for alias in node.names)
             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                names.add(node.module.partition(".")[0])
-    return frozenset(names - sys.stdlib_module_names)
+                found.add(node.module.partition(".")[0])
+    return frozenset(found - sys.stdlib_module_names)
 
 
-def load_workspace(repo_root: Path) -> Workspace:
-    """Read the root project and every `libs/*` workspace member under ``repo_root``."""
+def load_workspace(repo_root: Path, *, names: Sequence[str] | None = None) -> Workspace:
+    """Read the root project and every `libs/*` workspace member under ``repo_root``.
+
+    ``names`` injects a tracked listing for tests (see ``scripts.repo_files``).
+    """
     root = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
     patterns = root.get("tool", {}).get("uv", {}).get("workspace", {}).get("members", [])
     directories = sorted(
@@ -193,7 +209,7 @@ def load_workspace(repo_root: Path) -> Workspace:
             if (path / "pyproject.toml").is_file()
         }
     )
-    members = tuple(_load_member(repo_root, directory) for directory in directories)
+    members = tuple(_load_member(repo_root, directory, names=names) for directory in directories)
     root_source = repo_root / "src"
     root_packages = (
         frozenset(
@@ -214,7 +230,7 @@ def load_workspace(repo_root: Path) -> Workspace:
     return Workspace(members, root_dependencies, root_packages, root_specifiers)
 
 
-def _load_member(repo_root: Path, directory: Path) -> Member:
+def _load_member(repo_root: Path, directory: Path, *, names: Sequence[str] | None = None) -> Member:
     data = tomllib.loads((directory / "pyproject.toml").read_text(encoding="utf-8"))
     sources = data.get("tool", {}).get("uv", {}).get("sources", {})
     source_root = directory / "src"
@@ -236,7 +252,7 @@ def _load_member(repo_root: Path, directory: Path) -> Member:
             requirement_name(item): requirement_specifier(item)
             for item in data["project"].get("dependencies", [])
         },
-        imports=imported_top_level_names(source_root),
+        imports=imported_top_level_names(repo_root, source_root, names=names),
         packages=packages,
     )
 

@@ -12,6 +12,8 @@ from __future__ import annotations
 import ast
 from typing import TYPE_CHECKING
 
+from scripts.repo_files import tracked_files
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -42,7 +44,7 @@ def imports_flow(tree: ast.Module) -> bool:
 def flow_modules(root: Path) -> list[Path]:
     """Modules under `src/` that are flow code: the flow packages plus any importer of `Flow`."""
     found = {path for pattern in FLOW_GLOBS for path in root.glob(pattern)}
-    for path in (root / "src").rglob("*.py"):
+    for path in tracked_files(root, suffixes=(".py",), under=("src",)):
         if imports_flow(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
             found.add(path)
     return sorted(found)

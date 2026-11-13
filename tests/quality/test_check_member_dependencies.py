@@ -143,7 +143,15 @@ def test_load_workspace_reads_only_library_members_from_the_tree(tmp_path: Path)
         '[project]\nname = "x"\n', encoding="utf-8"
     )
 
-    loaded = load_workspace(tmp_path)
+    loaded = load_workspace(
+        tmp_path,
+        names=(
+            "pyproject.toml",
+            "libs/vs-a/pyproject.toml",
+            "libs/vs-a/src/vs_a/__init__.py",
+            "sdk/x/pyproject.toml",
+        ),
+    )
 
     assert [item.name for item in loaded.members] == ["vs-a"]
     assert loaded.members[0].imports == {"pydantic"}
