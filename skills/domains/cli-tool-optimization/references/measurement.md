@@ -40,6 +40,9 @@ fixed per invocation and puts a floor under every run.
 - Measure the floor: run the same program with trivial input or a no-op option.
 - Inspect dynamic loading with the loader's own diagnostics where available
   (for example `LD_DEBUG=statistics` on Linux).
+- Compare against a trivial program run the same way (for example one that
+  reads a tiny file and exits): whatever the harness itself costs is a floor
+  for every invocation, and a gain below it cannot be seen.
 - Estimate the ceiling of any per-input change: the saving cannot exceed the
   per-input share of the measured time, and a program that is mostly start-up
   gains little from a faster inner loop.
@@ -52,6 +55,15 @@ fresh process each time) and reproduce that state, rather than whichever is
 convenient. Do not mix states within one comparison. Prepare inputs outside the
 timed region, run one or more untimed warm-up repetitions when the evaluator
 does, and say what you did.
+
+## How the score aggregates
+
+Find out how the task turns many invocations into one number, because it decides
+what is worth optimizing. A total of times rewards the long invocations. A
+geometric mean of per-invocation candidate-over-baseline ratios weighs every
+invocation equally, so a 2% saving in start-up shared by all of them can beat a
+large saving in a few. Estimate ceilings and compare local results in that same
+aggregate, not in raw seconds.
 
 ## Comparing a candidate with the baseline
 
@@ -72,8 +84,8 @@ does, and say what you did.
 
 Short processes need extra care. Timer resolution, process-creation cost and
 scheduler placement are the same size as the signal. Time many launches and
-divide, or use hardware counters (instruction counts are far steadier than time)
-as a cross-check. Note that launching through a shell, wrapper or harness adds
+divide, or use instruction counts (hardware counters where permitted, otherwise
+callgrind), which are far steadier than time, as a cross-check. Note that launching through a shell, wrapper or harness adds
 its own cost to both sides; keep it identical.
 
 ## Contamination to rule out
@@ -83,7 +95,8 @@ its own cost to both sides; keep it identical.
   (confirm with the version string, a checksum or the build id).
 - Different environment or locale, a different working directory, or a different
   output sink (a terminal, a pipe and a file can each behave differently).
-- Tracing, sampling or instrumentation attached while timing.
+- Tracing, sampling or instrumentation attached while timing, including your own
+  profiling or builds running while the evaluator measures.
 - A debug or sanitizer build timed against an optimized one.
 - Inputs that changed between baseline and candidate runs.
 

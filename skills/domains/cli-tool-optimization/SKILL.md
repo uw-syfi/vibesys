@@ -39,9 +39,12 @@ Three things hold throughout:
    measurement commands. Edits outside the scope, or to the evaluator, are never
    an optimization.
 3. Understand the workload distribution: which invocations are scored, how many
-   of each, on what inputs, and what share of the total each represents.
-4. Select representative invocations, weighted by their share of the score, and
-   reproduce them exactly (same arguments, environment, inputs, output sink).
+   of each, on what inputs, and **how the score aggregates them**. A sum of
+   times is dominated by the long invocations; a geometric mean of
+   per-invocation ratios counts a 1 ms invocation as much as a 3 s one.
+4. Select representative invocations, weighted the way the score weights them,
+   and reproduce them exactly (same arguments, environment, inputs, output
+   sink).
 
 **Baseline and diagnosis**
 
@@ -61,9 +64,10 @@ Three things hold throughout:
 
 9. Form one falsifiable hypothesis: this mechanism costs X, this change removes
    Y, so this measurement moves by about Z.
-10. Estimate the ceiling. If the cost center is 3% of the measured time, no
-    change to it can give more than 3%. Drop hypotheses whose ceiling is below
-    the noise floor.
+10. Estimate the ceiling in the score's own terms. If the cost center is 3% of
+    the time of every scored invocation, no change to it can move the score by
+    more than 3%. Drop hypotheses whose ceiling is below the noise floor. If the
+    loop asks for a gain bound on a plan, use this estimate.
 11. Make the smallest real implementation change. Prefer a change a reviewer can
     read and verify in one sitting.
 12. Rebuild through the task-provided commands, not a private build. Build
@@ -81,13 +85,36 @@ Three things hold throughout:
     ([review-checklist.md](references/review-checklist.md)).
 16. Record why the experiment succeeded or failed, and what it ruled out.
 
+## Using it in a multi-agent loop
+
+When planners, workers, judges and profilers are separate agents, each reads this
+skill for its own part:
+
+- **Planner:** steps 3 to 10. Plan hypotheses from profiles and ceilings, and do
+  not re-propose one the record shows failed.
+- **Worker:** steps 11 to 14 on one hypothesis. Commit a small change and hand
+  back the evidence.
+- **Judge:** steps 13 to 15. Read the whole diff with the
+  [review checklist](references/review-checklist.md); judge correctness and
+  honesty from the source and the saved check, and speed only from a recorded
+  measurement.
+- **Profiler:** steps 4 to 8, ending in a named cost center and its share.
+
+If the task requires that all measurement and load go through its job system, run
+profiling, tracing and microbenchmarks only the way the task allows, and never
+alongside a running measurement: they contaminate it
+([measurement.md](references/measurement.md)). Where the task fixes the workload
+or hardware, specializing to that is fine, but never to the benchmark's own
+files, seeds or argument lists.
+
 ## Keep a record
 
 For each experiment write down the hypothesis, the ceiling you estimated, the
 change, the correctness result, the recorded measurement, and the verdict. A
 failed hypothesis with its evidence is worth keeping: it stops the next attempt
 from repeating it, and a pattern of failures often points at the real cost
-center. Do not delete the record of a failure when a later change succeeds.
+center. Keep it where the task's loop keeps plans and results, if it has such a
+place. Do not delete the record of a failure when a later change succeeds.
 
 ## When to read which reference
 
@@ -102,7 +129,10 @@ center. Do not delete the record of a failure when a later change succeeds.
 
 ## Limits of this skill
 
-It teaches a process and the questions to ask. It does not name a fix for any
+It teaches a process and the questions to ask. Expect modest gains from a mature
+program: shaving start-up cost and hot loops while preserving every byte is a
+real result, and a large gain on one pathological case at the price of changed
+behavior elsewhere is a failure. It does not name a fix for any
 particular program: a technique that helps one workload can do nothing, or harm,
 for another, and the profile decides. Where the task states a rule that differs
 from this guidance, follow the task.

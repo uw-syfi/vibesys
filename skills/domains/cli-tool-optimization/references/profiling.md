@@ -6,8 +6,11 @@ not the score.
 
 ## Choose what to profile
 
-1. List the scored invocations and how often each occurs. Weight each by its
-   share of the total time (count times duration), not by how interesting it is.
+1. List the scored invocations and how often each occurs. Weight each the way the
+   score does, not by how interesting it is: by share of total time if the score
+   sums time, but equally per invocation if the score is a geometric mean of
+   per-invocation ratios (then many short invocations matter as much as a few
+   long ones, and start-up cost is paid by every one of them).
 2. Cluster similar invocations (same options, similar input size). Profile one
    representative per cluster that carries a meaningful share, plus the single
    most expensive one.
@@ -19,7 +22,9 @@ not the score.
 
 Use what the task or the environment provides; an unavailable tool is a reason to
 use another, not to skip profiling. Containers and restricted hosts often block
-some of these.
+some of these, in particular hardware counters (`perf`). Where they are blocked,
+callgrind's instruction counts and `strace` counts are the usual substitutes.
+Run profilers only where the task allows load, never during a measurement.
 
 | Tool | Good for | Watch for |
 | --- | --- | --- |

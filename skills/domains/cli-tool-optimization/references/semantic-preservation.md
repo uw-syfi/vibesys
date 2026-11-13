@@ -23,7 +23,9 @@ Treat each of these as part of the contract:
   signals, behavior on closed or full output.
 - **Filesystem reads and writes**: which files are opened, in what mode, which are
   created or modified, atomicity, permissions, ownership, timestamps and other
-  **metadata**, and other **side effects**.
+  **metadata**, and other **side effects**. Creating a file the original did not
+  (a temporary file, a cache, a lock file) is a change in behavior, and an
+  evaluator may fail it as an extra write.
 - **Locale and environment variables**: collation, character encoding, number and
   date formatting, and variables that change behavior (for example locale
   selection, terminal and color settings, `TZ`, and compatibility switches).
