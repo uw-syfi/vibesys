@@ -205,6 +205,7 @@ class FileControlInbox:
         """Keep the requests in ``namespace``, the run's control state."""
         self._namespace = namespace
         self._reported: set[str] = set()
+        self._order_records: dict[str, str] = {}
 
     def post(self, request_id: str, payload: bytes, *, ended: Ended) -> None:
         """Create the request's file and claim its place, unless the run has ended.
@@ -302,13 +303,18 @@ class FileControlInbox:
             if not _SEQUENCE.fullmatch(entry):
                 self._report(entry, "is not a place in the posting order")
                 continue
-            held = self._namespace.read_bytes(_ORDER / entry)
-            if held is None:
-                continue
-            request_id = held.decode(errors="replace")
-            if not _REQUEST_ID.fullmatch(request_id):
-                self._report(entry, "names no valid request id")
-                continue
+            request_id = self._order_records.get(entry)
+            if request_id is None:
+                held = self._namespace.read_bytes(_ORDER / entry)
+                if held is None:
+                    continue
+                request_id = held.decode(errors="replace")
+                if not _REQUEST_ID.fullmatch(request_id):
+                    self._report(entry, "names no valid request id")
+                    continue
+                # Exclusively created order records are immutable. Cache only valid reads;
+                # a missing or unreadable entry must be tried again on the next scan.
+                self._order_records[entry] = request_id
             places.setdefault(request_id, int(entry))
         return places
 
