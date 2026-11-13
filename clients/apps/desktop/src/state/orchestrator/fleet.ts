@@ -48,34 +48,6 @@ export interface FleetFilter {
 
 export const NO_FLEET_FILTER: FleetFilter = {state: 'all', host: null, query: ''};
 
-/** The columns of the run list a person can sort by. */
-export type FleetColumn = 'name' | 'status' | 'host' | 'best' | 'agents' | 'cost';
-
-/** Every `FleetColumn`, in the order the list draws them. */
-export const FLEET_COLUMNS: readonly FleetColumn[] = [
-  'name',
-  'status',
-  'host',
-  'best',
-  'agents',
-  'cost',
-];
-
-/** How the list is sorted: by one column, ascending or descending. No sort is the list's own order. */
-export interface FleetSort {
-  readonly column: FleetColumn;
-  readonly direction: 'asc' | 'desc';
-}
-
-/**
- * What pressing a column's header does to the sort: sort by it ascending, then descending, then back
- * to the list's own order; pressing another column's header starts that one ascending.
- */
-export function pressedSort(current: FleetSort | null, column: FleetColumn): FleetSort | null {
-  if (current === null || current.column !== column) return {column, direction: 'asc'};
-  return current.direction === 'asc' ? {column, direction: 'desc'} : null;
-}
-
 /** The key of the row of run `runId` on host `hostKey`: unique across hosts, and a route's own parts. */
 export const fleetKey = (hostKey: string, runId: string): string => `${hostKey}/${runId}`;
 

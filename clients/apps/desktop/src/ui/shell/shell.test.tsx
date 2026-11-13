@@ -379,15 +379,6 @@ describe('the window shell', () => {
     screen.press(
       screen.controls('Runs').find(control => !control.classList.contains('vs-crumb')) ?? row(),
     );
-    // The list's headers sort it, and the edge of a column moves with the arrow keys.
-    screen.press(screen.control('Sort by Cost'));
-    const edge = screen.container.querySelector<HTMLElement>('hr.vs-columnlist-grip');
-    if (edge === null) throw new Error('the list has no column edge');
-    const Key = (edge.ownerDocument.defaultView as unknown as {KeyboardEvent: typeof KeyboardEvent})
-      .KeyboardEvent;
-    act(() => {
-      edge.dispatchEvent(new Key('keydown', {key: 'ArrowRight', bubbles: true, cancelable: true}));
-    });
     // The list's own controls: its state filter and, with two hosts, its host filter.
     screen.press(
       screen.container.querySelector<HTMLElement>('input[type="radio"][value="live"]') ?? row(),
@@ -460,10 +451,11 @@ describe('the machines page', () => {
     screen.unmount();
   });
 
-  it('shows an empty list as a table with one quiet row, not as an error', () => {
+  it('shows an empty list as a quiet empty state, not as an error', () => {
     const screen = mount(<MachinesScreen rows={[]} />);
-    const rows = [...screen.container.querySelectorAll('tbody tr')];
-    expect(rows.map(row => row.textContent)).toEqual(['No machines']);
+    expect(screen.text()).toContain('No machines connected');
+    expect(screen.container.querySelector('.vs-card-title')).toBeNull();
+    expect(screen.container.querySelector('[role="alert"]')).toBeNull();
     screen.unmount();
   });
 });

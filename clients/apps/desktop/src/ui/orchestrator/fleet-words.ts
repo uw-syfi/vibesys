@@ -137,7 +137,7 @@ export function runTitle(card: TaskCard | null, task: string): string {
  * and the hardware, `1× MI300X` (what tells runs of one model apart, so it is kept whole).
  * `hardware` is empty when the card names none.
  */
-export function runTitleParts(
+function runTitleParts(
   card: TaskCard | null,
   task: string,
 ): {readonly subject: string; readonly hardware: string} {

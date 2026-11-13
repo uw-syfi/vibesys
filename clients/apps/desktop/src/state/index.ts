@@ -124,12 +124,10 @@ export {
   exploredWorkstreams,
 } from './orchestrator/cost-workstreams.js';
 export {
-  FLEET_COLUMNS,
   FLEET_SEARCH_REGISTRY,
   FLEET_STATES,
   type FleetAbsence,
   type FleetAttention,
-  type FleetColumn,
   type FleetDiscoveryStatus,
   type FleetFilter,
   type FleetHostInput,
@@ -140,7 +138,6 @@ export {
   type FleetRow,
   type FleetSearchEntry,
   type FleetSearchField,
-  type FleetSort,
   type FleetState,
   type FleetUpdate,
   type FleetView,
@@ -154,7 +151,6 @@ export {
   type ManagedFleetRow,
   measuredObjectives,
   NO_FLEET_FILTER,
-  pressedSort,
   rowObjectives,
 } from './orchestrator/fleet.js';
 export {

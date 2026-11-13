@@ -5,13 +5,10 @@
  * any sequence of them.
  */
 import {
-  type FleetColumn,
   type FleetFilter,
-  type FleetSort,
   type FleetState,
   fleetKey,
   NO_FLEET_FILTER,
-  pressedSort,
 } from '../orchestrator/fleet.js';
 import {initialRoute, type Route, type RouteAction, routeReducer} from '../route.js';
 
@@ -27,10 +24,6 @@ export type MachinesPlace =
 export interface FleetPlace extends FleetFilter {
   /** The `fleetKey` of the run last opened from the list, so going back finds the row again. */
   readonly selected: string | null;
-  /** How the list is sorted, or null for its own order (newest first). */
-  readonly sort: FleetSort | null;
-  /** The widths, in px, a person gave columns by dragging their edges, by column key. */
-  readonly widths: Readonly<Record<string, number>>;
   /** Explicit operator receipts by fleet key; absence has never been opened in this app session. */
   readonly receipts: Readonly<Record<string, RunReceipt>>;
 }
@@ -60,10 +53,6 @@ export type NavigationAction =
   | {readonly type: 'filter-runs-by-state'; readonly state: FleetState}
   /** The list's host filter: one host, or null for every host. */
   | {readonly type: 'filter-runs-by-host'; readonly host: string | null}
-  /** A press on a column's header: sorts by it, then the other way, then not at all. */
-  | {readonly type: 'sort-runs'; readonly column: FleetColumn}
-  /** A column's edge dragged: its width in px, or null to put it back to its own. */
-  | {readonly type: 'resize-runs-column'; readonly column: string; readonly width: number | null}
   /** The list's operator query, kept with the other list filters. */
   | {readonly type: 'filter-runs-by-query'; readonly query: string}
   /** Record one exact structured revision as read, without opening it. */
@@ -101,8 +90,6 @@ const KINDS = {
   'open-runs': true,
   'filter-runs-by-state': true,
   'filter-runs-by-host': true,
-  'sort-runs': true,
-  'resize-runs-column': true,
   'filter-runs-by-query': true,
   'mark-run-read': true,
   'mark-run-unread': true,
@@ -120,7 +107,7 @@ export const NAVIGATION_KINDS = Object.keys(KINDS) as readonly NavigationKind[];
 export const initialNavigation: Navigation = {
   destination: 'runs',
   runs: initialRoute,
-  fleet: {...NO_FLEET_FILTER, selected: null, sort: null, widths: {}, receipts: {}},
+  fleet: {...NO_FLEET_FILTER, selected: null, receipts: {}},
   machines: {screen: 'list'},
 };
 
@@ -139,20 +126,6 @@ function stepBack(route: Route): Route {
 /** Whether the run list is what the person is looking at: the only place its filters are. */
 const onList = (navigation: Navigation): boolean =>
   navigation.destination === 'runs' && navigation.runs.screen === 'runs';
-
-/** The list's own arrangement after a press on a header or a drag of a column's edge. */
-function arrange(
-  fleet: FleetPlace,
-  action: Extract<NavigationAction, {type: 'sort-runs' | 'resize-runs-column'}>,
-): FleetPlace {
-  if (action.type === 'sort-runs') return {...fleet, sort: pressedSort(fleet.sort, action.column)};
-  const {[action.column]: _, ...rest} = fleet.widths;
-  const given = action.width;
-  // A width that is no width (not a positive number) puts the column back like null does.
-  return given === null || !Number.isFinite(given) || given <= 0
-    ? {...fleet, widths: rest}
-    : {...fleet, widths: {...rest, [action.column]: Math.round(given)}};
-}
 
 function routeNavigationReducer(navigation: Navigation, action: RouteAction): Navigation {
   switch (action.type) {
@@ -206,8 +179,6 @@ type FleetNavigationAction = Extract<
       | 'filter-runs-by-state'
       | 'filter-runs-by-host'
       | 'filter-runs-by-query'
-      | 'sort-runs'
-      | 'resize-runs-column'
       | 'mark-run-read'
       | 'mark-run-unread';
   }
@@ -222,9 +193,6 @@ function fleetNavigationReducer(navigation: Navigation, action: FleetNavigationA
       return {...navigation, fleet: {...navigation.fleet, host: action.host}};
     case 'filter-runs-by-query':
       return {...navigation, fleet: {...navigation.fleet, query: action.query}};
-    case 'sort-runs':
-    case 'resize-runs-column':
-      return {...navigation, fleet: arrange(navigation.fleet, action)};
     case 'mark-run-read':
       return {
         ...navigation,
@@ -310,8 +278,6 @@ export function navigationReducer(navigation: Navigation, action: NavigationActi
     case 'filter-runs-by-state':
     case 'filter-runs-by-host':
     case 'filter-runs-by-query':
-    case 'sort-runs':
-    case 'resize-runs-column':
     case 'mark-run-read':
     case 'mark-run-unread':
       return fleetNavigationReducer(navigation, action);
