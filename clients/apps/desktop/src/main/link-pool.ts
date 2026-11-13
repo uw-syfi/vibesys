@@ -12,6 +12,8 @@
 import * as Deferred from 'effect/Deferred';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
+import * as Fiber from 'effect/Fiber';
+import * as Option from 'effect/Option';
 import type * as Scope from 'effect/Scope';
 import {LinkFailed} from './errors.js';
 import {ProcessSpawner} from './process.js';
@@ -26,6 +28,20 @@ interface Entry {
   readonly link: SshLink;
   users: number;
 }
+
+/**
+ * How long the pool's own close waits for one host's retirement before giving up on that host and
+ * moving on to resolve. One host's teardown (`ssh-link.ts`'s `retireMaster`/`killMaster`) is a
+ * chain of up to four sequentially-bounded control commands (`-O exit`, then `killMaster`'s `ps`
+ * and `kill -KILL`, and a final `-O check`), each bounded by that file's own `CONTROL_COMMAND_BOUND`
+ * (1 second) by default, and a lease racing to establish around the same moment can itself be
+ * mid-way through that file's `CHECK_BOUND` (5 seconds). Left unbounded here, one host frozen deep
+ * enough to walk that whole chain has its full total charged against the pool's own close, and so
+ * against every other host's teardown and index.ts's `RELEASE_BOUND_MS`. A host that trips this
+ * bound keeps retiring in the background instead of being interrupted: ending its master is still
+ * worth finishing, just not worth the rest of the app's quit waiting on.
+ */
+export const RETIRE_BOUND_MS = 2_000;
 
 /**
  * A pool of links under `controlPath` (a template with ssh's `%C`). Closing the scope it is made
@@ -69,6 +85,20 @@ export const makeLinkPool = (
         }
         if (retiring.get(alias) === done) retiring.delete(alias);
         yield* Deferred.done(done, exit);
+      });
+
+    /**
+     * `retire(alias, entry)`, but given up on in the background past `RETIRE_BOUND_MS` instead of
+     * blocking the pool's own close on it. The retirement itself is forked, not interrupted, so a
+     * host that answers late (or never) still gets its master torn down once it does; only the
+     * pool's own close stops waiting on it, and says which host it gave up on.
+     */
+    const retireBounded = (alias: string, entry: Entry) =>
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkDetach(retire(alias, entry));
+        const joined = yield* Effect.timeoutOption(Fiber.join(fiber), `${RETIRE_BOUND_MS} millis`);
+        if (Option.isNone(joined))
+          log(`gave up waiting for ${alias} to release (still retiring in the background)`);
       });
 
     /** Wait for any earlier release of the host to finish, whether it did or not. */
@@ -129,7 +159,7 @@ export const makeLinkPool = (
       Effect.suspend(() => {
         closed = true;
         return Effect.forEach(
-          [...entries].map(([alias, entry]) => retire(alias, entry)),
+          [...entries].map(([alias, entry]) => retireBounded(alias, entry)),
           effect => effect,
           {concurrency: 'unbounded', discard: true},
         );
