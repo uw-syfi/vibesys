@@ -53,7 +53,7 @@ Quantized and unquantized layers can coexist. The usual split is quantized linea
 
 ## Pitfalls
 
-- **Materializing inside the layer loop.** One `mx.eval` per step, at the end. Not per layer.
+- **Materializing inside the layer loop.** One `mx.eval` per step, at the end. Not per layer. (Exception: a CPU+GPU prefill split may need a boundary per split layer; see [`cpu-gpu-co-execution.md`](cpu-gpu-co-execution.md).)
 - **Python-side EOS comparison.** Forces a sync; fold into the step's evaluation.
 - **Unbounded KV growth.** System memory is shared; a runaway cache causes swapping, not a clean OOM.
 - **Benchmarking without warmup.** First-call compilation lands in TTFT.

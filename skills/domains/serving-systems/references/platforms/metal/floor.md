@@ -40,6 +40,7 @@ Group size 64 is a reasonable default; 32 for quality-sensitive work.
 
 - **Continuous batching** — worthwhile but differently shaped; contract at [`algorithms/continuous-batching.md`](../../algorithms/continuous-batching.md), implementation at [`continuous-batching.md`](continuous-batching.md).
 - **KV cache layout** — [`mlx-serving.md`](mlx-serving.md).
+- **CPU+GPU co-execution for prefill** — splitting prefill matmuls across both units; whether it needs an eager boundary, unlike §2, depends on the OS and MLX version. See [`cpu-gpu-co-execution.md`](cpu-gpu-co-execution.md).
 
 ## What does not apply
 
