@@ -157,7 +157,7 @@ async function checkTheNewRunPageOpensAndCloses(page: Page): Promise<void> {
   await expect(page.getByRole('heading', {level: 1, name: 'New run'})).toBeVisible();
   await expect(page.getByRole('button', {name: /Start from an example/})).toBeVisible();
   await expect(page.getByRole('button', {name: /Bring a repository/})).toBeVisible();
-  await expect(page.getByRole('button', {name: 'Edit in Machines'})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Add machine or server'})).toBeVisible();
   const folder = process.env['VIBESYS_E2E_SHOTS'];
   if (folder !== undefined && folder !== '')
     await page.screenshot({path: join(folder, '1b-start.png')});
