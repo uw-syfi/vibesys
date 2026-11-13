@@ -66,6 +66,7 @@ SKIPPED_PARTS = (
 )  # fmt: skip
 SKIPPED_NAMES = (
     "_test.go", ".test.ts", ".test.tsx", ".spec.ts", ".d.ts", ".golden.json", "playwright.config.ts",
+    "playwright.fixture.config.ts",
 )  # fmt: skip
 
 ENV_NAME = re.compile(
@@ -78,7 +79,11 @@ ENV_READ = re.compile(
     r"""(?:\bos\.(?:Getenv|LookupEnv)|\b[gG]etenv|\b[lL]ookupEnv|\bos\.getenv|\bos\.environ\.get"""
     r"""|\benviron\.get)\(\s*["'`](""" + _VIBESYS_NAME + r""")["'`]"""
     r"""|\bos\.environ\[\s*["'](""" + _VIBESYS_NAME + r""")["']\s*\]"""
-    r"""|\bprocess\.env(?:\.(""" + _VIBESYS_NAME + r""")\b|\[\s*["'](""" + _VIBESYS_NAME + r""")["']\s*\])"""
+    r"""|\bprocess\.env(?:\.("""
+    + _VIBESYS_NAME
+    + r""")\b|\[\s*["']("""
+    + _VIBESYS_NAME
+    + r""")["']\s*\])"""
 )
 """A read of a variable by its literal name, in Go, Python and TypeScript."""
 

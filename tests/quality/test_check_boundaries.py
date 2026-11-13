@@ -94,6 +94,7 @@ def test_tests_docs_generated_code_and_the_python_path_are_not_scanned() -> None
         "gateway/e2e/world.go",
         "clients/apps/desktop/src/a.test.ts",
         "clients/apps/desktop/playwright.config.ts",
+        "clients/apps/desktop/playwright.fixture.config.ts",
         "sdk/vibesys-evaluator/python/tests/test_a.py",
         "docs/contributing/a.md",
         "src/vibesys/a.py",
