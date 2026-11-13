@@ -56,6 +56,14 @@ convenient. Do not mix states within one comparison. Prepare inputs outside the
 timed region, run one or more untimed warm-up repetitions when the evaluator
 does, and say what you did.
 
+## Quick and full measurements
+
+Evaluators often offer a quick tier (a small subset, few repetitions) and a full
+tier. The quick one is a smoke test: use it to see that nothing broke and the effect
+has the right sign. Only the full tier, with every failure and error at zero,
+supports a claim. Full measurements are expensive and may be budgeted, so spend them
+on hypotheses whose ceiling is above the noise floor.
+
 ## How the score aggregates
 
 Find out how the task turns many invocations into one number, because it decides

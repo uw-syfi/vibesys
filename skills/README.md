@@ -27,6 +27,20 @@ Every plugin installs from the one source directory and differs only by the skil
 | `vibesys-kernels-trainium` | `kernel-correctness`, `kernel-performance`, the Neuron NKI pack |
 | `vibesys-cli-tools` | `cli-tool-optimization` |
 
+Inside a Claude Code session (2.1.275 or later) each plugin also installs in one step, with no separate
+`marketplace add`:
+
+```text
+/plugin install vibesys --marketplace uw-syfi/vibesys
+/plugin install vibesys-llm-serving --marketplace uw-syfi/vibesys
+/plugin install vibesys-microservices --marketplace uw-syfi/vibesys
+/plugin install vibesys-database --marketplace uw-syfi/vibesys
+/plugin install vibesys-kernels-cuda --marketplace uw-syfi/vibesys
+/plugin install vibesys-kernels-rocm --marketplace uw-syfi/vibesys
+/plugin install vibesys-kernels-trainium --marketplace uw-syfi/vibesys
+/plugin install vibesys-cli-tools --marketplace uw-syfi/vibesys
+```
+
 Install `vibesys` plus the domain plugin the task needs, chosen by the task's `[agent] domain` and
 `backends` (a Trainium LLM-serving task needs `vibesys-llm-serving` and `vibesys-kernels-trainium`);
 `optimize` stops with the install commands when one is missing. Skill names carry the plugin

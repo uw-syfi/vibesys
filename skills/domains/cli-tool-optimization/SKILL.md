@@ -127,6 +127,7 @@ place. Do not delete the record of a failure when a later change succeeds.
 | Where does the time go? Which tool answers that? | [profiling.md](references/profiling.md) |
 | What must not change? How do I test beyond the benchmark? | [semantic-preservation.md](references/semantic-preservation.md) |
 | Is this change honest? What would a reviewer reject? | [review-checklist.md](references/review-checklist.md) |
+| What does the evaluator already prove, and what must I check myself? How is a task's evaluator proven? | [evaluator-design.md](references/evaluator-design.md) |
 | What does this kind of program usually spend time on? | [workload-archetypes.md](references/workload-archetypes.md) |
 
 ## Limits of this skill

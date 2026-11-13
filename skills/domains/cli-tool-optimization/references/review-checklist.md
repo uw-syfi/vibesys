@@ -29,6 +29,8 @@ explicitly with the evidence; do not wave it through.
   differently when it is.
 - Canned or prerecorded output, or a lookup of results keyed on the benchmark's
   inputs.
+- Behavior that depends on whether output goes to a pipe, a file or a terminal
+  beyond what the original does, such as stopping output after some bytes on a pipe.
 
 **Moving or hiding work**
 

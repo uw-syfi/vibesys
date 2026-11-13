@@ -26,7 +26,9 @@ the real one.
   is a build change even if no source file moved.
 - **Distribution-style builds** apply the packager's flags (often `-O2`, debug
   info, hardening, position-independent code). If the task measures a
-  distribution-style build, optimize that build, not an idealized one.
+  distribution-style build, optimize that build, not an idealized one. The
+  packaging rules, patch series and configure options may be inside the permitted
+  scope; changing them is a build change, with everything that implies here.
 
 ## Clean versus incremental
 
@@ -79,7 +81,9 @@ changes that need no special instructions.
 A new library changes the build, the portability and often the license
 obligations. Before adding one, ask whether an in-tree change gives most of the
 gain, whether the task's scope permits it, and whether the build environment has
-it. Disclose any dependency you add, with the reason and the measured benefit.
+it. A new shared library may also be missing from the environment that runs the
+program, where the program then fails to start; prefer none. Disclose any dependency
+you add, with the reason and the measured benefit.
 Vendoring third-party code carries the same questions plus its license.
 
 ## Build changes can mislead the experiment
