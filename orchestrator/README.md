@@ -737,6 +737,14 @@ needed at run time. Every session, lead and subagent, on either harness, loads t
 `RELEASE/marketplace` and none of the operator's own plugins, skills or configuration. The plugin is
 installed once per agent into `STATE/sessions/AGENT/plugin-home`, which a resume reuses.
 
+Because only the `vibesys` plugin is loaded, a domain plugin such as `vibesys-kernels-cuda` or
+`vibesys-cli-tools` is never installed in a managed session, whatever the task's `[agent] domain` is. The
+`optimize` skill accepts a domain skill that the operator's instructions name by absolute path, so
+name it in the run's `--brief`: the release carries every skill under
+`RELEASE/marketplace/skills/domains/<skill>/SKILL.md`, and a `--skills-directory` checkout carries them
+under `skills/domains/<skill>/SKILL.md`. The lead then points every brief at that file. Without it
+the lead finds no domain skill among its own and stops, as `domain-plugins.md` says.
+
 Each part is chosen, in order, from the host's configuration, then the release, then an error:
 
 | Part | Configuration (used as given, errors included) | Release |
