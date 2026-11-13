@@ -177,7 +177,12 @@ export async function expectAccessibleShell(
 
   const navigation = page.getByRole('navigation', {name: 'Main'});
   await expect(navigation, 'the named primary navigation').toHaveCount(1);
-  for (const name of ['VibeSys', 'Runs', 'Cost', 'Machines', 'Settings']) {
+  // The app's mark leads the rail as a static picture set apart, not a control.
+  await expect(
+    navigation.getByRole('img', {name: 'VibeSys', exact: true}),
+    'VibeSys rail mark',
+  ).toHaveCount(1);
+  for (const name of ['Runs', 'Cost', 'Machines', 'Settings']) {
     await expect(
       navigation.getByRole('button', {name, exact: true}),
       `${name} rail control`,
