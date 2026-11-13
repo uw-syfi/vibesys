@@ -25,6 +25,11 @@
 	url = https://github.com/vibesys-playground/vllm-omni.git
 	branch = vibesys
 	shallow = true
+[submodule "examples/model-serving/repositories/news-signal"]
+	path = examples/model-serving/repositories/news-signal
+	url = https://github.com/Nano-AI/news-signal
+	branch = vibesys-0.1
+	shallow = true
 [submodule "examples/microservices/repositories/deathstarbench"]
 	path = examples/microservices/repositories/deathstarbench
 	url = https://github.com/vibesys-playground/DeathStarBench.git
