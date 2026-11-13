@@ -174,8 +174,10 @@ export function bucketWords(bucketMs: number): string {
 }
 
 /**
- * The CLI provider and model the finished turns reported. The provider always stays visible: two
- * providers may serve the same model id, and an empty model means that provider's own default.
+ * The CLI provider and model a run's finished turns reported, as `<provider> · <id>`. The provider
+ * stays in the visible name so an operator scanning the per-provider cost split sees which provider
+ * served each model without hovering; two providers may serve the same model id. An empty model is
+ * that provider's own default.
  */
 export function modelName(model: CostModel, words: CostWords): string {
   const harness = words.harness(model.harness);

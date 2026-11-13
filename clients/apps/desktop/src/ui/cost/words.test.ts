@@ -142,11 +142,11 @@ describe('which buckets are labelled', () => {
 describe('naming a model', () => {
   const words = {harness: () => 'Codex'};
 
-  it('is the id the host served, and for a harness default the harness and the word default', () => {
+  it('keeps the provider visible before the id the host served, and names a default by its harness', () => {
     const named = {harness: 1, model: 'claude-opus-5-5'};
     const own = {harness: 1, model: ''};
-    expect(modelName(named, words as never)).toBe('claude-opus-5-5');
-    expect(modelName(own, words as never)).toBe('Codex default');
+    expect(modelName(named, words as never)).toBe('Codex · claude-opus-5-5');
+    expect(modelName(own, words as never)).toBe('Codex · default');
   });
 });
 
