@@ -1,6 +1,8 @@
 """What a multi run may spend, stated once from its config and its roles.
 
-A round is one admitted attempt, run serially, so the run admits `max_rounds` attempts. Core
+A round is one admitted attempt, run serially, plus, when the run offers a profiler, the
+profiler's own unretained attempt on the round's base, so the run admits `max_rounds` attempts
+(twice that with profiling). Core
 enforces the numbers; this module is the one place that derives them from what the search does,
 so a change to a role's corrections or to the number of paid turns changes the budget with it.
 """
@@ -30,7 +32,7 @@ def budget(config: MultiConfig) -> RunBudget:
     implementing = (_chain(IMPLEMENTER) + _chain(JUDGE)) * (paid + MAX_SUBMISSIONS_PER_MEASUREMENT)
     per_round = designing + advising + implementing
     return RunBudget(
-        attempts=config.max_rounds,
+        attempts=config.max_rounds * (2 if config.profiling else 1),
         turns=config.max_rounds * per_round,
         parallel=1,
         refunds=config.max_rounds,
