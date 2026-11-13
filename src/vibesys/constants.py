@@ -16,6 +16,7 @@ class DomainName(StrEnum):
     MICROSERVICES = "microservices"
     DATABASE = "database"
     KERNEL_WRITING = "kernel-writing"
+    FPGA_HLS = "fpga-hls"
 
 
 DEFAULT_COMPUTE_BACKEND = ComputeBackend.CUDA

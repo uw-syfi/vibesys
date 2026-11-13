@@ -25,6 +25,7 @@ Every plugin installs from the one source directory and differs only by the skil
 | `vibesys-kernels-cuda` | `kernel-correctness`, `kernel-performance`, `kernel-ncu-analysis`, `kernel-timeline-analysis` |
 | `vibesys-kernels-rocm` | `kernel-correctness`, `kernel-performance`, `kernel-rocprof-analysis` |
 | `vibesys-kernels-trainium` | `kernel-correctness`, `kernel-performance`, the Neuron NKI pack |
+| `vibesys-fpga-hls` | `fpga-hls-workflow`, `fpga-hls-feasibility`, `fpga-llm-operators`, the AMD Vitis HLS pack |
 
 Install `vibesys` plus the domain plugin the task needs, chosen by the task's `[agent] domain` and
 `backends` (a Trainium LLM-serving task needs `vibesys-llm-serving` and `vibesys-kernels-trainium`);
@@ -81,7 +82,7 @@ short section in the harness file.
 
 ## Layout
 
-- `domains/`: domain skills for kernels, LLM serving, microservices, Tokio services and
+- `domains/`: domain skills for kernels, FPGA HLS, LLM serving, microservices, Tokio services and
   Neuron. Both the plugin and VibeSys runs use them: a run reads only this tree, and the
   sidecar in it decides which skills a run installs for its backend and domain
   ([skill metadata](../docs/contributing/skill-metadata.md)).

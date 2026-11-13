@@ -52,6 +52,20 @@ NKI_SKILL_NAMES = {
 }
 
 
+AMD_HLS_WRAPPER_DIR = PROJECT_ROOT / "skills" / "domains" / "amd-hls"
+AMD_HLS_SKILL_NAMES = {
+    "hls-array-to-stream",
+    "hls-burst-inference",
+    "hls-dataflow",
+    "hls-flattenable",
+    "hls-ii-diagnose",
+    "hls-pipeline",
+    "hls-pragma-scope",
+    "hls-synthesizable",
+}
+FPGA_HLS_SKILL_NAMES = {"fpga-hls-workflow", "fpga-hls-feasibility", "fpga-llm-operators"}
+
+
 def _args(
     tmp_path: Path,
     backend: ComputeBackend,
@@ -354,6 +368,9 @@ def test_all_repository_skill_metadata_is_valid() -> None:
     assert metadata["kernel-timeline-analysis"].backends == (ComputeBackend.CUDA,)
     assert metadata["kernel-rocprof-analysis"].domains == (DomainName.KERNEL_WRITING,)
     assert metadata["kernel-rocprof-analysis"].backends == (ComputeBackend.ROCM,)
+    for name in FPGA_HLS_SKILL_NAMES | AMD_HLS_SKILL_NAMES:
+        assert metadata[name].domains == (DomainName.FPGA_HLS,)
+        assert metadata[name].backends is None
     assert set(metadata) >= NKI_SKILL_NAMES
 
 
@@ -385,6 +402,28 @@ def test_kernel_skills_follow_domain_and_backend(tmp_path: Path) -> None:
     assert (shared | analysis).isdisjoint(_skill_names(rocm_serving_skills))
     assert analysis.isdisjoint(_skill_names(trainium_skills))
     assert shared <= _skill_names(trainium_skills)
+
+
+@pytest.mark.parametrize("backend", ComputeBackend)
+def test_fpga_hls_skills_load_only_for_the_fpga_hls_domain(
+    tmp_path: Path, backend: ComputeBackend
+) -> None:
+    fpga = FPGA_HLS_SKILL_NAMES | AMD_HLS_SKILL_NAMES
+    for domain in DomainName:
+        _, skills, _ = load_config_and_skills(_args(tmp_path, backend), domain=domain)
+        names = _skill_names(skills)
+        if domain is DomainName.FPGA_HLS:
+            assert fpga <= names
+            assert {"kernel-correctness", "serving-systems"}.isdisjoint(names)
+        else:
+            assert fpga.isdisjoint(names)
+
+
+def test_all_amd_hls_skills_inherit_fpga_hls_scope_from_wrapper_sidecar() -> None:
+    metadata = {m.skill_dir.name: m for m in validate_skill_tree(AMD_HLS_WRAPPER_DIR)}
+    assert set(metadata) == AMD_HLS_SKILL_NAMES
+    assert all(m.domains == (DomainName.FPGA_HLS,) for m in metadata.values())
+    assert all(m.backends is None for m in metadata.values())
 
 
 def test_all_nki_skills_inherit_trainium_scope_from_wrapper_sidecar() -> None:

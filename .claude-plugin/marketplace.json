@@ -117,6 +117,26 @@
         "./domains/neuron-agentic-development/skills/neuron-nki-profiling",
         "./domains/neuron-agentic-development/skills/neuron-nki-writing"
       ]
+    },
+    {
+      "name": "vibesys-fpga-hls",
+      "source": "./skills",
+      "description": "Domain skills for FPGA accelerators written in Vitis HLS, with the vendored AMD HLS design-guidance pack, for use with the vibesys optimization loop.",
+      "version": "0.1.0",
+      "strict": false,
+      "skills": [
+        "./domains/amd-hls/skills/hls-array-to-stream",
+        "./domains/amd-hls/skills/hls-burst-inference",
+        "./domains/amd-hls/skills/hls-dataflow",
+        "./domains/amd-hls/skills/hls-flattenable",
+        "./domains/amd-hls/skills/hls-ii-diagnose",
+        "./domains/amd-hls/skills/hls-pipeline",
+        "./domains/amd-hls/skills/hls-pragma-scope",
+        "./domains/amd-hls/skills/hls-synthesizable",
+        "./domains/fpga-hls-feasibility",
+        "./domains/fpga-hls-workflow",
+        "./domains/fpga-llm-operators"
+      ]
     }
   ]
 }
