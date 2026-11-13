@@ -1,0 +1,13 @@
+version = 1
+
+[agent]
+domain = "llm-serving"
+
+[accuracy]
+command = ["uv", "run", "--offline", "--no-dev", "python", "${PROJECT_ROOT}/.vibesys/tasks/shared-prefix/accuracy_checker/checker.py"]
+timeout_seconds = 180
+
+[benchmark]
+command = ["uv", "run", "--offline", "--no-dev", "python", "${PROJECT_ROOT}/.vibesys/tasks/shared-prefix/benchmark/benchmark.py"]
+timeout_seconds = 300
+result_protocol = 2
