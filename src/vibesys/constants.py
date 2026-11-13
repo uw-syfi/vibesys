@@ -16,6 +16,7 @@ class DomainName(StrEnum):
     MICROSERVICES = "microservices"
     DATABASE = "database"
     KERNEL_WRITING = "kernel-writing"
+    CLI_TOOLS = "cli-tools"
 
 
 DEFAULT_COMPUTE_BACKEND = ComputeBackend.CUDA

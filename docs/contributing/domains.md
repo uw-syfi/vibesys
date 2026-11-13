@@ -22,6 +22,7 @@ domain = "llm-serving"
 | `microservices` | Microservice workload context: service lifecycle, protocol correctness, and workload-specific evaluator guidance. |
 | `database`    | Database / dataflow engine context: in-place optimization of a vendored engine, judged by output-equivalence against a pristine round-0 copy of the same engine. |
 | `kernel-writing` | Compute-kernel implementation and optimization against a task-owned reference, accuracy checker, and scored benchmark. |
+| `cli-tools` | Optimization of locally built native command-line programs on CPU: preserve the complete observable CLI contract, work through the task's build, correctness and measurement commands, and reject benchmark-specific or moved work. Loads the `cli-tool-optimization` skill on the CPU backend. |
 | `generic`     | Empty: no domain prose injected. The neutral baseline; copy it to start your own. |
 
 ## Anatomy of a domain package

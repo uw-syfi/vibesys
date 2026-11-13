@@ -31,6 +31,10 @@ _ENVIRONMENT_DEFAULTS = (
     *sorted(ACTIVE_PROFILER_KINDS, key=lambda kind: kind.value),
 )
 _PROFILER_VALUES = frozenset(kind.value for kind in ProfilerKind)
+# The domains whose workload runs on the host CPU and so get the host's native CPU profilers.
+# Written out here, not read from the policy under test, so widening the policy fails a test.
+_NATIVE_CPU_DOMAINS = frozenset({DomainName.GENERIC, DomainName.CLI_TOOLS})
+_NATIVE_CPU_KINDS = frozenset({ProfilerKind.MACOS_CPU, ProfilerKind.LINUX_CPU})
 
 
 class _ResolutionInputs(TypedDict):
@@ -242,7 +246,7 @@ def _expected_resolved(
         if requested not in allowed:
             raise ValueError
         return requested
-    if domain is DomainName.GENERIC and requested is ProfilerKind.AUTO:
+    if domain in _NATIVE_CPU_DOMAINS and requested is ProfilerKind.AUTO:
         return _expected_generic_auto(backend)
     if domain is DomainName.MICROSERVICES:
         return ProfilerKind.NONE
@@ -289,6 +293,59 @@ def test_profiler_auto_resolution_exhaustive(
                 resolve_profiler_kind(requested, **kwargs)
         else:
             assert resolve_profiler_kind(requested, **kwargs) is expected, kwargs
+
+
+@pytest.mark.parametrize("backend", tuple(ComputeBackend))
+def test_cli_tools_is_offered_the_native_cpu_profilers_and_no_accelerator_profiler(
+    backend: ComputeBackend,
+) -> None:
+    assert allowed_profiler_kinds(DomainName.CLI_TOOLS, backend) == (
+        {ProfilerKind.NONE} | _NATIVE_CPU_KINDS
+    )
+
+
+def test_only_the_native_cpu_profilers_list_cli_tools() -> None:
+    listing = {
+        kind
+        for kind, definition in PROFILER_DEFINITIONS.items()
+        if DomainName.CLI_TOOLS in definition.domains
+    }
+
+    assert listing == _NATIVE_CPU_KINDS
+
+
+@pytest.mark.parametrize("backend", [b for b in ComputeBackend if b is not ComputeBackend.CPU])
+def test_cli_tools_auto_selects_no_profiler_on_an_accelerator_backend(
+    backend: ComputeBackend,
+) -> None:
+    choice = resolve_profiler_choice(
+        ProfilerKind.AUTO,
+        domain=DomainName.CLI_TOOLS,
+        backend=backend,
+        environment_default_profiler_kind=ProfilerKind.NSYS,
+    )
+
+    assert choice.kind is ProfilerKind.NONE
+    assert choice.reason is not None
+    assert "cli-tools" in choice.reason
+    assert backend.value in choice.reason
+
+
+def test_cli_tools_auto_selects_the_host_cpu_profiler_on_the_cpu_backend() -> None:
+    assert resolve_profiler_kind(
+        ProfilerKind.AUTO,
+        domain=DomainName.CLI_TOOLS,
+        backend=ComputeBackend.CPU,
+        environment_default_profiler_kind=ProfilerKind.NONE,
+    ) is _expected_generic_auto(ComputeBackend.CPU)
+
+
+@pytest.mark.parametrize("domain", [d for d in DomainName if d not in _NATIVE_CPU_DOMAINS])
+def test_domains_outside_the_native_cpu_policy_get_neither_native_profiler(
+    domain: DomainName,
+) -> None:
+    for backend in ComputeBackend:
+        assert _NATIVE_CPU_KINDS.isdisjoint(allowed_profiler_kinds(domain, backend))
 
 
 def test_generic_auto_uses_none_when_host_has_no_native_cpu_profiler(
@@ -386,7 +443,7 @@ def test_profiler_resolution_invariants(
 
     assert resolved is not ProfilerKind.AUTO
     assert resolved in allowed
-    if domain is DomainName.GENERIC and requested is ProfilerKind.AUTO:
+    if domain in _NATIVE_CPU_DOMAINS and requested is ProfilerKind.AUTO:
         system = platform.system()
         if backend is not ComputeBackend.CPU:
             expected = ProfilerKind.NONE

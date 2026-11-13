@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
 from vibesys.domains import (
+    cli_tools,
     database,
     generic,
     kernel_writing,
@@ -22,6 +23,7 @@ DOMAINS: dict[DomainName, DomainDefinition] = {
     microservices.DEFINITION.name: microservices.DEFINITION,
     database.DEFINITION.name: database.DEFINITION,
     kernel_writing.DEFINITION.name: kernel_writing.DEFINITION,
+    cli_tools.DEFINITION.name: cli_tools.DEFINITION,
 }
 
 

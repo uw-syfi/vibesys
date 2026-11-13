@@ -158,6 +158,12 @@ class ProfilerPreflightResult:
         )
 
 
+# The domains whose workload runs on the host CPU, so the host's native profilers see it. No
+# accelerator profiler lists these domains.
+NATIVE_CPU_PROFILER_DOMAINS: frozenset[DomainName] = frozenset(
+    {DomainName.GENERIC, DomainName.CLI_TOOLS}
+)
+
 PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
     definition.kind: definition
     for definition in (
@@ -232,12 +238,12 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
         # only where that shell has the program (the host, or an image that ships it).
         ProfilerDefinition(
             ProfilerKind.MACOS_CPU,
-            frozenset({DomainName.GENERIC}),
+            NATIVE_CPU_PROFILER_DOMAINS,
             tool=ProfilerTool("sample", ProfilerSite.AGENT_SHELL),
         ),
         ProfilerDefinition(
             ProfilerKind.LINUX_CPU,
-            frozenset({DomainName.GENERIC}),
+            NATIVE_CPU_PROFILER_DOMAINS,
             tool=ProfilerTool("perf", ProfilerSite.AGENT_SHELL),
         ),
         # Analyzes a target-captured kernel headroom report (observed vs
@@ -312,12 +318,16 @@ def allowed_profiler_kinds(domain: DomainName, backend: ComputeBackend) -> froze
 
 
 def _resolve_generic_profiler(
+    domain: DomainName,
     allowed: frozenset[ProfilerKind],
     environment_default: ProfilerKind,
     environment_supported: frozenset[ProfilerKind] | None,
     backend: ComputeBackend,
 ) -> ProfilerChoice:
     """Pick a host-native profiler when the backend and the environment fit it.
+
+    The name is the baselined purity-ratchet symbol from when only the generic domain used it;
+    it serves every domain in ``NATIVE_CPU_PROFILER_DOMAINS``.
 
     The native profilers (``perf``, Instruments) see CPU work only, so they fit the CPU
     backend alone: on an accelerator backend the workload that matters runs on the device,
@@ -326,7 +336,7 @@ def _resolve_generic_profiler(
     if backend is not ComputeBackend.CPU:
         return ProfilerChoice(
             ProfilerKind.NONE,
-            f"the generic domain's native CPU profilers do not fit the {backend.value} backend",
+            f"the {domain.value} domain's native CPU profilers do not fit the {backend.value} backend",
         )
     system = platform.system()
     if system == "Darwin":
@@ -347,7 +357,7 @@ def _resolve_generic_profiler(
         )
     supported_values = ", ".join(sorted(kind.value for kind in environment_supported))
     message = (
-        "No profiler supported by both the generic domain and selected run environment; "
+        f"No profiler supported by both the {domain.value} domain and selected run environment; "
         f"environment allows: {supported_values}."
     )
     raise ValueError(message)
@@ -381,7 +391,7 @@ def resolve_profiler_choice(
 ) -> ProfilerChoice:
     """Resolve ``--profiler`` into the effective profiler kind and, for ``auto``, the reason for none.
 
-    ``auto`` is domain-aware. Generic workloads pick a native CPU profiler when
+    ``auto`` is domain-aware. Generic and CLI-tools workloads pick a native CPU profiler when
     the host platform has one; kernel-writing runs pick NCU on CUDA, rocprof
     on ROCm and neuron on Trainium when the run environment supports it; LLM-serving runs use their
     backend profiler unless the run environment dictates another safe default.
@@ -430,9 +440,9 @@ def _resolve_auto_profiler(
     environment_default: ProfilerKind,
     environment_supported: frozenset[ProfilerKind] | None,
 ) -> ProfilerChoice:
-    if domain is DomainName.GENERIC:
+    if domain in NATIVE_CPU_PROFILER_DOMAINS:
         return _resolve_generic_profiler(
-            allowed, environment_default, environment_supported, backend
+            domain, allowed, environment_default, environment_supported, backend
         )
 
     if domain is DomainName.KERNEL_WRITING:
