@@ -220,7 +220,7 @@ Several flags look independent, but they combine into one execution contract:
 | Agent environment | none (always Docker) | Where the agent runs: a local Docker container, for every run. `--docker` was removed and is rejected. |
 | Evaluation environment | `--run-environment`, `--modal`, `--skypilot`, `--slurm-config` | Where evaluation runs: the local container (default), Modal, SkyPilot, or Slurm. These never move the agent out of its local container. |
 | Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `rocprof`, `torch`, `neuron`, `macos_cpu`, `linux_cpu`, or `auto`. |
-| Domain | `[agent].domain` in `vibesys.input.toml` | Problem-space package used by the agent and evolve loops, such as `llm-serving`, `microservices`, or `generic`. |
+| Domain | `[agent].domain` in `vibesys.input.toml` | Problem-space package used by the agent and evolve loops, such as `llm-serving`, `microservices`, `cli-tools`, or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
 | Skills | `--skills-dir`, `--extra-skills`, `--no-skills` | Override the preset skill roots, stack extra skills on top of the presets, or disable skill loading. |
 | Target project | `--project` (`--input` alias) | Candidate repository. Defaults to the current directory. |
@@ -716,6 +716,7 @@ context for the agent and evolve loops. Registered domains include:
 | --- | --- |
 | `llm-serving` | LLM-serving guidance, including serving-system skills and judge gates. |
 | `microservices` | Microservice workload guidance, lifecycle rules, and service-level evaluation context. |
+| `cli-tools` | Native command-line program optimization on CPU: observable-behavior preservation, task-owned build, correctness and measurement commands, and CPU profiling guidance. `auto` selects the host's native CPU profiler; no accelerator profiler applies. |
 | `generic` | No extra domain guidance. Useful for custom/non-LLM targets. |
 
 Each input bundle must declare `[agent].domain`; there is no CLI override for a
@@ -938,7 +939,7 @@ Required flags:
 | Flag | Maps to |
 | --- | --- |
 | `--input-objective TEXT` or `--input-objective-file PATH` | `.vibesys/tasks/default/OBJECTIVE.md` |
-| `--input-domain {llm-serving,generic,microservices}` | `[agent].domain` |
+| `--input-domain {llm-serving,generic,microservices,database,kernel-writing,cli-tools}` | `[agent].domain` |
 | `--input-accuracy-command CMD` | `[accuracy].command` (shell-quoted argv) |
 | `--input-benchmark-command CMD` | `[benchmark].command` (shell-quoted argv) |
 

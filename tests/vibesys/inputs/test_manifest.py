@@ -13,6 +13,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.support.task_project import task_path, write_task
 
+from vibesys.constants import DomainName
 from vibesys.inputs import (
     BenchmarkResult,
     EvaluatorInput,
@@ -488,3 +489,26 @@ def test_profile_workload_is_a_strict_trusted_command_roundtrip(
         InputManifest.model_validate(
             {**manifest.model_dump(), "profile": {**profile, "untrusted_workload": "ignored"}}
         )
+
+
+@pytest.mark.parametrize("domain", list(DomainName), ids=lambda domain: domain.value)
+def test_every_registered_domain_round_trips_through_the_manifest(domain: DomainName) -> None:
+    manifest = InputManifest.model_validate(_manifest({"agent": {"domain": domain.value}}))
+
+    assert manifest.agent.domain is domain
+    assert f'domain = "{domain.value}"' in render_input_manifest(manifest)
+    assert InputManifest.model_validate(tomllib.loads(render_input_manifest(manifest))) == manifest
+
+
+def test_the_cli_tools_domain_is_declared_by_its_hyphenated_name() -> None:
+    manifest = InputManifest.model_validate(_manifest({"agent": {"domain": "cli-tools"}}))
+
+    assert manifest.agent.domain is DomainName.CLI_TOOLS
+
+
+@pytest.mark.parametrize(
+    "spelling", ["cli_tools", "CLI-TOOLS", "cli-tool", "clitools", "cli-tools "]
+)
+def test_a_domain_that_is_not_registered_is_rejected_naming_the_field(spelling: str) -> None:
+    with pytest.raises(ValidationError, match=r"agent\.domain"):
+        InputManifest.model_validate(_manifest({"agent": {"domain": spelling}}))

@@ -36,3 +36,8 @@ domains = ["database"]
 [[rule]]
 path = "custom-rpc-optimization"
 domains = ["microservices"]
+
+[[rule]]
+path = "cli-tool-optimization"
+backends = ["cpu"]
+domains = ["cli-tools"]

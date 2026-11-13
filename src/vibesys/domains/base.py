@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from vibesys.constants import DomainName
 
 
@@ -26,6 +25,14 @@ class DomainRole(StrEnum):
 # domain prompt directory and the ``domain_sections[<role>]`` slot of that role's
 # prompts (`core_protocol/domain_section.j2`).
 DOMAIN_ROLES: tuple[DomainRole, ...] = tuple(DomainRole)
+
+
+def prompt_dir_beside(package_init: str) -> Path:
+    """Return the ``prompts`` directory of the domain package whose ``__init__.py`` is given.
+
+    A domain package passes its own ``__file__``, so it needs no path logic of its own.
+    """
+    return Path(package_init).resolve().parent / "prompts"
 
 
 @dataclass(frozen=True)

@@ -58,6 +58,18 @@ DOMAIN_LEAK_CHECKS = (
             "modal_profile",
         ),
     ),
+    DomainLeakCheck(
+        source_domain=DomainName.CLI_TOOLS,
+        target_domains=(DomainName.GENERIC,),
+        keywords=(
+            "command-line program",
+            "exit status",
+            "dynamic linking",
+            "timed region",
+            "argument vectors",
+            "cli-tool-optimization",
+        ),
+    ),
 )
 
 _NEUTRAL_CONTEXT: dict[str, object] = {

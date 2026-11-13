@@ -58,6 +58,7 @@ def test_registered_domains_present() -> None:
     assert "microservices" in names
     assert "database" in names
     assert "kernel-writing" in names
+    assert "cli-tools" in names
     assert "README" not in names  # the authoring guide is not a domain
 
 
@@ -99,6 +100,51 @@ def test_kernel_writing_domain_renders_roles_and_derives_single_agent() -> None:
     assert single_agent == f"{implementer}\n\n{judge}"
 
 
+def test_resolve_cli_tools_domain() -> None:
+    d = resolve_domain(DomainName.CLI_TOOLS)
+    assert d.name is DomainName.CLI_TOOLS
+    assert d.prompt_dir.is_dir()
+    assert d.prompt_dir.name == "prompts"
+    assert d.prompt_dir.parent.name == "cli_tools"
+
+
+@pytest.mark.parametrize("role", [r for r in DOMAIN_ROLES if r is not DomainRole.SINGLE_AGENT])
+def test_cli_tools_domain_has_a_non_empty_section_for_every_role(role: DomainRole) -> None:
+    domain = resolve_domain(DomainName.CLI_TOOLS)
+
+    assert (domain.prompt_dir / f"{role.value}.md").is_file()
+    assert render_domain_section(domain, role).strip()
+
+
+def test_cli_tools_domain_derives_single_agent_and_names_no_local_path() -> None:
+    domain = resolve_domain(DomainName.CLI_TOOLS)
+    implementer = render_domain_section(domain, DomainRole.IMPLEMENTER)
+    judge = render_domain_section(domain, DomainRole.JUDGE)
+
+    assert render_domain_section(domain, DomainRole.SINGLE_AGENT) == f"{implementer}\n\n{judge}"
+    for path in sorted(domain.prompt_dir.glob("*.md")):
+        text = path.read_text(encoding="utf-8").casefold()
+        for local_path in ("/home/", "/users/"):
+            assert local_path not in text, f"{path.name} names {local_path!r}"
+
+
+def test_cli_tools_sections_do_not_depend_on_the_run_context() -> None:
+    """The role files are plain prose: any run context renders the same section."""
+    domain = resolve_domain(DomainName.CLI_TOOLS)
+    for role in DOMAIN_ROLES:
+        bare = render_domain_section(domain, role)
+        full = render_domain_section(
+            domain,
+            role,
+            benchmark_command="./bench",
+            accuracy_command="./check",
+            runtime_notes="notes",
+            profile_execution="remote",
+            interface="service",
+        )
+        assert bare == full
+
+
 def test_resolve_path_is_not_supported(tmp_path: Path) -> None:
     f = tmp_path / "mine"
     f.mkdir()
@@ -115,6 +161,7 @@ def test_domains_declare_torch_profiler_compatibility() -> None:
     assert not DOMAINS[DomainName.MICROSERVICES].supports_torch_profiler
     assert not DOMAINS[DomainName.DATABASE].supports_torch_profiler
     assert not DOMAINS[DomainName.KERNEL_WRITING].supports_torch_profiler
+    assert not DOMAINS[DomainName.CLI_TOOLS].supports_torch_profiler
 
 
 def test_resolve_unknown_raises() -> None:
