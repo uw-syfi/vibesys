@@ -3,6 +3,7 @@
  * in-run idea by workstream; this selector counts those served groups and says whether the host has
  * proved that the count is whole. It never infers a workstream from an agent or a turn.
  */
+import {oneofIs} from '@vibesys/orchestrator-proto';
 import type {OrchestratorState} from './state.js';
 
 /** A host's named run-workstreams: one workstream with an idea in one run counts once. */
@@ -33,7 +34,10 @@ export function exploredWorkstreams(
   let searchesComplete = true;
   for (const runId of runIds) {
     const search = state.searches[runId];
-    if (search === undefined || search.health?.state.case !== 'liveSince') {
+    if (
+      search === undefined ||
+      !oneofIs(search.health?.state, 'liveSince', {liveSince: true, unreadable: true})
+    ) {
       searchesComplete = false;
       continue;
     }

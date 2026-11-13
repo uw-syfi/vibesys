@@ -20,7 +20,8 @@
       "!**/dist",
       "!libs/display-names/src/generated",
       "!libs/proto/src/generated",
-      "!libs/orchestrator-proto/src/generated"
+      "!libs/orchestrator-proto/src/generated",
+      "!apps/desktop/src/state/new-run/generated"
     ]
   },
   "css": {

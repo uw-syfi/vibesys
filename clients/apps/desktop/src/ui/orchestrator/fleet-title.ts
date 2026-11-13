@@ -7,9 +7,7 @@ import {setupTitle} from './setup/index.js';
  * What a row is called, in the two halves its cell draws (the model or workload gives way, the
  * hardware stays): its task's title, or, in setup with no task, the state and the repository.
  */
-export const rowTitleParts = (
-  row: FleetRow,
-): {readonly subject: string; readonly hardware: string} =>
+const rowTitleParts = (row: FleetRow): {readonly subject: string; readonly hardware: string} =>
   row.source === 'generic'
     ? {subject: genericRunTitle(row), hardware: ''}
     : row.setup

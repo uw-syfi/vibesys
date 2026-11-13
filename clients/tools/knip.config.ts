@@ -34,6 +34,10 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
       'src/**/*.test.tsx',
       // The journey the desktop path test (`gateway/e2e`) runs against the built app.
       'e2e/observe-run.ts',
+      // The app-window contact-sheet capture suite and the static server it starts by name
+      // (`playwright.fixture.config.ts`), which knip cannot see through the string command.
+      'e2e/fixture/*.spec.ts',
+      'e2e/fixture/serve-dist.mjs',
     ],
     project: [
       'src/**/*.ts',

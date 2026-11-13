@@ -27,6 +27,7 @@ import type {
 } from '../generic-run-index.js';
 import type {HostStatus} from '../host-status.js';
 import {inSetup} from '../setup/setup.js';
+import {messageIs} from './messages.js';
 import {type ObjectiveReport, objectiveReports} from './report/objectives.js';
 import type {OrchestratorState} from './state.js';
 import {ms} from './time.js';
@@ -410,7 +411,7 @@ function updateOf(
       atMs: latest.atMs,
     };
   }
-  const report = summary?.report?.body.case === 'report' ? summary.report.body.value : undefined;
+  const report = messageIs(summary?.report, 'report') ? summary.report.body.value : undefined;
   return report === undefined
     ? {kind: 'none'}
     : {
@@ -429,7 +430,7 @@ function searchEntries(
   description: string,
 ): readonly FleetSearchEntry[] {
   const card = run.taskCard;
-  const report = summary?.report?.body.case === 'report' ? summary.report.body.value : undefined;
+  const report = messageIs(summary?.report, 'report') ? summary.report.body.value : undefined;
   const entries: FleetSearchEntry[] = [
     {field: 'title', value: run.task},
     {field: 'title', value: card?.heading ?? ''},
@@ -474,8 +475,9 @@ function rowOf(
   const live = isLive(run.status);
   const description = descriptionOf(run.taskCard);
   const update = updateOf(run, summary, search);
-  const reportSequence =
-    summary?.report?.body.case === 'report' ? summary.report.body.value.sequence : 0;
+  const reportSequence = messageIs(summary?.report, 'report')
+    ? summary.report.body.value.sequence
+    : 0;
   return {
     source: 'managed',
     key: fleetKey(host.key, run.id),

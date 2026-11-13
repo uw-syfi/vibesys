@@ -3,7 +3,7 @@
  * asks for the snapshot of detail SUMMARY, so the host lists every run and sends no mailbox with it; a
  * run's history is read when a screen of the run opens (`run-history.ts`).
  */
-import {SnapshotDetail} from '@vibesys/orchestrator-proto';
+import {oneofIs, SnapshotDetail} from '@vibesys/orchestrator-proto';
 import * as Effect from 'effect/Effect';
 import * as Queue from 'effect/Queue';
 import type * as AsyncResult from 'effect/reactivity/AsyncResult';
@@ -50,12 +50,15 @@ const IDLE_REFRESH: RunsRefreshState = {_tag: 'Idle'};
 const REFRESHING: RunsRefreshState = {_tag: 'Refreshing'};
 const FAILED_REFRESH: RunsRefreshState = {_tag: 'Failed'};
 
+/** Every kind the runs stream's frame body may carry; each oneof read declares them all. */
+const RUNS_BODY_KINDS = {snapshot: true, search: true, summary: true, change: true} as const;
+
 const isRunsSnapshot = (frame: HostFrame): boolean =>
-  frame.from === 'runs' && frame.body.case === 'snapshot';
+  frame.from === 'runs' && oneofIs(frame.body, 'snapshot', RUNS_BODY_KINDS);
 
 /** A requested snapshot replaces even a host that restarted below the sequence already shown. */
 const applyRunsFrame = (model: HostModel, frame: HostFrame, replacing: boolean): HostModel =>
-  replacing && frame.from === 'runs' && frame.body.case === 'snapshot'
+  replacing && frame.from === 'runs' && oneofIs(frame.body, 'snapshot', RUNS_BODY_KINDS)
     ? {...model, data: replaceSnapshot(model.data, frame.body.value)}
     : applyHostFrame(model, frame);
 
@@ -91,7 +94,7 @@ export const makeRunsView = Effect.fn('RunsView.make')(function* (parts: HostPar
     yield* connection.leftTerminal;
   });
   const refreshSucceeded = Effect.fn('RunsView.refreshSucceeded')(function* (frame: HostFrame) {
-    if (frame.from !== 'runs' || frame.body.case !== 'snapshot') {
+    if (frame.from !== 'runs' || !oneofIs(frame.body, 'snapshot', RUNS_BODY_KINDS)) {
       return yield* Effect.die(new Error('a runs refresh completed without a snapshot'));
     }
     yield* SubscriptionRef.set(refreshState, {

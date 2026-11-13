@@ -9,7 +9,7 @@ export interface FixtureScreen {
 }
 
 /** Long names and enough live and ended runs to exercise the app-window layout. */
-export const FIXTURE_PATH =
+const FIXTURE_PATH =
   '/fixture.html?scenario=11-12-live-tree-3&fleet=30-10&long&host=local&host=ssh%3Ahost-a';
 
 async function openRail(page: Page, name: string): Promise<void> {
