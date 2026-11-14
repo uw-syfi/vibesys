@@ -45,17 +45,25 @@ class InputError extends Error {}
 // must resolve symlinks. Located by content, never by directory name.
 const TOOLKIT_FILES = ['trace_parser.js', 'trace_analysis.js', 'decode.js', 'diagnose_setup.js'];
 
-// This extractor ships as first-party tooling inside the dial9-tokio skill
-// bundle, one level up from the vendored toolkit, so it resolves its sibling
-// toolkit by default and needs no --toolkit/DIAL9_TOOLKIT when run in place:
-//   dial9-tokio/ranker/extract/  (here)  ->  dial9-tokio/skills/dial9-toolkit/scripts/
-const BUNDLED_TOOLKIT = path.join(__dirname, '..', '..', 'skills', 'dial9-toolkit', 'scripts');
+// This extractor ships inside the dial9-rank-bottlenecks skill, so it is
+// copied wherever that skill is installed. It resolves the dial9-toolkit skill
+// beside it by default and needs no --toolkit/DIAL9_TOOLKIT, in both layouts a
+// skill can be read from:
+//   in the bundle:  dial9-tokio/dial9-rank-bottlenecks/scripts/extract/ (here)
+//                   -> dial9-tokio/skills/dial9-toolkit/scripts/
+//   installed flat: <skills>/dial9-rank-bottlenecks/scripts/extract/ (here)
+//                   -> <skills>/dial9-toolkit/scripts/
+const SKILLS_ROOT = path.join(__dirname, '..', '..', '..');
+const BUNDLED_TOOLKITS = [
+  path.join(SKILLS_ROOT, 'skills', 'dial9-toolkit', 'scripts'),
+  path.join(SKILLS_ROOT, 'dial9-toolkit', 'scripts'),
+];
 
 function findToolkit(explicit) {
   const candidates = [];
   if (explicit) candidates.push(path.resolve(explicit));
   if (process.env.DIAL9_TOOLKIT) candidates.push(path.resolve(process.env.DIAL9_TOOLKIT));
-  candidates.push(BUNDLED_TOOLKIT);
+  candidates.push(...BUNDLED_TOOLKITS);
   candidates.push(path.join(__dirname, 'toolkit'));
   const searched = [];
   for (const dir of candidates) {

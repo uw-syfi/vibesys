@@ -20,8 +20,8 @@ ranking only says where the time goes.
 
 It is the front door to this bundle. Run the ranker to get a verdict, read the
 verdict with the rules below, then hand off to the vendored `dial9-*` skills to
-root-cause a specific finding. The ranker and those skills are siblings here, in
-`skills/domains/dial9-tokio/`.
+root-cause a specific finding. The ranker is this skill's own
+`scripts/analyze_dial9.py`, in the directory that holds this `SKILL.md`.
 
 ## 1. Produce the ranking
 
@@ -29,16 +29,17 @@ One command. The ranker parses the trace, claims on-CPU nanoseconds to the
 innermost covering span per task, and writes profile result protocol v1:
 
 ```
-python3 skills/domains/dial9-tokio/ranker/analyze_dial9.py \
+python3 <this skill's directory>/scripts/analyze_dial9.py \
     --traces <trace-dir-or-file> \
     --window <workload-driver.json> \
     --vs-output <out.json>
 ```
 
-It finds the vendored toolkit automatically; `--toolkit` / `DIAL9_TOOLKIT` only
-override it. `--window` is the workload driver's JSON carrying the steady-state
-window, so startup and ramp never enter the ranking; omit it only to rank the
-whole trace, which the summary then flags as "startup and ramp included".
+It finds the toolkit of the `dial9-toolkit` skill, installed beside this one,
+automatically; `--toolkit` / `DIAL9_TOOLKIT` only override it. `--window` is the
+workload driver's JSON carrying the steady-state window, so startup and ramp
+never enter the ranking; omit it only to rank the whole trace, which the summary
+then flags as "startup and ramp included".
 
 The exit code is the contract: **0** means a ranking was written; **2** means a
 setup or tool error and NO verdict (see section 4). A degraded ranking is never

@@ -1,7 +1,7 @@
 """Tests for the reusable dial9 trace ranker's policy path.
 
-``skills/domains/dial9-tokio/ranker/`` is first-party tooling shipped inside
-the dial9-tokio skill bundle: it ranks any Tokio runtime's dial9 trace into
+``skills/domains/dial9-tokio/dial9-rank-bottlenecks/scripts/`` is first-party
+tooling shipped inside the dial9-rank-bottlenecks skill: it ranks any Tokio runtime's dial9 trace into
 profile result protocol v1, independent of any example. The heavy parts
 (building and running an engine, parsing a real trace with the Node toolkit) are
 not exercised here. Instead a captured, trimmed extractor report
@@ -40,7 +40,15 @@ _FRAME_BEGIN = "__VIBESYS_ATTRIBUTION_BEGIN__"
 _FRAME_END = "__VIBESYS_ATTRIBUTION_END__"
 
 _REPO = Path(__file__).resolve().parents[2]
-_ANALYZE_PY = _REPO / "skills" / "domains" / "dial9-tokio" / "ranker" / "analyze_dial9.py"
+_ANALYZE_PY = (
+    _REPO
+    / "skills"
+    / "domains"
+    / "dial9-tokio"
+    / "dial9-rank-bottlenecks"
+    / "scripts"
+    / "analyze_dial9.py"
+)
 _FIXTURE = Path(__file__).with_name("fixtures") / "dial9_extractor_report.json"
 
 
