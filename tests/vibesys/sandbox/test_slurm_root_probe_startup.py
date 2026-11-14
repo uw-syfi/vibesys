@@ -9,8 +9,11 @@ run failed after the 1800 s queue deadline.
 from __future__ import annotations
 
 import hashlib
+import sys
 from dataclasses import replace
 from typing import TYPE_CHECKING
+
+import pytest
 
 from vibesys.run.environment import open_run_environment
 from vs_runtime.api.infrastructure import (
@@ -219,6 +222,15 @@ def test_an_agent_gpu_command_waits_for_a_queued_probe_and_never_reaches_srun(
     assert not [argv for argv in started if "srun" in " ".join(argv)], started
 
 
+# The Fake cluster runs the production Slurm job script with the host's bash, and that script
+# reaps its process group through Linux's `setsid` and `/proc`, so a probe job can succeed only
+# there (CI is Linux); on macOS it exits 127 and the probe is never proven.
+_LINUX_JOB_SCRIPT = pytest.mark.skipif(
+    sys.platform != "linux", reason="the Slurm job script needs Linux setsid and /proc"
+)
+
+
+@_LINUX_JOB_SCRIPT
 def test_a_new_root_session_of_the_run_starts_a_new_probe_once_the_last_one_closed(
     tmp_path: Path,
 ) -> None:
