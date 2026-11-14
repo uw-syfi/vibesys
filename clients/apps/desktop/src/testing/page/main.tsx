@@ -371,31 +371,38 @@ function genericDetail(base: Recording): Recording {
   }
 }
 const GENERIC_RUN = 'generic-run';
+/** The generic run is the first host's: on a page with several hosts it is one run, not one on each. */
+const onFirstHost = (generic: Recording, base: Recording): Recording => ({
+  respond: (target, nth) => (target.host === shown[0]?.key ? generic : base).respond(target, nth),
+});
 const recording = query.has('generic')
-  ? genericDetail(
-      servingRuns(() => [
-        runEntryFrame(GENERIC_RUN, {
-          liveness: RunLiveness.ALIVE,
-          projectRoot: '/projects/serve',
-          head: {
-            strategy: 'natural-language',
-            lifecycle: {state: {case: 'running', value: {}}},
-            objective: {
-              series: {
-                name: 'throughput',
-                unit: 'items/s',
-                direction: Direction.MAX,
-                role: SeriesRole.OBJECTIVE,
+  ? onFirstHost(
+      genericDetail(
+        servingRuns(() => [
+          runEntryFrame(GENERIC_RUN, {
+            liveness: RunLiveness.ALIVE,
+            projectRoot: '/projects/serve',
+            head: {
+              strategy: 'natural-language',
+              lifecycle: {state: {case: 'running', value: {}}},
+              objective: {
+                series: {
+                  name: 'throughput',
+                  unit: 'items/s',
+                  direction: Direction.MAX,
+                  role: SeriesRole.OBJECTIVE,
+                },
+                bestValue: 512,
               },
-              bestValue: 512,
+              usage: {costUsd: 4.25},
+              needsUser: true,
             },
-            usage: {costUsd: 4.25},
-            needsUser: true,
-          },
-        }),
-        runsSyncedFrame,
-        {hang: true},
-      ])(selectedRecording),
+          }),
+          runsSyncedFrame,
+          {hang: true},
+        ])(selectedRecording),
+      ),
+      selectedRecording,
     )
   : selectedRecording;
 const fake = makeFakeTransport(recording);
