@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vibesys.orchestration.skill_selection import resolve_agent_resource_paths
@@ -89,3 +89,34 @@ def test_absolute_link_citation_advertises_canonical_copied_resource(tmp_path: P
     assert resolve_agent_resource_paths("skills/domains/demo/absolute.md", [skill]) == (
         ".agents/skills/demo/references/note.md"
     )
+
+
+# A path part that is neither hidden from agents nor the installed skill's own name.
+_PATH_PART = st.from_regex(r"[a-z][a-z0-9_-]{0,12}", fullmatch=True).filter(
+    lambda part: part not in {"repos", "nested-skill"}
+)
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(
+    st.lists(_PATH_PART, min_size=0, max_size=2),
+    st.lists(_PATH_PART, min_size=1, max_size=3),
+)
+# The reported citation: a vendored pack's skill, `<pack>/skills/<skill>/SKILL.md`.
+@example(wrappers=["dial9-tokio", "skills"], parts=["SKILL"])
+def test_nested_skill_citations_resolve_to_the_installed_skill(
+    wrappers: list[str], parts: list[str]
+) -> None:
+    """A skill below a pack wrapper is cited by its checkout path and installed by its name."""
+    with TemporaryDirectory() as scratch:
+        skill = Path(scratch, "domains", *wrappers, "nested-skill")
+        resource = Path(*parts).with_suffix(".md")
+        (skill / resource).parent.mkdir(parents=True)
+        (skill / resource).write_text("Reference.")
+        checkout = Path(*wrappers, "nested-skill", resource).as_posix()
+        citation = f"skills/domains/{checkout}"
+
+        resolved = resolve_agent_resource_paths(f"Read `{citation}`.", [skill])
+
+        assert resolved == f"Read `.agents/skills/nested-skill/{resource.as_posix()}`."
