@@ -224,18 +224,18 @@ kind = "local"
 """
 
 
-def _docker_script(spec: ProcessSpec) -> ProcessScript:
-    """A Docker client over one container of the run: it lists it, and every other command is ok."""
-    if spec.argv[:2] == ("docker", "ps"):
-        return ProcessScript(stdout=b"c0ffee\n")
-    if spec.argv[:2] == ("docker", "exec"):
-        return ProcessScript(stdout=b"0\n")
-    return ProcessScript()
+def _docker_world(*, listed: bytes = b"c0ffee\n") -> tuple[FakeProcesses, EnvironmentSystem]:
+    """A Docker client over the run's *listed* containers; every command but ``ps`` is ok."""
 
+    def script(spec: ProcessSpec) -> ProcessScript:
+        if spec.argv[:2] == ("docker", "ps"):
+            return ProcessScript(stdout=listed)
+        if spec.argv[:2] == ("docker", "exec"):
+            return ProcessScript(stdout=b"0\n")
+        return ProcessScript()
 
-def _docker_world() -> tuple[FakeProcesses, EnvironmentSystem]:
     clock = ManualClock()
-    processes = FakeProcesses(script=_docker_script, pass_time=clock.advance)
+    processes = FakeProcesses(script=script, pass_time=clock.advance)
     return processes, replace(idle_environment_system(), processes=processes)
 
 
@@ -285,8 +285,12 @@ def test_a_container_environment_sweeps_the_containers_of_its_run_for_the_step(
 @pytest.mark.parametrize("name", ["docker", "skypilot", "modal", "slurm"])
 def test_every_container_environment_answers_the_run_wide_reap(name: str, tmp_path: Path) -> None:
     """Regression: SkyPilot inherited a Docker reap that read Docker settings its config lacks."""
-    processes, system = _docker_world()
+    # The run lists no container. Ending the agents of a listed one goes through agentshim's
+    # own host executor, not this fake client, so a listed container would run the host's
+    # `docker` (and fail where it has none); vs-agent's orphan tests cover that path with a
+    # Fake confinement. This test is about the client each environment lists with.
+    processes, system = _docker_world(listed=b"")
 
     _container_environments(tmp_path)[name].reap_orphans(RUN, system=system, log=lambda _line: None)
 
-    assert processes.ran[0].argv[:2] == ("docker", "ps")
+    assert [spec.argv[:2] for spec in processes.ran] == [("docker", "ps")]
