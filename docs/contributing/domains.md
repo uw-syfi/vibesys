@@ -119,7 +119,22 @@ Example (inside `judge.md`):
 5. Optionally add `orchestrator.md` and `profiler.md` when the neutral planning
    or profiling skeleton needs domain-specific examples or capture commands.
 6. Export a `DEFINITION` from the domain package's `__init__.py`, with
-   `prompt_dir=Path(__file__).resolve().parent / "prompts"`. If the domain
+   `name` set to the domain's `DomainName` member and `prompt_dir` set by
+   `prompt_dir_beside(__file__)`:
+
+   ```python
+   from vibesys.constants import DomainName
+   from vibesys.domains.base import DomainDefinition, prompt_dir_beside
+
+   DEFINITION = DomainDefinition(
+       name=DomainName.MY_DOMAIN,
+       prompt_dir=prompt_dir_beside(__file__),
+   )
+   ```
+
+   The helper keeps `pathlib` out of the domain package: the purity check
+   refuses a new module that imports it, so do not copy the `pathlib` form that
+   the older domain packages, including `generic`, still use. If the domain
    needs setup/teardown behavior such as mounts or copy exclusions, implement
    `EnvironmentHooks` in that package and attach it to the definition.
 7. Register the definition in `vibesys.domains.registry.DOMAINS`.
