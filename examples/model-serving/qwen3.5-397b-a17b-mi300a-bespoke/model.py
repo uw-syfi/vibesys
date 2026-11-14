@@ -385,6 +385,21 @@ class Model:
             logits = self.forward(torch.tensor([[tok]]), pos)
             pos += 1
 
+    @torch.no_grad()
+    def score(self, ids: list[int], continuation_start: int) -> torch.Tensor:
+        """Teacher-forced fp32 logits [len(ids) - continuation_start, vocab]: row j predicts
+        ids[continuation_start + j]. Chunked prefill like `generate`; only chunks that reach
+        the scored positions project every token to vocab size."""
+        self.reset()
+        rows = []
+        for s in range(0, len(ids) - 1, PREFILL_CHUNK):
+            chunk = ids[s : min(s + PREFILL_CHUNK, len(ids) - 1)]
+            wanted = s + len(chunk) > continuation_start - 1
+            logits = self.forward(torch.tensor([chunk]), s, all_logits=wanted)
+            if wanted:
+                rows.append(logits[max(continuation_start - 1 - s, 0) :])
+        return torch.cat(rows)
+
     @staticmethod
     def sample(logits: torch.Tensor, temperature: float) -> int:
         if temperature <= 0:
