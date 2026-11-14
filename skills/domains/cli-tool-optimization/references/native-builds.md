@@ -18,7 +18,9 @@ the real one.
   headers and Makefiles. Re-running `configure` can change the build in ways
   unrelated to your edit. Generated sources (`Makefile.in`, parsers, lookup
   tables) may not rebuild when their inputs change; know which are checked in and
-  which are generated.
+  which are generated. Editing an autotools input (`configure.ac`, `Makefile.am`)
+  makes the build regenerate files with whatever autotools versions are installed;
+  a version mismatch fails the build or silently changes it.
 - **Plain make and CMake**: check that header dependencies are tracked, or an
   edited header will not rebuild its users.
 - **Cargo**: profiles (`opt-level`, `lto`, `codegen-units`, `panic`, debug
@@ -49,9 +51,10 @@ experiment:
 
 - **Optimization level and inlining** can change speed and, where the program
   has undefined behavior, its output. Re-run correctness after any change.
-- **Semantics-changing flags** (fast-math style float relaxations, removing
-  strict-aliasing or overflow protections) can alter results. Do not use them
-  unless the objective allows it.
+- **Semantics-changing flags** can alter results: fast-math style float
+  relaxations, or dropping flags the code relies on, such as
+  `-fno-strict-aliasing` or `-fwrapv`. Do not change them unless the objective
+  allows it.
 - **Link-time optimization (LTO)** can help across translation units. It lengthens
   builds, and its benefit depends on the toolchain version.
 - **Profile-guided optimization (PGO)** trains the compiler on a workload. A
@@ -82,7 +85,8 @@ A new library changes the build, the portability and often the license
 obligations. Before adding one, ask whether an in-tree change gives most of the
 gain, whether the task's scope permits it, and whether the build environment has
 it. A new shared library may also be missing from the environment that runs the
-program, where the program then fails to start; prefer none. Disclose any dependency
+program, where the program then fails to start; prefer none. So may a symbol
+version or loader feature newer than the runtime that runs the program. Disclose any dependency
 you add, with the reason and the measured benefit.
 Vendoring third-party code carries the same questions plus its license.
 

@@ -103,10 +103,11 @@ inform.
 
 ## Plan
 
-A planner gets ONLY this, in a fresh context. No idea, no area.
+A planner gets ONLY this, in a fresh context. No idea, no area. It still gets the task's domain
+skills, chosen as for the common header, because they carry how to bound and plan in that domain.
 
 ```
 Task: <task>      Nudge: <optional, one short phrase, or none>
 CLI context: <as above, with --agent planner>
-Load vibesys:plan-hypotheses and vibesys:state. Create only your own plan.
+Load vibesys:plan-hypotheses, vibesys:state and <domain skills>. Create only your own plan.
 ```
