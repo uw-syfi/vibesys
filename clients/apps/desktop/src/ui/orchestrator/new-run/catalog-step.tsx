@@ -342,7 +342,7 @@ export function CatalogStep(props: {
                 ? 'Browsing offline · connect a machine to start'
                 : host.catalogue.failure === null
                   ? ''
-                  : 'Machine catalogue unreadable · showing offline examples'}
+                  : `Machine catalogue unreadable: ${host.catalogue.failure} · showing offline examples`}
             </Text>
           </Row>
           <Stale stale={props.stale}>

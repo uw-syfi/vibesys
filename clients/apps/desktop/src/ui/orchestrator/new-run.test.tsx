@@ -414,7 +414,7 @@ describe('the catalog step', () => {
     screen.unmount();
   });
 
-  it('shows the fix for a classified catalogue problem instead of the card grid', () => {
+  it('shows the fix for a classified catalogue problem above the examples, which stay browseable offline', () => {
     const problem = fixtureCatalogueProblemResponse(
       CatalogueProblemReason.NO_RELEASE,
       'no release found next to this host',
@@ -425,7 +425,7 @@ describe('the catalog step', () => {
     expect(text).toContain('no release found next to this host');
     expect(text).toContain('install.sh');
     expect(text).toContain('vibesys-client host status');
-    expect(screen.container.querySelectorAll('.vs-pick-card')).toHaveLength(0);
+    expect(screen.container.querySelectorAll('.vs-pick-card').length).toBeGreaterThan(0);
     screen.unmount();
   });
 
