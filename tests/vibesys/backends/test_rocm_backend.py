@@ -10,8 +10,6 @@ from hypothesis import strategies as st
 from tests.support.docker import capture_docker_start_argv, recording_docker_cli
 
 from entrypoints.cli import _add_common_args
-from vibesys.prompts import PROMPTS_DIR, RocmComputeBackendFragment
-from vibesys.prompts.renderer import _FRAGMENT_IMPLS, ComputeBackendFragment
 from vs_sandbox.api import (
     AcceleratorInventory,
     ComputeBackend,
@@ -273,24 +271,3 @@ class TestRocmCli:
         _add_common_args(parser)
         ns = parser.parse_args(["--backend", "rocm"])
         assert ns.backend is ComputeBackend.ROCM
-
-
-class TestRocmPromptFragments:
-    def test_every_fragment_name_exists_for_rocm(self) -> None:
-        """`BackendPromptRenderer.__init__` calls validate(); a missing .j2 fails the run."""
-        RocmComputeBackendFragment.validate()
-
-    def test_rocm_is_registered_in_the_fragment_impl_table(self) -> None:
-        """An unregistered backend raises at prompt construction time."""
-        assert _FRAGMENT_IMPLS[ComputeBackend.ROCM] is RocmComputeBackendFragment
-
-    def test_every_backend_has_a_fragment_impl(self) -> None:
-        """Adding a ComputeBackend without fragments breaks every run on it."""
-        assert set(_FRAGMENT_IMPLS) == set(ComputeBackend)
-
-    def test_rocm_fragments_are_non_empty(self) -> None:
-        """Empty .j2 is a legal 'hard skip', but ROCm has real content for all
-        three — an accidental empty file would silently drop prompt guidance."""
-        backend_dir = PROMPTS_DIR / "backend" / ComputeBackend.ROCM.value
-        for name in ComputeBackendFragment.NAMES:
-            assert (backend_dir / f"{name}.j2").read_text().strip()

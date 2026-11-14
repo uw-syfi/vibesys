@@ -10,7 +10,6 @@
 {"path": "libs/vs-project/tests/test_git_tracker_guards.py", "rule": "patch", "count": 1}
 {"path": "libs/vs-project/tests/test_state_guards.py", "rule": "patch", "count": 2}
 {"path": "libs/vs-prompts/tests/test_contract.py", "rule": "private_import", "count": 1}
-{"path": "libs/vs-prompts/tests/test_fragments.py", "rule": "private_import", "count": 2}
 {"path": "libs/vs-prompts/tests/test_renderer.py", "rule": "private_import", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_device_nodes.py", "rule": "patch", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_device_nodes.py", "rule": "private_import", "count": 2}
