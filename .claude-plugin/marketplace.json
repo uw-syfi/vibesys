@@ -9,7 +9,7 @@
       "name": "vibesys",
       "source": "./skills",
       "description": "Resumable, measurement-driven optimization loop with parallel hypotheses, measurements and independent judging; the domain skills are in the vibesys-llm-serving, vibesys-database, vibesys-microservices, vibesys-cli-tools and vibesys-kernels-<backend> plugins.",
-      "version": "0.12.1",
+      "version": "0.12.2",
       "strict": false,
       "skills": [
         "./search/allocations",

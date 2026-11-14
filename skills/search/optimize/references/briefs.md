@@ -36,9 +36,12 @@ Rules:
   is not a handoff; never end a turn without one.
 ```
 
-Domain skills: pick from the plugin's skill list those whose description fits the task's
-`[agent] domain` and `backends` in `vibesys.input.toml`. Give their full names, which carry the
-plugin name (`vibesys-kernels-cuda:kernel-performance`).
+Domain skills: the skills [domain-plugins.md](domain-plugins.md) found for the task's
+`[agent] domain` and `backends` in `vibesys.input.toml`, named the way you found each. A skill
+your harness offers goes by the name it offers it under (`vibesys-kernels-cuda:kernel-performance`,
+or the bare `kernel-performance` where the harness has no plugin prefix). A skill the user or the
+operator's instructions named by its directory goes by the absolute path of its `SKILL.md`, never
+by a plugin name: no such plugin is installed.
 
 ## Implement
 
