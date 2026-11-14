@@ -36,16 +36,29 @@ def resolve_agent_resource_paths(
     unavailable or escaping citations raise ValueError naming the source path.
     Other objective text, including operator constraints, is preserved.
     """
-    sources = {source.name: source.resolve() for source in skill_sources}
+    # Installed skills by name, last writer winning as materialization does.
+    installed = {source.name: source for source in skill_sources}
 
     def resolve(match: re.Match[str]) -> str:
         citation = match.group().rstrip(".")
         relative = Path(citation).relative_to("skills/domains")
-        source = sources.get(relative.parts[0])
-        resource = Path(*relative.parts[1:])
-        if source is None:
+        # A skill below a pack wrapper (`<pack>/skills/<skill>/...`) is cited by its whole
+        # checkout path but installed by its name, so match the longest leading part of the
+        # citation that ends an installed skill's path.
+        depth, skill = next(
+            (
+                (depth, candidate)
+                for depth in range(len(relative.parts), 0, -1)
+                if (candidate := installed.get(relative.parts[depth - 1])) is not None
+                and candidate.parts[-depth:] == relative.parts[:depth]
+            ),
+            (1, None),
+        )
+        if skill is None:
             message = f"{citation}: skill is not installed"
             raise ValueError(message)
+        source = skill.resolve()
+        resource = Path(*relative.parts[depth:])
         if ".." in relative.parts or any(
             part in {".git", "repos", "__pycache__"} for part in resource.parts
         ):
@@ -72,7 +85,7 @@ def resolve_agent_resource_paths(
             raise ValueError(message)
         # Canonical source-relative paths survive copying even when the citation
         # traverses an absolute link whose original target is outside confinement.
-        agent_path = (Path(".agents/skills") / relative.parts[0] / resolved_resource).as_posix()
+        agent_path = (Path(".agents/skills") / skill.name / resolved_resource).as_posix()
         return agent_path + match.group()[len(citation) :]
 
     return _SOURCE_SKILL_CITATION.sub(resolve, document)
