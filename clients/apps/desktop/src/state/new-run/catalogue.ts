@@ -23,6 +23,8 @@ const DOMAIN_ORDER: readonly TaskDomain[] = [
   TaskDomain.DATA_STRUCTURES,
   TaskDomain.DATABASES,
   TaskDomain.MICROSERVICES,
+  TaskDomain.CLI_TOOLS,
+  TaskDomain.KERNEL_WRITING,
   TaskDomain.UNSPECIFIED,
 ];
 

@@ -8,20 +8,19 @@ import {
 } from '@vibesys/orchestrator-proto';
 import {type PlaceWord, type ProvisionProgress, readable} from '../../../state/index.js';
 
-export const domainWord = (domain: TaskDomain): string => {
-  switch (domain) {
-    case TaskDomain.LLM_SERVING:
-      return 'Model serving';
-    case TaskDomain.DATA_STRUCTURES:
-      return 'Data structures';
-    case TaskDomain.DATABASES:
-      return 'Databases';
-    case TaskDomain.MICROSERVICES:
-      return 'Microservices';
-    default:
-      return 'Other';
-  }
+const DOMAIN_WORDS: Readonly<Record<TaskDomain, string>> = {
+  [TaskDomain.UNSPECIFIED]: 'Other',
+  [TaskDomain.LLM_SERVING]: 'Model serving',
+  [TaskDomain.DATA_STRUCTURES]: 'Data structures',
+  [TaskDomain.DATABASES]: 'Databases',
+  [TaskDomain.MICROSERVICES]: 'Microservices',
+  [TaskDomain.CLI_TOOLS]: 'Command-line tools',
+  [TaskDomain.KERNEL_WRITING]: 'Kernels',
 };
+
+/** A domain's name; one a newer host sends and this client does not know is `Other`. */
+export const domainWord = (domain: TaskDomain): string =>
+  DOMAIN_WORDS[domain] ?? DOMAIN_WORDS[TaskDomain.UNSPECIFIED];
 
 const MODEL_WORDS: Readonly<Record<AcceleratorModel, string>> = {
   [AcceleratorModel.UNSPECIFIED]: '',

@@ -38,6 +38,8 @@ const domainArb = fc.constantFrom(
   TaskDomain.DATA_STRUCTURES,
   TaskDomain.DATABASES,
   TaskDomain.MICROSERVICES,
+  TaskDomain.CLI_TOOLS,
+  TaskDomain.KERNEL_WRITING,
   99 as TaskDomain,
 );
 
@@ -116,6 +118,22 @@ describe('the catalogue grouped by domain', () => {
         }
       }),
     );
+  });
+
+  it('lists every domain the contract defines under its own name, never with the unnamed', () => {
+    const defined = Object.values(TaskDomain).filter(
+      (domain): domain is TaskDomain =>
+        typeof domain === 'number' && domain !== TaskDomain.UNSPECIFIED,
+    );
+    expect(defined).toContain(TaskDomain.CLI_TOOLS);
+    expect(defined).toContain(TaskDomain.KERNEL_WRITING);
+    const entries = defined.map(domain =>
+      create(CatalogueEntrySchema, {
+        example: `examples/${domain}`,
+        card: create(TaskCardSchema, {task: 'default', domain}),
+      }),
+    );
+    expect(groupByDomain(entries).map(group => group.domain)).toEqual(defined);
   });
 
   it('lists a domain the client does not know last, with those the host left unnamed', () => {

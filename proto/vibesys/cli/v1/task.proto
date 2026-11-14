@@ -134,6 +134,8 @@ enum TaskDomain {
   TASK_DOMAIN_DATA_STRUCTURES = 2;
   TASK_DOMAIN_DATABASES = 3;
   TASK_DOMAIN_MICROSERVICES = 4;
+  TASK_DOMAIN_CLI_TOOLS = 5;
+  TASK_DOMAIN_KERNEL_WRITING = 6;
 }
 
 // ModelMaker is who made a served model; OTHER is a maker with no entry yet.

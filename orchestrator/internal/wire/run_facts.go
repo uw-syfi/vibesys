@@ -25,6 +25,8 @@ var (
 		core.DomainDataStructures: cliv1.TaskDomain_TASK_DOMAIN_DATA_STRUCTURES,
 		core.DomainDatabases:      cliv1.TaskDomain_TASK_DOMAIN_DATABASES,
 		core.DomainMicroservices:  cliv1.TaskDomain_TASK_DOMAIN_MICROSERVICES,
+		core.DomainCLITools:       cliv1.TaskDomain_TASK_DOMAIN_CLI_TOOLS,
+		core.DomainKernelWriting:  cliv1.TaskDomain_TASK_DOMAIN_KERNEL_WRITING,
 	})
 	modelMakers = newEnum(map[core.ModelMaker]cliv1.ModelMaker{
 		"":                 cliv1.ModelMaker_MODEL_MAKER_UNSPECIFIED,

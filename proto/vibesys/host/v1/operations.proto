@@ -112,6 +112,8 @@ enum ExampleDomain {
   EXAMPLE_DOMAIN_DATA_STRUCTURES = 2 [(vibesys.host.v1.adapter_spelling) = "data-structures"];
   EXAMPLE_DOMAIN_DATABASES = 3 [(vibesys.host.v1.adapter_spelling) = "databases"];
   EXAMPLE_DOMAIN_MICROSERVICES = 4 [(vibesys.host.v1.adapter_spelling) = "microservices"];
+  EXAMPLE_DOMAIN_CLI_TOOLS = 5 [(vibesys.host.v1.adapter_spelling) = "cli-tools"];
+  EXAMPLE_DOMAIN_KERNEL_WRITING = 6 [(vibesys.host.v1.adapter_spelling) = "kernel-writing"];
 }
 
 message ExampleHardware {

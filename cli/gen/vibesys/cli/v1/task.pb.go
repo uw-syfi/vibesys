@@ -34,6 +34,8 @@ const (
 	TaskDomain_TASK_DOMAIN_DATA_STRUCTURES TaskDomain = 2
 	TaskDomain_TASK_DOMAIN_DATABASES       TaskDomain = 3
 	TaskDomain_TASK_DOMAIN_MICROSERVICES   TaskDomain = 4
+	TaskDomain_TASK_DOMAIN_CLI_TOOLS       TaskDomain = 5
+	TaskDomain_TASK_DOMAIN_KERNEL_WRITING  TaskDomain = 6
 )
 
 // Enum value maps for TaskDomain.
@@ -44,6 +46,8 @@ var (
 		2: "TASK_DOMAIN_DATA_STRUCTURES",
 		3: "TASK_DOMAIN_DATABASES",
 		4: "TASK_DOMAIN_MICROSERVICES",
+		5: "TASK_DOMAIN_CLI_TOOLS",
+		6: "TASK_DOMAIN_KERNEL_WRITING",
 	}
 	TaskDomain_value = map[string]int32{
 		"TASK_DOMAIN_UNSPECIFIED":     0,
@@ -51,6 +55,8 @@ var (
 		"TASK_DOMAIN_DATA_STRUCTURES": 2,
 		"TASK_DOMAIN_DATABASES":       3,
 		"TASK_DOMAIN_MICROSERVICES":   4,
+		"TASK_DOMAIN_CLI_TOOLS":       5,
+		"TASK_DOMAIN_KERNEL_WRITING":  6,
 	}
 )
 
@@ -1807,14 +1813,16 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\x0f_relative_noise\"N\n" +
 	"\n" +
 	"TaskPareto\x12@\n" +
-	"\x0erelative_noise\x18\x01 \x01(\x01B\x19\xbaH\x16\x12\x14@\x01\x11\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00R\rrelativeNoise*\xa1\x01\n" +
+	"\x0erelative_noise\x18\x01 \x01(\x01B\x19\xbaH\x16\x12\x14@\x01\x11\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00R\rrelativeNoise*\xdc\x01\n" +
 	"\n" +
 	"TaskDomain\x12\x1b\n" +
 	"\x17TASK_DOMAIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17TASK_DOMAIN_LLM_SERVING\x10\x01\x12\x1f\n" +
 	"\x1bTASK_DOMAIN_DATA_STRUCTURES\x10\x02\x12\x19\n" +
 	"\x15TASK_DOMAIN_DATABASES\x10\x03\x12\x1d\n" +
-	"\x19TASK_DOMAIN_MICROSERVICES\x10\x04*\xe4\x01\n" +
+	"\x19TASK_DOMAIN_MICROSERVICES\x10\x04\x12\x19\n" +
+	"\x15TASK_DOMAIN_CLI_TOOLS\x10\x05\x12\x1e\n" +
+	"\x1aTASK_DOMAIN_KERNEL_WRITING\x10\x06*\xe4\x01\n" +
 	"\n" +
 	"ModelMaker\x12\x1b\n" +
 	"\x17MODEL_MAKER_UNSPECIFIED\x10\x00\x12\x14\n" +

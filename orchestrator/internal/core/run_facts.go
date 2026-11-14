@@ -28,6 +28,8 @@ const (
 	DomainDataStructures TaskDomain = "data_structures"
 	DomainDatabases      TaskDomain = "databases"
 	DomainMicroservices  TaskDomain = "microservices"
+	DomainCLITools       TaskDomain = "cli_tools"
+	DomainKernelWriting  TaskDomain = "kernel_writing"
 )
 
 // ModelMaker is who made a served model. The empty value is none.
