@@ -32,6 +32,7 @@ import {
   type FleetRemoteSearch,
   type FleetRow,
   type FleetState,
+  fleetOverview,
   fleetView,
   type NavigationAction,
   type ObjectiveReport,
@@ -41,6 +42,7 @@ import {
 import {useDisplayClock} from '../display-clock.js';
 import type {DisplayClock} from '../display-time.js';
 import {hostStatusWord} from '../host-status-words.js';
+import {FleetOverviewBar} from './fleet-overview.js';
 import {
   ago,
   attentionWords,
@@ -693,6 +695,7 @@ export function FleetScreen(props: FleetScreenProps): JSX.Element {
   );
   const view = fleetView(props.hosts, filter, remote);
   const rows = [...view.live, ...view.history, ...view.unknown];
+  const overview = fleetOverview(rows);
   const objectivesOf = rowObjectives(props.hosts);
   const open = (row: FleetRow): void =>
     go({
@@ -766,6 +769,7 @@ export function FleetScreen(props: FleetScreenProps): JSX.Element {
               refresh={props.refreshHost}
             />
           </Row>
+          <FleetOverviewBar overview={overview} />
           {rows.length === 0 ? (
             <EmptyState title={empty.title} body={empty.body} align="start" />
           ) : (

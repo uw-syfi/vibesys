@@ -288,6 +288,65 @@ export interface FleetView {
   readonly absence: FleetAbsence;
 }
 
+/** A one-line reading of the runs a person is looking at: how many run, how many want a look, the live load. */
+export interface FleetOverview {
+  /** How many runs the reading is over: the rows shown. */
+  readonly shown: number;
+  /** Runs still working. */
+  readonly live: number;
+  /** Runs that are over. */
+  readonly ended: number;
+  /**
+   * Live runs with a fact that wants the operator — a stall, stuck jobs, a limit, kept checkouts — or
+   * an unreadable report. A run that has merely posted its final report is not counted here.
+   */
+  readonly attention: number;
+  /** Agents working across the live runs, when any host reported a count; null when none did. */
+  readonly agentsWorking: number | null;
+  /** Summed cost of the live runs that reported one; null when none did. */
+  readonly liveCostUsd: number | null;
+}
+
+/** The attention facts that want the operator's look, as opposed to a run that has merely finished its report. */
+const ATTENTION_WARN_KINDS: ReadonlySet<FleetAttention['kind']> = new Set([
+  'stalled',
+  'troubles',
+  'limit',
+  'kept',
+]);
+
+/** Whether a live run shows a fact that wants the operator's look, as opposed to a mere final report. */
+function wantsOperatorLook(row: FleetRow): boolean {
+  return row.attention.some(fact => ATTENTION_WARN_KINDS.has(fact.kind)) || row.reportUnavailable;
+}
+
+/** Add a run's reading to a running total that stays null until some live run reports one. */
+function addReading(total: number | null, reading: number | null): number | null {
+  return reading === null ? total : (total ?? 0) + reading;
+}
+
+/**
+ * Read a fleet overview from the rows shown. A plain fold like the rest of this module: it reads no
+ * clock and derives nothing the host did not serve. A figure summed over the live runs is null, not
+ * zero, when no live run reported it, so an absent reading is never shown as a real zero.
+ */
+export function fleetOverview(rows: readonly FleetRow[]): FleetOverview {
+  let live = 0;
+  let ended = 0;
+  let attention = 0;
+  let agentsWorking: number | null = null;
+  let liveCostUsd: number | null = null;
+  for (const row of rows) {
+    if (row.section === 'history') ended += 1;
+    if (!row.live) continue;
+    live += 1;
+    if (wantsOperatorLook(row)) attention += 1;
+    agentsWorking = addReading(agentsWorking, row.agentsRunning);
+    liveCostUsd = addReading(liveCostUsd, row.costUsd);
+  }
+  return {shown: rows.length, live, ended, attention, agentsWorking, liveCostUsd};
+}
+
 export type FleetAbsence =
   | {readonly kind: 'complete'}
   | {readonly kind: 'opening'}
