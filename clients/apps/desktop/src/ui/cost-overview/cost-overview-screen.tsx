@@ -3,13 +3,9 @@ import {
   Button,
   Card,
   Chip,
-  CountedFact,
-  FactLine,
-  KeyValue,
+  type Figure,
+  FigureStrip,
   MainSide,
-  MetricTile,
-  MetricTiles,
-  MutedFact,
   Page,
   pageState,
   Row,
@@ -35,15 +31,7 @@ import {
   type RunSortKey,
   type SpendRange,
 } from '../../state/index.js';
-import {
-  AgentTypeTable,
-  type CostCell,
-  FLOOR,
-  FLOOR_HINT,
-  floored,
-  formatAxisUsd,
-  NOT_REPORTED,
-} from '../cost/index.js';
+import {AgentTypeTable, type CostCell, FLOOR, formatAxisUsd, NOT_REPORTED} from '../cost/index.js';
 import {HostStatusChip} from '../host-status-chip.js';
 import {
   type BudgetCell,
@@ -53,9 +41,7 @@ import {
   type ModelLine,
   NO_VIEW,
   type RunLine,
-  type TotalFigures,
   totalFigures,
-  UNPRICED_FACT_HINT,
 } from './cost-overview-model.js';
 
 /** The words of the run's own vocabulary this screen needs beside the cost words. */
@@ -497,6 +483,12 @@ const figure = (value: string | null, floor: boolean): string =>
 const countFigure = (value: string, served: number, total: number): string =>
   served === 0 ? NOT_REPORTED : `${served < total ? FLOOR : ''}${value}`;
 
+/** How many machines a figure covers, short enough for a figure's quiet line. */
+const covers = (served: number, total: number): string =>
+  served === total
+    ? `${total} ${total === 1 ? 'machine' : 'machines'}`
+    : `${served} of ${total} machines`;
+
 const coverage = (served: number, total: number): string =>
   served === total
     ? total === 1
@@ -504,157 +496,102 @@ const coverage = (served: number, total: number): string =>
       : `${total} machines reporting`
     : `${served} of ${total} machines reporting`;
 
-/** The eight operator figures requested by the Cost destination, with absences kept explicit. */
-function OperatorSummary(props: {readonly figures: ReturnType<typeof totalFigures>}): JSX.Element {
-  const {figures} = props;
-  const allCoverage = coverage(figures.servedHosts, figures.hostCount);
-  const dayCoverage = coverage(figures.lastDayHosts, figures.hostCount);
-  const perWorkstream = figures.costPerWorkstream;
-  return (
-    <MetricTiles label="Cost summary" count={8} dense>
-      <MetricTile
-        name="Total spend"
-        figure={figure(figures.figure, figures.floor)}
-        {...(figures.floor ? {note: 'at least'} : {})}
-        {...(figures.figure === null ? {tone: 'muted' as const} : {})}
-        detail={allCoverage}
-        hint="Priced finished turns across the cost views each machine served"
-      />
-      <MetricTile
-        name="Last hour"
-        figure={figure(figures.lastHour, figures.lastHourFloor)}
-        {...(figures.lastHourFloor ? {note: 'partial'} : {})}
-        {...(figures.lastHour === null ? {tone: 'muted' as const} : {})}
-        detail="Priced spend from finished turns in the last hour"
-      />
-      <MetricTile
-        name="Last 24 hours"
-        figure={figure(figures.lastDay, figures.lastDayFloor)}
-        {...(figures.lastDayFloor ? {note: 'at least'} : {})}
-        {...(figures.lastDay === null ? {tone: 'muted' as const} : {})}
-        detail={dayCoverage}
-        hint="An exact 24-hour view fixed when this Cost page opened"
-      />
-      <MetricTile
-        name="Runs"
-        figure={countFigure(figures.runs.count, figures.servedHosts, figures.hostCount)}
-        {...(figures.servedHosts === 0 ? {tone: 'muted' as const} : {})}
-        detail={allCoverage}
-      />
-      <MetricTile
-        name="Turns"
-        figure={countFigure(figures.turns.count, figures.servedHosts, figures.hostCount)}
-        {...(figures.servedHosts === 0 ? {tone: 'muted' as const} : {})}
-        detail="Finished turns"
-      />
-      <MetricTile
-        name="Unpriced turns"
-        figure={countFigure(figures.unpriced?.count ?? '0', figures.servedHosts, figures.hostCount)}
-        {...(figures.servedHosts === 0 ? {tone: 'muted' as const} : {})}
-        detail="Tokens reported without a price"
-      />
-      <MetricTile
-        name="Workstreams explored"
-        figure={figure(figures.workstreams, figures.workstreamsFloor)}
-        {...(figures.workstreamsFloor ? {note: 'at least'} : {})}
-        {...(figures.workstreams === null ? {tone: 'muted' as const} : {})}
-        detail={coverage(figures.workstreamHosts, figures.hostCount)}
-        hint="Named workstreams with at least one idea, counted once per run from complete search views"
-      />
-      <MetricTile
-        name="Cost per workstream"
-        figure={perWorkstream.kind === 'average' ? perWorkstream.figure : NOT_REPORTED}
-        {...(perWorkstream.kind === 'unavailable' ? {tone: 'muted' as const} : {})}
-        detail={
-          perWorkstream.kind === 'average'
-            ? 'Total priced spend ÷ explored workstreams'
-            : perWorkstream.reason
-        }
-        hint="Operator-wide average only; individual turns are not attributed to a workstream"
-      />
-    </MetricTiles>
-  );
+type Figures = ReturnType<typeof totalFigures>;
+
+/** What the total's quiet line says: the unpriced turns behind a floor, else who reported, else why not. */
+function totalDetail(figures: Figures): string {
+  const unpriced =
+    figures.unpriced === null || figures.unpriced.count === '0'
+      ? ''
+      : `${figures.unpriced.count} ${figures.unpriced.what}`;
+  if (figures.figure !== null)
+    return figures.floor && unpriced !== ''
+      ? unpriced
+      : covers(figures.servedHosts, figures.hostCount);
+  if (!figures.complete) return 'Reading cost';
+  return figures.unpriced === null ? 'Nothing spent yet' : 'Spend unknown';
 }
 
-/** The controls the current authoritative contracts can and cannot enforce. */
-function CostControls(): JSX.Element {
-  return (
-    <Card section="Cost controls and attribution">
-      <KeyValue
-        items={[
-          {
-            key: 'Run cost limits',
-            value:
-              'Enforced by each machine. Select a run below, then choose Adjust to review or change its cost limit.',
-          },
-          {
-            key: 'Provider limits',
-            value:
-              'Not available yet. Machines attribute provider cost after turns finish and expose no provider-specific cost quota.',
-          },
-          {
-            key: 'Provider and model',
-            value:
-              'The rows below use what finished turns actually reported, never a model merely allowed for a run.',
-          },
-          {
-            key: 'Workstreams',
-            value:
-              'Complete search views provide the explored count. The headline is an operator-wide average, not turn attribution.',
-          },
-        ]}
-      />
-    </Card>
-  );
+/** A figure nobody reported reads as a muted dash and never a zero. */
+const reported = (is: boolean): {readonly tone?: 'muted'} => (is ? {} : {tone: 'muted'});
+
+function perWorkstreamFigure(figures: Figures): Figure {
+  const average = figures.costPerWorkstream;
+  return {
+    label: 'Per workstream',
+    value: average.kind === 'average' ? average.figure : NOT_REPORTED,
+    detail: average.kind === 'average' ? 'Spend ÷ workstreams' : 'Not available',
+    hint:
+      average.kind === 'average'
+        ? 'Total priced spend ÷ explored workstreams. An operator-wide average only; individual turns are not attributed to a workstream'
+        : average.reason,
+    ...reported(average.kind === 'average'),
+  };
+}
+
+function summaryFigures(figures: Figures): readonly Figure[] {
+  const unpriced =
+    figures.unpriced === null || figures.unpriced.count === '0'
+      ? ''
+      : `; ${figures.unpriced.count} ${figures.unpriced.what}`;
+  return [
+    {
+      label: 'Total spend',
+      value: figure(figures.figure, figures.floor),
+      detail: totalDetail(figures),
+      hint: `Priced finished turns across the cost views each machine served; ${coverage(figures.servedHosts, figures.hostCount)}${unpriced}`,
+      ...reported(figures.figure !== null),
+    },
+    {
+      label: 'Last hour',
+      value: figure(figures.lastHour, figures.lastHourFloor),
+      detail: figures.lastHourFloor ? 'Partial' : 'Priced turns',
+      hint: 'Priced spend from finished turns in the last hour',
+      ...reported(figures.lastHour !== null),
+    },
+    {
+      label: 'Last 24 hours',
+      value: figure(figures.lastDay, figures.lastDayFloor),
+      detail: covers(figures.lastDayHosts, figures.hostCount),
+      hint: 'An exact 24-hour view fixed when this Cost page opened',
+      ...reported(figures.lastDay !== null),
+    },
+    {
+      label: 'Runs',
+      value: countFigure(figures.runs.count, figures.servedHosts, figures.hostCount),
+      detail: `${figures.turns.count} finished turns`,
+      ...reported(figures.servedHosts > 0),
+    },
+    {
+      label: 'Workstreams',
+      value: figure(figures.workstreams, figures.workstreamsFloor),
+      detail: covers(figures.workstreamHosts, figures.hostCount),
+      hint: 'Workstreams explored: named workstreams with at least one idea, counted once per run from complete search views',
+      ...reported(figures.workstreams !== null),
+    },
+    perWorkstreamFigure(figures),
+  ];
 }
 
 /**
- * The page's facts in one line, led by the host's status when there is one host: what has been
- * spent (a floor while turns are unpriced), the last hour's spend when a host served it, the runs and
- * turns counted, and in the quiet voice the turns left without a price, with what that means on hover.
+ * The operator's figures in one band: what has been spent and when, the runs and turns behind it,
+ * and what a workstream cost. A figure no machine reported reads as a muted dash and never a zero, a
+ * floor says `at least` beside its value, and what a figure covers (how many machines reported) is
+ * its quiet line. When the per-workstream average cannot be worked out, the reason is said under the
+ * band in words, not left to a hover.
  */
-function Facts(props: {
-  readonly totals: TotalFigures;
-  readonly status: HostStatus | undefined;
-}): JSX.Element {
-  const {totals} = props;
-  const marked = (figure: string, floor: boolean): string => (floor ? floored(figure) : figure);
+function OperatorSummary(props: {readonly figures: Figures}): JSX.Element {
+  const {figures} = props;
+  const average = figures.costPerWorkstream;
   return (
-    <FactLine spaced>
-      {props.status === undefined ? null : <HostStatusChip status={props.status} />}
-      {totals.figure === null ? (
-        <MutedFact
-          text={
-            !totals.complete
-              ? 'reading cost'
-              : totals.unpriced === null
-                ? 'nothing spent yet'
-                : 'spend unknown'
-          }
-        />
-      ) : (
-        <CountedFact
-          figure={marked(totals.figure, totals.floor)}
-          words="spent"
-          {...(totals.floor ? {hint: FLOOR_HINT} : {})}
-        />
+    <Stack gap="space-2">
+      <FigureStrip label="Cost summary" figures={summaryFigures(figures)} />
+      {average.kind === 'average' ? null : (
+        <Text variant="small" tone="muted">
+          {average.reason}
+        </Text>
       )}
-      {totals.lastHour === null ? null : (
-        <CountedFact
-          figure={marked(totals.lastHour, totals.lastHourFloor)}
-          words="in the last hour"
-          {...(totals.lastHourFloor ? {hint: FLOOR_HINT} : {})}
-        />
-      )}
-      <CountedFact figure={totals.runs.count} words={totals.runs.what} />
-      <CountedFact figure={totals.turns.count} words={totals.turns.what} />
-      {totals.unpriced === null ? null : (
-        <MutedFact
-          text={`${totals.unpriced.count} ${totals.unpriced.what}`}
-          hint={UNPRICED_FACT_HINT}
-        />
-      )}
-    </FactLine>
+    </Stack>
   );
 }
 
@@ -697,22 +634,10 @@ export function CostOverviewScreen(props: {
           ),
       )}
       title="Cost"
-      meta={
-        hosts.length === 0 ? undefined : (
-          <Facts
-            totals={totalFigures(served, hosts.length)}
-            status={only === undefined || several ? undefined : only.status}
-          />
-        )
-      }
+      meta={only === undefined || several ? undefined : <HostStatusChip status={only.status} />}
     >
       {hosts.length === 0 ? null : (
-        <>
-          <OperatorSummary
-            figures={totalFigures(served, hosts.length, servedLastDay, workstreams)}
-          />
-          <CostControls />
-        </>
+        <OperatorSummary figures={totalFigures(served, hosts.length, servedLastDay, workstreams)} />
       )}
       {hosts.map(host => (
         <Stack key={host.key} gap="space-4">

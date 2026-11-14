@@ -1,0 +1,30 @@
+/* A band of labelled figures divided by hairlines. Imported by components.css. */
+
+.vs-figure-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--column-figure-cell), 1fr));
+  min-width: 0;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  overflow: hidden;
+}
+.vs-figure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+  /* A hairline on the start of every figure but the first, and above every wrapped row. */
+  box-shadow: calc(var(--hairline) * -1) calc(var(--hairline) * -1) 0 0 var(--line);
+}
+.vs-figure-value,
+.vs-figure-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-figure .vs-meter {
+  margin: var(--space-1) 0;
+}

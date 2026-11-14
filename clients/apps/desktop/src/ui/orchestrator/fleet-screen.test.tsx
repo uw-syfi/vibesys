@@ -376,12 +376,13 @@ describe('the Runs operator page', () => {
     expect(queue.textContent).toContain('Batch consumer wake-ups');
     expect(queue.textContent).toContain('Latest hypothesis');
     expect(queue.textContent).toContain('This Mac');
-    expect(queue.textContent).toContain('3 agents working');
-    expect(queue.textContent).toContain('$318 of $500');
+    expect(queue.textContent).toContain('Agents3 working');
+    expect(queue.textContent).toContain('Spend$318of $500');
     expect(queue.textContent).toContain('Running 5h 20m');
 
     const endedCard = cardOf(screen, 'Tokenizer throughput');
-    expect(endedCard.textContent).toContain('2.31k tok/s (71% of bound)');
+    expect(endedCard.textContent).toContain('Best so far2.31k tok/s');
+    expect(endedCard.textContent).toContain('71% of bound');
     expect(endedCard.textContent).toContain('$12.40');
     expect(endedCard.textContent).toContain('Finished');
     screen.unmount();
@@ -482,7 +483,10 @@ describe('the Runs operator page', () => {
     const live = cardOf(screen, 'operator-console');
     expect(live.textContent).toContain('Running');
     expect(live.textContent).toContain('Operator action');
-    expect(live.textContent).toContain('Measurements unavailable');
+    expect(live.textContent).toContain('headline result, not the measurement series');
+    // Nothing the host index does not carry is drawn: no agents, no workstreams, no time left.
+    expect(live.textContent).not.toContain('Agents');
+    expect(live.textContent).not.toContain('Workstreams');
     expect(
       screen.container.querySelector('section[aria-label="Status unavailable runs"]'),
     ).not.toBeNull();

@@ -13,12 +13,29 @@ import {
 import type {JSX} from 'react';
 import {offeredPlaces, readable} from '../../../state/index.js';
 import type {StartHost} from '../start-run-form.js';
-import {placeDetail, placeName} from './words.js';
+import {offerWords, placeDetail, placeName} from './words.js';
 
-/** A tab's second word: how many places the machine evaluates on, or nothing before it is read. */
-const placesWord = (host: StartHost): string => {
+/** The most accelerators a tab names before it says how many more there are. */
+const HARDWARE_SHOWN = 3;
+
+/**
+ * A tab's second part: what the machine can evaluate on, such as `CPU · 8× H100`, which is what
+ * decides where a run can go. Nothing before the places are read, and `no places` when it has none.
+ */
+const hardwareWord = (host: StartHost): string => {
   const places = host.evalPlaces.data?.places;
-  return places === undefined ? 'eval places' : `${offeredPlaces(places).length} eval places`;
+  if (places === undefined) return 'reading hardware';
+  const offered = offeredPlaces(places);
+  if (offered.length === 0) return 'no places to evaluate';
+  const hardware = [
+    ...new Set(
+      offered.flatMap(place =>
+        place.offers.length === 0 ? ['CPU'] : place.offers.map(offerWords),
+      ),
+    ),
+  ];
+  const more = hardware.length - HARDWARE_SHOWN;
+  return `${hardware.slice(0, HARDWARE_SHOWN).join(' · ')}${more > 0 ? ` +${more}` : ''}`;
 };
 
 /**
@@ -80,7 +97,7 @@ export function MachineStrip(props: {
               value={props.chosen}
               options={props.hosts.map(host => ({
                 value: host.key,
-                label: `${host.label} · ${placesWord(host)}`,
+                label: `${host.label} · ${hardwareWord(host)}`,
               }))}
               change={props.pick}
             />

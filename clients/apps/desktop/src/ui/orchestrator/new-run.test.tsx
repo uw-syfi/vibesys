@@ -136,9 +136,9 @@ describe('the New run page', () => {
     expect(text).toContain('New run');
     expect(text).toContain('Start from an example');
     expect(text).toContain('Bring a repository, or describe one');
-    // A tab per machine, each with its eval places: the cloud place is left out.
-    expect(text).toContain('This machine · 4 eval places');
-    expect(text).toContain('host-a · 4 eval places');
+    // A tab per machine, each with the hardware it can evaluate on: the cloud place is left out.
+    expect(text).toContain('This machine · CPU · ');
+    expect(text).toContain('host-a · CPU · ');
     expect(text).toContain('Evals on');
     expect(text).toContain('Local Docker');
     expect(text).not.toContain('modal');

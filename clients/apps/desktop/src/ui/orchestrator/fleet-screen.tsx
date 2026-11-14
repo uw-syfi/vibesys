@@ -16,6 +16,9 @@ import {
   Stack,
   type StatusTone,
   SummaryCard,
+  type SummaryFlag,
+  type SummaryResult,
+  type SummaryStat,
   Text,
   withoutPaths,
 } from '@vibesys/ui';
@@ -34,6 +37,7 @@ import {
   type FleetState,
   fleetOverview,
   fleetView,
+  type ManagedFleetRow,
   type NavigationAction,
   type ObjectiveReport,
   rowObjectives,
@@ -153,27 +157,11 @@ function latestOf(row: FleetRow): {readonly label: string; readonly text: string
 /** A measured objective expands to fill the card's right side. */
 function trend(row: FleetRow, measured: readonly ObjectiveReport[]): ReactNode {
   if (row.source === 'generic') {
-    const unavailable = [
-      {id: 'measurements', label: 'Not available'},
-      {id: 'best', label: 'Not recorded'},
-      {id: 'agents', label: 'Not listed'},
-      {id: 'cost', label: 'Not recorded'},
-    ] as const;
     return (
       <Stack gap="space-1" align="center" justify="center">
-        <Text variant="section">Measurements unavailable</Text>
         <Text variant="small" tone="muted">
-          The run index provides a headline result, not the measurement series.
-          <span data-narrow-only>{` · ${row.host.label}`}</span>
+          The host's run index has a headline result, not the measurement series.
         </Text>
-        <Row gap="space-2" wrap>
-          {unavailable.map(item => (
-            <Text key={item.id} variant="small" tone="muted" title={item.label}>
-              <span data-wide-only>{item.label}</span>
-              <span data-narrow-only>—</span>
-            </Text>
-          ))}
-        </Row>
       </Stack>
     );
   }
@@ -225,19 +213,7 @@ function metadata(row: FleetRow, nowMs: number, clock: DisplayClock): string {
       .filter(Boolean)
       .join(' · ');
   }
-  return [
-    hostWords(row.host),
-    withoutPaths(row.repository),
-    row.card?.modelName === undefined || row.card.modelName === ''
-      ? ''
-      : `Task model: ${row.card.modelName}`,
-    row.live && row.agentsRunning !== null ? `${row.agentsRunning} agents working` : '',
-    results,
-    row.costUsd === null
-      ? ''
-      : `${dollars(row.costUsd)}${row.budgetUsd === null ? '' : ` of ${dollars(row.budgetUsd)}`}`,
-    whenLine(row, nowMs, clock),
-  ]
+  return [hostWords(row.host), withoutPaths(row.repository), whenLine(row, nowMs, clock)]
     .filter(Boolean)
     .join(' · ');
 }
@@ -490,15 +466,129 @@ interface FleetScreenProps {
   readonly newRun: ReactNode;
 }
 
-function cardDescription(row: FleetRow): string {
+/** How far along its cost limit a run is, 0 to 1; null for a run with no limit or no cost yet. */
+const budgetShare = (row: FleetRow): number | null =>
+  row.budgetUsd === null || row.budgetUsd <= 0 || row.costUsd === null
+    ? null
+    : row.costUsd / row.budgetUsd;
+
+const NOT_REPORTED = '\u2014';
+
+/** A slot the host has not filled: a muted dash that says why on hover, never a zero. */
+const notReported = (label: string, hint: string): SummaryStat => ({
+  label,
+  value: NOT_REPORTED,
+  tone: 'muted',
+  hint,
+});
+
+function spendStat(row: FleetRow): SummaryStat {
+  if (row.costUsd === null) return notReported('Spend', 'No finished turn reported a cost');
+  const share = budgetShare(row);
+  return {
+    label: 'Spend',
+    value: dollars(row.costUsd),
+    detail: row.budgetUsd === null ? 'No cost limit' : `of ${dollars(row.budgetUsd)}`,
+    ...(share === null ? {} : {share, tone: share >= 0.9 ? ('warn' as const) : ('ok' as const)}),
+    hint:
+      row.budgetUsd === null
+        ? 'What finished turns have cost so far'
+        : `What finished turns have cost so far, against the run's ${dollars(row.budgetUsd)} limit`,
+  };
+}
+
+function workstreamsStat(row: ManagedFleetRow): SummaryStat {
+  if (row.workstreams == null) return notReported('Workstreams', 'Not read from the host yet');
+  const ideas = row.ideas ?? 0;
+  return {
+    label: 'Workstreams',
+    value: String(row.workstreams),
+    ...(ideas === 0 ? {} : {detail: `${ideas} ${ideas === 1 ? 'idea' : 'ideas'} tried`}),
+    hint: 'Named lines of work this run started',
+  };
+}
+
+function agentsStat(row: ManagedFleetRow): SummaryStat {
+  if (row.agentsRunning === null)
+    return notReported('Agents', 'The host has not sent a summary yet');
+  return {
+    label: 'Agents',
+    value: `${row.agentsRunning} working`,
+    ...(row.fanoutLimit == null ? {} : {detail: `of ${row.fanoutLimit + 1} allowed`}),
+    hint: 'Agents starting, in a turn or waiting on a subagent, as the host counts them; the lead plus up to its fan-out limit of subagents',
+  };
+}
+
+function timeLeftStat(row: ManagedFleetRow, nowMs: number): SummaryStat {
+  if (row.deadlineMs === null) return {label: 'Time left', value: 'No limit', tone: 'muted'};
+  const left = row.deadlineMs - nowMs;
+  return left > 0
+    ? {label: 'Time left', value: span(left), detail: 'until its limit'}
+    : {label: 'Time left', value: 'None', detail: 'limit reached', tone: 'warn'};
+}
+
+/**
+ * The figures that tell runs apart, each a fact the host served. A live run always has the same four
+ * slots in the same order (spend, agents, workstreams, time left), so figures line up down the list;
+ * a slot the host has not filled says so with a dash and never a zero. An ended run drops the two
+ * that only a live run has.
+ */
+function cardStats(row: FleetRow, nowMs: number): readonly SummaryStat[] {
+  if (row.source !== 'managed') return row.costUsd === null ? [] : [spendStat(row)];
+  if (row.live)
+    return [spendStat(row), agentsStat(row), workstreamsStat(row), timeLeftStat(row, nowMs)];
+  const ranFor =
+    row.startedMs !== null && row.endedMs !== null
+      ? [{label: 'Ran for', value: span(row.endedMs - row.startedMs)}]
+      : [];
+  return [spendStat(row), workstreamsStat(row), ...ranFor];
+}
+
+/** Why a run wants a look, one chip each, in the host's order of urgency. */
+function cardFlags(row: FleetRow, nowMs: number, clock: DisplayClock): readonly SummaryFlag[] {
+  if (row.source === 'generic') {
+    return [
+      ...(row.needsUser ? [{label: 'Needs you', tone: 'warn' as const}] : []),
+      ...(row.indexFreshness === 'stale'
+        ? [{label: 'Index out of date', tone: 'warn' as const}]
+        : []),
+    ];
+  }
+  return [
+    ...row.attention.map(attention => {
+      const words = attentionWords(attention, nowMs, clock);
+      return {label: words.label, tone: words.tone, hint: words.hint};
+    }),
+    ...(row.reportUnavailable
+      ? [{label: 'Report unavailable', tone: 'warn' as const, hint: 'The host could not serve it'}]
+      : []),
+  ];
+}
+
+/** The best result so far, led by its share of the bound when the host worked one out. */
+function cardResult(row: FleetRow): SummaryResult | null {
+  const [best] = row.objectives;
+  if (best === undefined || best.value === null) return null;
+  const more = row.objectives.length - 1;
+  const parts = [
+    best.percentOfBound === null ? '' : `${percent(best.percentOfBound)} of bound`,
+    more > 0 ? `+${more} more` : '',
+  ].filter(Boolean);
+  return {
+    label: 'Best so far',
+    value: resultWords(best),
+    ...(parts.length === 0 ? {} : {detail: parts.join(' · ')}),
+    hint: row.objectives.map(resultHint).join('\n'),
+  };
+}
+
+function cardDescription(row: FleetRow): string | null {
   if (row.source === 'generic')
     return row.projectRoot === null
       ? 'Generic run discovered by the host run index.'
       : `Generic run in ${withoutPaths(row.projectRoot)}.`;
-  const description = row.description ?? '';
-  return description.trim() === ''
-    ? `Optimization run in ${withoutPaths(row.repository)}.`
-    : description;
+  const description = (row.description ?? '').trim();
+  return description === '' ? null : description;
 }
 
 const activityKeyOf = (row: FleetRow): string => row.activityKey ?? `${row.source}:${row.runId}`;
@@ -584,6 +674,9 @@ function RunCard(props: {
         latest={cardLatest(row)}
         chart={trend(row, props.objectives)}
         metadata={metadata(row, nowMs, clock)}
+        stats={cardStats(row, nowMs)}
+        flags={cardFlags(row, nowMs, clock)}
+        result={cardResult(row)}
         status={{tone: cardTone(row, unread, nowMs, clock), label: statusLabel(row, nowMs)}}
         attention={unread || (row.source === 'generic' && row.needsUser)}
         label={`Open run ${rowTitle(row)}`}

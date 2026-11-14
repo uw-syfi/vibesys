@@ -4,8 +4,9 @@ import {
   Card,
   Chip,
   EmptyState,
+  type Figure,
+  FigureStrip,
   Grid,
-  KeyValue,
   Page,
   Row,
   Stack,
@@ -16,6 +17,7 @@ import {
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import {
+  type FleetOverview,
   hostFromKey,
   type MachineEntry,
   type MachineRow,
@@ -31,6 +33,7 @@ import {
   settleAsks,
 } from '../../state/index.js';
 import {HostStatusChip} from '../host-status-chip.js';
+import {dollars} from '../orchestrator/fleet-words.js';
 import {offerWords} from '../orchestrator/new-run/words.js';
 import type {MachineControls} from './add-machine/machine-controls.js';
 import {Reading} from './machine-cells.js';
@@ -50,31 +53,48 @@ export interface PlacesHost {
   readonly places: Remote<ListEvalPlacesResponse>;
 }
 
-/** Facts the saved host key can prove about how SSH addresses a machine. */
-function connectionFacts(row: MachineRow): readonly {
-  readonly key: string;
-  readonly value: string;
-  readonly mono?: boolean;
-}[] {
+/**
+ * How the app reaches a machine, in one quiet line: the way in, where it is, and the user when the
+ * saved key names one. A fact SSH resolves by itself (a user, a port) is not listed as a stand-in.
+ */
+function connectionLine(row: MachineRow): string {
   const host = hostFromKey(row.key);
-  if (host.kind === 'local') {
-    return [
-      {key: 'Connection', value: 'Local'},
-      {key: 'Destination', value: row.label},
-    ];
-  }
+  if (host.kind === 'local') return 'This computer';
   const at = host.alias.lastIndexOf('@');
   const user = at < 0 ? null : host.alias.slice(0, at);
   const destination = at < 0 ? host.alias : host.alias.slice(at + 1);
+  return user === null ? `SSH to ${destination}` : `SSH to ${destination} as ${user}`;
+}
+
+/** What the machine is carrying now: a figure nobody reported is a muted dash, never a zero. */
+function loadFigures(load: FleetOverview | undefined): readonly Figure[] {
+  if (load === undefined) return [];
+  const dash = {value: '\u2014', tone: 'muted' as const};
   return [
-    {key: 'Connection', value: 'SSH'},
-    {key: 'Destination', value: destination, mono: true},
     {
-      key: 'User',
-      value: user ?? 'Resolved by SSH',
-      ...(user === null ? {} : {mono: true}),
+      label: 'Live runs',
+      value: String(load.live),
+      detail: load.ended === 0 ? 'none ended' : `${load.ended} ended`,
+      hint: 'Runs on this machine that are starting, running or stopping',
     },
-    {key: 'Port', value: 'Resolved by SSH'},
+    {
+      label: 'Attention',
+      value: String(load.attention),
+      detail: load.attention === 0 ? 'none waiting' : `of ${load.live} live`,
+      hint: 'Live runs that want the operator: a stall, stuck jobs, a limit or kept checkouts',
+      tone: load.attention > 0 ? 'warn' : 'muted',
+    },
+    {
+      label: 'Agents',
+      ...(load.agentsWorking === null ? dash : {value: String(load.agentsWorking)}),
+      hint: 'Agents starting, in a turn or waiting on a subagent, across the live runs',
+    },
+    {
+      label: 'Spend',
+      ...(load.liveCostUsd === null ? dash : {value: dollars(load.liveCostUsd)}),
+      detail: 'live runs',
+      hint: 'Priced turns of the runs still working',
+    },
   ];
 }
 
@@ -208,6 +228,7 @@ function MachinePlaces(props: {
 function MachineCard(props: {
   readonly entry: MachineEntry;
   readonly repositoriesDirectory: string;
+  readonly load: FleetOverview | undefined;
   readonly ask: PlaceAsk;
   readonly refreshPlaces: ((key: string) => void) | undefined;
   readonly remove: ((key: string) => void) | undefined;
@@ -215,8 +236,6 @@ function MachineCard(props: {
 }): JSX.Element {
   const {entry} = props;
   const {row} = entry;
-  const repository =
-    props.repositoriesDirectory === '' ? 'Host default' : props.repositoriesDirectory;
   return (
     <Card
       section={row.label}
@@ -238,19 +257,20 @@ function MachineCard(props: {
       }
     >
       <Stack gap="space-5">
-        <Stack gap="space-2">
-          <Text variant="section">Connection and workspace</Text>
-          <KeyValue
-            items={[
-              ...connectionFacts(row),
-              {
-                key: 'Repositories',
-                value: repository,
-                ...(props.repositoriesDirectory === '' ? {} : {mono: true}),
-              },
-            ]}
-          />
+        <Stack gap="space-1">
+          <Text variant="small" tone="muted">
+            {connectionLine(row)}
+          </Text>
+          {props.repositoriesDirectory === '' ? null : (
+            <Text variant="small" tone="muted">
+              {`Repositories in `}
+              <Text variant="code">{props.repositoriesDirectory}</Text>
+            </Text>
+          )}
         </Stack>
+        {props.load === undefined ? null : (
+          <FigureStrip label={`Load on ${row.label}`} figures={loadFigures(props.load)} />
+        )}
         {entry.stats === null ? null : (
           <Stack gap="space-2">
             <Text variant="section">Live resources</Text>
@@ -284,6 +304,8 @@ export function MachinesScreen(props: {
   };
   /** The explicit repositories folder of each machine; absent means the host chooses its default. */
   readonly repositories?: Readonly<Record<string, string>>;
+  /** What each machine's runs are doing now, by host key; without it the cards say nothing of load. */
+  readonly load?: Readonly<Record<string, FleetOverview>>;
 }): JSX.Element {
   const {controls, places} = props;
   const entries = machineEntries(props.rows, {
@@ -329,6 +351,7 @@ export function MachinesScreen(props: {
               key={entry.row.key}
               entry={entry}
               repositoriesDirectory={props.repositories?.[entry.row.key] ?? ''}
+              load={props.load?.[entry.row.key]}
               ask={settled.get(entry.row.key) ?? 'none'}
               refreshPlaces={refresh}
               remove={controls?.remove}

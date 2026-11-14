@@ -38,6 +38,7 @@ import {
   fleetOverview,
   fleetRows,
   fleetView,
+  hostFleetOverview,
   isLive,
   NO_FLEET_FILTER,
 } from './fleet.js';
@@ -354,6 +355,18 @@ const shown = (hosts: readonly FleetHostInput[], by: FleetFilter): FleetRow[] =>
   const view = fleetView(hosts, by);
   return [...view.live, ...view.history, ...view.unknown];
 };
+
+/** What a run's search view says it started and tried, null for both when no view was read. */
+const searchCounts = (
+  search: OrchestratorState['searches'][string] | undefined,
+  runId: string,
+): [number | null, number | null] =>
+  search === undefined
+    ? [null, null]
+    : [
+        search.workstreams.filter(each => each.origin?.runId === runId).length,
+        search.ideas.filter(each => each.inRun).length,
+      ];
 
 const genericRun = (
   runId: string,
@@ -682,6 +695,32 @@ describe('the fleet of runs', () => {
     );
   });
 
+  it('counts the workstreams and ideas of a run from its own search view, absent when none was read', () => {
+    fc.assert(
+      fc.property(fleet, hosts => {
+        for (const row of shown(hosts, NO_FLEET_FILTER)) {
+          if (row.source !== 'managed') continue;
+          const host = hosts.find(each => each.key === row.host.key);
+          const search = host?.data.searches[row.runId];
+          expect([row.workstreams, row.ideas]).toEqual(searchCounts(search, row.runId));
+          const limit = host?.data.runs[row.runId]?.fanoutLimit ?? 0;
+          expect(row.fanoutLimit).toBe(limit > 0 ? limit : null);
+        }
+      }),
+    );
+  });
+
+  it('reads what one host carries from its model alone, as the overview reads the managed rows', () => {
+    fc.assert(
+      fc.property(fleet, hosts => {
+        for (const host of hosts) {
+          const managed = fleetRows([host]).filter(row => row.source === 'managed');
+          expect(hostFleetOverview(host.data)).toEqual(fleetOverview(managed));
+        }
+      }),
+    );
+  });
+
   // The fleet derives nothing: a host that held any agents and any messages (a window report among
   // them, which the host marks and the fleet never inspects) shows the rows of a host that held none.
   it('reads nothing but runs, their summaries and their searches: the agents and messages held change no row', () => {
@@ -796,7 +835,7 @@ interface OverviewRowSpec {
 const overviewRow = (spec: OverviewRowSpec, index: number): FleetRow => ({
   source: 'managed',
   setup: false,
-  status: spec.live ? RunStatus.RUNNING : RunStatus.FINISHED,
+  status: spec.live ? RunStatus.RUNNING : RunStatus.ENDED,
   key: `host-0/run-${index}`,
   host: OVERVIEW_HOST,
   runId: `run-${index}`,

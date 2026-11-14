@@ -167,15 +167,13 @@ describe('the Machines operator page', () => {
 
     const localCard = card(screen.container, 'This machine');
     const remoteCard = card(screen.container, 'operator@host-a');
-    expect(localCard.textContent).toContain('ConnectionLocal');
-    expect(localCard.textContent).toContain('RepositoriesHost default');
+    expect(localCard.textContent).toContain('This computer');
+    // An unset folder is not listed as a stand-in: only a folder somebody chose is said.
+    expect(localCard.textContent).not.toContain('Host default');
     expect(localCard.textContent).toContain('11%');
     expect(localCard.textContent).toContain('local');
-    expect(remoteCard.textContent).toContain('ConnectionSSH');
-    expect(remoteCard.textContent).toContain('Destinationhost-a');
-    expect(remoteCard.textContent).toContain('Useroperator');
-    expect(remoteCard.textContent).toContain('PortResolved by SSH');
-    expect(remoteCard.textContent).toContain('Repositories~/work');
+    expect(remoteCard.textContent).toContain('SSH to host-a as operator');
+    expect(remoteCard.textContent).toContain('Repositories in ~/work');
     expect(remoteCard.textContent).toContain('73%');
     expect(remoteCard.textContent).toContain('gpu-cluster');
     expect(screen.controls('Remove This machine from this app')).toHaveLength(0);
@@ -187,7 +185,7 @@ describe('the Machines operator page', () => {
     screen.unmount();
   });
 
-  it('labels SSH-config values as resolved instead of inventing a user or port', () => {
+  it('says nothing of a user or port it cannot know instead of inventing one', () => {
     const screen = mount(
       <MachinesScreen
         rows={[
@@ -200,9 +198,9 @@ describe('the Machines operator page', () => {
       />,
     );
     const machine = card(screen.container, 'gpu-a');
-    expect(machine.textContent).toContain('Destinationgpu-a');
-    expect(machine.textContent).toContain('UserResolved by SSH');
-    expect(machine.textContent).toContain('PortResolved by SSH');
+    expect(machine.textContent).toContain('SSH to gpu-a');
+    expect(machine.textContent).not.toContain(' as ');
+    expect(machine.textContent).not.toContain('Resolved by SSH');
     expect(machine.textContent).not.toContain('22');
     screen.unmount();
   });

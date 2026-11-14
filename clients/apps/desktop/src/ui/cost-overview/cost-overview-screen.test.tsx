@@ -42,13 +42,7 @@ function page(
   );
 }
 
-const PANELS = [
-  'Cost controls and attribution',
-  'Spend over time',
-  'By run',
-  'By agent type',
-  'By CLI provider and model',
-];
+const PANELS = ['Spend over time', 'By run', 'By agent type', 'By CLI provider and model'];
 const headings = (screen: Screen): string[] =>
   [...screen.container.querySelectorAll('h2')].map(each => each.textContent ?? '');
 const bars = (screen: Screen): number => screen.container.querySelectorAll('.vs-bars-bar').length;
@@ -77,7 +71,7 @@ describe('the Cost page of one host', () => {
     const screen = mount(page(views.none));
     const text = screen.text();
     expect(text).toContain('No turns yet');
-    expect(text).toContain('nothing spent yet');
+    expect(text).toContain('Nothing spent yet');
     // The run's row is there with nothing made up for it: no zero cost, no zero tokens.
     expect(
       screen.container.querySelector('table[aria-label="Cost by run on Host A"]'),
@@ -99,27 +93,23 @@ describe('the Cost page of one host', () => {
         runs: [{...run, turns: 1, unpricedTurns: 1}],
       }),
     );
-    expect(unpriced.text()).toContain('spend unknown');
-    expect(unpriced.text()).not.toContain('nothing spent yet');
+    expect(unpriced.text()).toContain('Spend unknown');
+    expect(unpriced.text()).not.toContain('Nothing spent yet');
     unpriced.unmount();
   });
 
-  it('puts the status and the facts on one line under the title, with no card of figures', () => {
+  it('puts the host status under the title and the figures in one band, saying each once', () => {
     const screen = mount(page(views.short));
     const meta = screen.container.querySelector('.vs-page-meta');
-    expect(meta?.querySelectorAll('.vs-factline')).toHaveLength(1);
-    expect(meta?.querySelector('.vs-factline .vs-chip')?.textContent).toBe('Live');
-    const text = meta?.textContent ?? '';
-    expect(text).toContain('≥\u00a0$2.35 spent');
-    expect(text).toContain('≥\u00a0$2.35 in the last hour');
-    expect(text).toContain('1 run');
-    expect(text).toContain('9 turns');
+    expect(meta?.querySelector('.vs-chip')?.textContent).toBe('Live');
+    expect(meta?.querySelectorAll('.vs-factline')).toHaveLength(0);
+    const strip = screen.container.querySelector('.vs-figure-strip');
+    expect(strip).not.toBeNull();
+    const text = strip?.textContent ?? '';
+    expect(text).toMatch(/≥\s\$2\.35/u);
+    expect(text).toContain('9 finished turns');
     expect(text).toContain('4 turns unpriced');
-    const unpriced = [...(meta?.querySelectorAll('.vs-fact') ?? [])].find(fact =>
-      fact.textContent?.includes('unpriced'),
-    );
-    expect(unpriced?.getAttribute('title')).toMatch(/tokens and no price/);
-    expect(text).not.toContain('Last hour');
+    expect(text).not.toContain('Cost controls');
     screen.unmount();
   });
 
@@ -169,20 +159,16 @@ describe('the Cost page of one host', () => {
     screen.unmount();
   });
 
-  it('writes each figure of the facts line one space from its words, never against them', () => {
+  it('gives every figure a label, a value and no raw number run into its words', () => {
     for (const view of [views.none, views.short, views.week]) {
       const screen = mount(page(view));
-      const facts = [...screen.container.querySelectorAll('.vs-page-meta .vs-fact')];
-      expect(facts.length).toBeGreaterThanOrEqual(3);
-      for (const fact of facts) {
-        const text = fact.textContent ?? '';
-        // A figure is followed by a space (or ends the fact), and no word is joined to a figure.
-        expect(text, text).not.toMatch(/[\d%]\p{L}/u);
-        expect(text, text).toMatch(/^[^ ]+( [^ ]+)*$/);
+      const figures = [...screen.container.querySelectorAll('.vs-figure-strip .vs-figure')];
+      expect(figures.length).toBe(6);
+      for (const figure of figures) {
+        const detail = figure.querySelector('.vs-figure-detail')?.textContent ?? '';
+        // A figure's quiet line is words, never a figure joined to its words.
+        expect(detail, detail).not.toMatch(/[\d%]\p{L}/u);
       }
-      expect(screen.container.querySelector('.vs-factline')?.getAttribute('data-spaced')).toBe(
-        'true',
-      );
       screen.unmount();
     }
   });
@@ -437,10 +423,8 @@ describe('the Cost destination operator summary', () => {
       'Last hour',
       'Last 24 hours',
       'Runs',
-      'Turns',
-      'Unpriced turns',
-      'Workstreams explored',
-      'Cost per workstream',
+      'Workstreams',
+      'Per workstream',
     ]) {
       expect(text).toContain(label);
     }
@@ -449,9 +433,9 @@ describe('the Cost destination operator summary', () => {
     expect(text).toContain('$12.50');
     expect(text).toContain('Codex · model-a');
     expect(text).toContain('By CLI provider and model');
-    expect(text).toContain('Workstreams explored3');
-    expect(text).toContain('Cost per workstream$26.67');
-    expect(text).toContain('Total priced spend ÷ explored workstreams');
+    expect(text).toContain('Workstreams3');
+    expect(text).toContain('Per workstream$26.67');
+    expect(text).toContain('Spend ÷ workstreams');
     screen.unmount();
   });
 
@@ -468,13 +452,12 @@ describe('the Cost destination operator summary', () => {
     );
 
     const text = screen.text();
-    expect(text).toContain('Workstreams explored3');
-    expect(text).toContain('Cost per workstream$6.67');
-    expect(text).toContain('operator-wide average, not turn attribution');
-    expect(text).toContain('Provider limits');
-    expect(text).toContain('expose no provider-specific cost quota');
-    expect(text).toContain('Run cost limits');
-    expect(text).toContain('Select a run below, then choose Adjust');
+    expect(text).toContain('Workstreams3');
+    expect(text).toContain('Per workstream$6.67');
+    const average = screen.container.querySelector(
+      '.vs-figure-strip [title*="operator-wide average"]',
+    );
+    expect(average?.getAttribute('title')).toContain('not attributed to a workstream');
     const row = screen.container.querySelector<HTMLElement>('tr[data-selectable]');
     if (row === null) throw new Error('no run listed');
     screen.press(row);
@@ -509,10 +492,11 @@ describe('the Cost destination operator summary', () => {
       />,
     );
 
-    expect(screen.text()).toContain('1 of 2 machines reporting');
+    expect(screen.text()).toContain('1 of 2 machines');
+    expect(screen.container.querySelector('[title*="1 of 2 machines reporting"]')).not.toBeNull();
     expect(screen.text()).toContain('≥ $40.00');
     expect(screen.text()).toContain('≥ $10.00');
-    expect(screen.text()).toContain('Workstreams explored≥ 3at least');
+    expect(screen.text()).toMatch(/Workstreams≥\s3/u);
     expect(screen.text()).toContain('1 of 2 machine cost views available');
     expect(screen.text()).toContain('1 unpriced turn remains');
     expect(screen.text()).toContain('1 of 2 machines have complete workstream views');

@@ -164,4 +164,54 @@ describe('SummaryCard', () => {
     await act(async () => one(container, 'article').dispatchEvent(context));
     expect(context.defaultPrevented).toBe(false);
   });
+
+  test('draws its figure strip, reasons to look and headline result, and leaves out a missing description', async () => {
+    const container = await mount(
+      <SummaryCard
+        title="Queue throughput"
+        description={null}
+        latest={null}
+        chart={<span data-chart="true">chart</span>}
+        metadata="host-a · queue-rs"
+        status={{tone: 'live', label: 'Running 2h 0m'}}
+        flags={[{label: 'Stalled 40m', tone: 'warn', hint: 'Nothing has moved the run'}]}
+        stats={[
+          {label: 'Spend', value: '$412', detail: 'of $500', share: 0.82, tone: 'ok'},
+          {label: 'Agents', value: '3 working', hint: 'Agents in a turn'},
+        ]}
+        result={{label: 'Best so far', value: '2.31k tok/s', detail: '71% of bound'}}
+        press={() => undefined}
+      />,
+    );
+    expect(container.querySelector('.vs-summary-card-description')).toBeNull();
+    const stats = [...container.querySelectorAll('.vs-summary-card-stat')];
+    expect(stats.map(each => each.querySelector('.vs-text')?.textContent)).toEqual([
+      'Spend',
+      'Agents',
+    ]);
+    expect(stats[0]?.querySelector('.vs-meter')).not.toBeNull();
+    expect(stats[1]?.querySelector('.vs-meter')).toBeNull();
+    expect(stats[1]?.getAttribute('title')).toBe('Agents in a turn');
+    const head = one(container, '.vs-summary-card-head');
+    expect(head.textContent).toContain('Running 2h 0m');
+    expect(head.textContent).toContain('Stalled 40m');
+    expect(one(container, '.vs-summary-card-result').textContent).toContain('2.31k tok/s');
+    expect(one(container, '.vs-summary-card-result').textContent).toContain('71% of bound');
+  });
+
+  test('draws no figure strip or result when it has none', async () => {
+    const container = await mount(
+      <SummaryCard
+        title="Queue throughput"
+        description="A run summary"
+        latest={null}
+        chart={null}
+        metadata="host-a"
+        status={{tone: 'neutral', label: 'Queued'}}
+        press={() => undefined}
+      />,
+    );
+    expect(container.querySelector('.vs-summary-card-stats')).toBeNull();
+    expect(container.querySelector('.vs-summary-card-result')).toBeNull();
+  });
 });

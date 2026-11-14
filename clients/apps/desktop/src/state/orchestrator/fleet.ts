@@ -219,6 +219,15 @@ interface FleetRowBase {
   readonly attention: readonly FleetAttention[];
   /** The run came from whole-history search and is absent from the bounded runs snapshot. */
   readonly searchOnly?: boolean;
+  /**
+   * How many named workstreams this run started, from its search view; absent until that view is
+   * read, so an unread count is never shown as zero.
+   */
+  readonly workstreams?: number | null;
+  /** How many of the run's plans (ideas) belong to this run, from the same view; absent as above. */
+  readonly ideas?: number | null;
+  /** How many non-lead agents the run may have live at once; absent for a run with no such limit. */
+  readonly fanoutLimit?: number | null;
 }
 
 /** One host's authoritative whole-history matches for exactly `query`. */
@@ -345,6 +354,25 @@ export function fleetOverview(rows: readonly FleetRow[]): FleetOverview {
     liveCostUsd = addReading(liveCostUsd, row.costUsd);
   }
   return {shown: rows.length, live, ended, attention, agentsWorking, liveCostUsd};
+}
+
+/**
+ * What one host carries, read from its model alone: its live and ended runs, how many want the
+ * operator, the agents working and the cost of the live runs. The same reading the Runs band makes
+ * over the rows shown, made over every run the host has, so a machine can say how loaded it is.
+ */
+export function hostFleetOverview(data: OrchestratorState): FleetOverview {
+  const stub: FleetHostRef = {
+    key: '',
+    label: '',
+    freshness: 'live',
+    status: {kind: 'live', cause: null, staleForMs: null},
+  };
+  return fleetOverview(
+    Object.values(data.runs)
+      .filter(run => !run.neverOpened)
+      .map(run => rowOf(stub, data.summaries[run.id], data.searches[run.id], run)),
+  );
 }
 
 export type FleetAbsence =
@@ -541,6 +569,12 @@ function rowOf(
     deadlineMs: ms(run.deadline),
     attention: attentionOf(run, search),
     searchOnly,
+    workstreams:
+      search === undefined
+        ? null
+        : search.workstreams.filter(workstream => workstream.origin?.runId === run.id).length,
+    ideas: search === undefined ? null : search.ideas.filter(idea => idea.inRun).length,
+    fanoutLimit: run.fanoutLimit > 0 ? run.fanoutLimit : null,
   };
 }
 

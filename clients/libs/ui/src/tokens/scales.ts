@@ -50,6 +50,7 @@ export type SizeToken =
   | 'column-metric'
   | 'column-chart'
   | 'summary-card-chart'
+  | 'column-figure-cell'
   | 'chart-min'
   | 'chart-min-across'
   | 'chart-flex-min'
@@ -102,6 +103,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'column-metric': 360,
   'column-chart': 248,
   'summary-card-chart': 112,
+  'column-figure-cell': 112,
   'chart-min': 360,
   'chart-min-across': 290,
   'chart-flex-min': 480,

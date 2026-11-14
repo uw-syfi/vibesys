@@ -33,31 +33,35 @@ describe('FleetOverviewBar', () => {
       agentsWorking: 11,
       liveCostUsd: 412,
     });
-    expect(html).toContain('2 need attention');
-    expect(html).toContain('11 agents working');
+    expect(html).toContain('Need attention');
+    expect(html).toContain('of 4 live');
+    expect(html).toContain('Agents working');
+    expect(html).toContain('>11<');
     expect(html).toContain('$412');
-    expect(html).toContain('live spend');
+    expect(html).toContain('Live spend');
   });
 
-  it('does not repeat the live count that the section header already carries', () => {
-    const html = markup({...EMPTY, shown: 4, live: 4, agentsWorking: 2});
-    expect(html).not.toContain('4 live');
-  });
-
-  it('omits the need-attention chip when nothing wants a look', () => {
+  it('says nothing waits on the operator, in the quiet tone, when no run wants a look', () => {
     const html = markup({...EMPTY, shown: 3, live: 3, agentsWorking: 2});
-    expect(html).toContain('2 agents working');
-    expect(html).not.toContain('need attention');
+    expect(html).toContain('Nothing is waiting on you');
+    expect(html).not.toContain('data-tone="warn"');
+  });
+
+  it('draws the attention count in the problem tone only when it is above zero', () => {
+    const html = markup({...EMPTY, shown: 2, live: 2, attention: 1});
+    expect(html).toContain('of 2 live');
+    expect(html).toContain('data-tone="warn"');
   });
 
   it('leaves out a figure the hosts did not report rather than showing zero', () => {
     const html = markup({...EMPTY, shown: 2, live: 2, attention: 1});
-    expect(html).toContain('need attention');
-    expect(html).not.toContain('agents working');
-    expect(html).not.toContain('live spend');
+    expect(html).not.toContain('Agents working');
+    expect(html).not.toContain('Live spend');
   });
 
   it('names a single working agent in the singular', () => {
-    expect(markup({...EMPTY, shown: 1, live: 1, agentsWorking: 1})).toContain('1 agent working');
+    expect(markup({...EMPTY, shown: 1, live: 1, agentsWorking: 1})).toContain(
+      'agent across live runs',
+    );
   });
 });

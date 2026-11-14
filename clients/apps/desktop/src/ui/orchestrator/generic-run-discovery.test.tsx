@@ -83,7 +83,6 @@ describe('generic run discovery', () => {
     expect(row.textContent).toContain('Needs you · Up to date');
     expect(row.textContent).toContain('87.5 requests/s');
     expect(row.textContent).toContain('$4.25');
-    expect(row.querySelector('[data-narrow-only]')?.textContent).toBe(' · This machine');
     screen.press(row);
     expect(screen.container.querySelector('h1')?.textContent).toBe('serve');
     expect(screen.text()).toContain('Run details unavailable');
@@ -115,21 +114,12 @@ describe('generic run discovery', () => {
     );
     expect(screen.text()).toContain('Status unavailable');
     expect(screen.text()).toContain('Last known');
-    expect(screen.text()).toContain('Not available');
-    expect(screen.text()).toContain('Not listed');
-    expect(screen.text()).toContain('Not recorded');
+    expect(screen.text()).toContain('headline result, not the measurement series');
+    // An unlisted agent count and an unrecorded cost are left out, never drawn as a zero or a dash.
     const row = screen.container.querySelector('[role="option"]');
-    expect(row?.querySelectorAll('[data-wide-only]')).toHaveLength(4);
-    expect(
-      [...(row?.querySelectorAll<HTMLElement>('[data-wide-only]') ?? [])].map(
-        element => element.textContent,
-      ),
-    ).toEqual(['Not available', 'Not recorded', 'Not listed', 'Not recorded']);
-    expect(
-      [...(row?.querySelectorAll<HTMLElement>('[data-narrow-only]') ?? [])]
-        .filter(element => element.textContent === '—')
-        .map(element => element.parentElement?.title),
-    ).toEqual(['Not available', 'Not recorded', 'Not listed', 'Not recorded']);
+    expect(row?.textContent).not.toContain('Agents');
+    expect(row?.textContent).not.toContain('Spend');
+    expect(row?.textContent).not.toContain('$0');
     expect(screen.text()).not.toContain('Finished');
     screen.unmount();
   });

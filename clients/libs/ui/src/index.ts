@@ -83,6 +83,7 @@ export {
 export {DotLegend, type LegendItem} from './components/dot-legend.js';
 export {CountedFact, Fact, FactLine, MutedFact} from './components/facts.js';
 export {Field, TextInput} from './components/field.js';
+export {type Figure, FigureStrip} from './components/figure-strip.js';
 export {
   Gantt,
   type GanttAxis,
@@ -224,7 +225,13 @@ export {Stale} from './components/stale.js';
 export {Chip, StatusDot, type StatusTone} from './components/status.js';
 export {type StepItem, StepList, type StepState} from './components/step-list.js';
 export {type ReplyField, StructuredReply} from './components/structured-reply.js';
-export {SummaryCard, type SummaryCardUpdate} from './components/summary-card.js';
+export {
+  SummaryCard,
+  type SummaryCardUpdate,
+  type SummaryFlag,
+  type SummaryResult,
+  type SummaryStat,
+} from './components/summary-card.js';
 export {Swatch, type SwatchItem, SwatchLegend} from './components/swatch-legend.js';
 export {Table, type TableColumn, type TableSort} from './components/table.js';
 export {Tabs} from './components/tabs.js';

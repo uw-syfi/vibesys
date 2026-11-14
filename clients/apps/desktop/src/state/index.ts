@@ -149,6 +149,7 @@ export {
   fleetView,
   type GenericDiscoveryStatus,
   type GenericFleetRow,
+  hostFleetOverview,
   isLive,
   type ManagedFleetRow,
   measuredObjectives,
