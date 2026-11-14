@@ -81,7 +81,8 @@ func TestRealTwoImageTaskServesTheCandidateBesideTheTask(t *testing.T) {
 		if r.code != exitOK || !strings.Contains(r.stdout, "succeeded") || strings.Contains(r.stdout, "reused") || !strings.Contains(r.stdout, "[harness]") {
 			t.Fatalf("submit command --image harness = %+v\n%s", r, m.logsOf(r))
 		}
-		if logs := m.logsOf(r); !strings.Contains(logs, "ok\nloaded") || !strings.Contains(logs, "[command] image: harness") {
+		// Candidate request logs can interleave with the harness's stdout between these lines.
+		if logs := m.logsOf(r); !strings.Contains(logs, "\nok\n") || !strings.Contains(logs, "\nloaded\n") || !strings.Contains(logs, "[command] image: harness") {
 			t.Fatalf("the harness command's output %q", logs)
 		}
 	}
