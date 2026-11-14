@@ -42,6 +42,7 @@ import {
   NO_VIEW,
   type RunLine,
   totalFigures,
+  UNPRICED_FACT_HINT,
 } from './cost-overview-model.js';
 
 /** The words of the run's own vocabulary this screen needs beside the cost words. */
@@ -539,7 +540,7 @@ function summaryFigures(figures: Figures): readonly Figure[] {
       label: 'Total spend',
       value: figure(figures.figure, figures.floor),
       detail: totalDetail(figures),
-      hint: `Priced finished turns across the cost views each machine served; ${coverage(figures.servedHosts, figures.hostCount)}${unpriced}`,
+      hint: `Priced finished turns across the cost views each machine served; ${coverage(figures.servedHosts, figures.hostCount)}${unpriced}${figures.floor ? `. ${UNPRICED_FACT_HINT}` : ''}`,
       ...reported(figures.figure !== null),
     },
     {
