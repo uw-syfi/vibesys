@@ -219,7 +219,7 @@ Several flags look independent, but they combine into one execution contract:
 | Agents | `--agent-backend`, `[agent].scripted_seed` | `cli` (the default) drives a coding-agent CLI. `scripted` is the agent-less mode: the real backend with scripted agents and no model (see [Agent-less runs](contributing/development.md#agent-less-runs)). |
 | Agent environment | none (always Docker) | Where the agent runs: a local Docker container, for every run. `--docker` was removed and is rejected. |
 | Evaluation environment | `--run-environment`, `--modal`, `--skypilot`, `--slurm-config` | Where evaluation runs: the local container (default), Modal, SkyPilot, or Slurm. These never move the agent out of its local container. |
-| Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `rocprof`, `torch`, `neuron`, `macos_cpu`, `linux_cpu`, or `auto`. |
+| Profiler | `--profiler` | Bottleneck evidence source: `auto`, `none`, `nsys`, `ncu`, `flashinfer`, `ncu_flashinfer`, `rocprof`, `torch`, `neuron`, `macos_cpu`, `linux_cpu`, or `headroom` (see [Profiler](#profiler)). |
 | Domain | `[agent].domain` in `vibesys.input.toml` | Problem-space package used by the agent and evolve loops, such as `llm-serving`, `microservices`, `cli-tools`, or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
 | Skills | `--skills-dir`, `--extra-skills`, `--no-skills` | Override the preset skill roots, stack extra skills on top of the presets, or disable skill loading. |
@@ -638,6 +638,7 @@ supported by this CLI.
 | Value | Intended use |
 | --- | --- |
 | `auto` | Let the runtime/backend pick the default profiler. |
+| `none` | No standalone profiling between rounds. |
 | `nsys` | NVIDIA Nsight Systems. Requires a CUDA/NVIDIA profiling environment. |
 | `ncu` | NVIDIA Nsight Compute for CUDA kernel-writing tasks. Selected by `auto` when the run environment supports it; use `none` to disable it. |
 | `flashinfer` | Per-block intra-kernel timelines recorded with FlashInfer's profiler macros, for CUDA kernel-writing tasks. Opt-in; `auto` does not select it. |
@@ -647,6 +648,7 @@ supported by this CLI.
 | `neuron` | AWS Neuron profiler for Trainium. |
 | `macos_cpu` | Instruments Time Profiler with a supported `/usr/bin/sample` fallback. |
 | `linux_cpu` | Linux `perf` profiler for native and mixed-language CPU workloads. |
+| `headroom` | Analysis of a kernel headroom report that the task's own capture command writes: each kernel's measured time against its roofline speed-of-light. LLM-serving tasks only; opt-in, and `auto` does not select it. |
 
 When `auto` selects a host-native profiler that fails its local capability
 preflight, VibeSys logs the diagnostic and continues with `none`. An explicit
@@ -715,7 +717,7 @@ context for the agent and evolve loops. The registered domains are:
 | Domain | Meaning |
 | --- | --- |
 | `llm-serving` | LLM-serving guidance, including serving-system skills and judge gates. |
-| `microservices` | Microservice workload guidance, lifecycle rules, and service-level evaluation context. |
+| `microservices` | Microservice workload guidance, lifecycle rules, and service-level evaluation context. Loads the `microservice-optimization` and `custom-rpc-optimization` skills and the dial9 Tokio trace skills. |
 | `database` | In-place optimization of a vendored database or dataflow engine, judged by output equivalence against a pristine copy of the same engine. Loads the dial9 Tokio trace skills. |
 | `kernel-writing` | Compute-kernel implementation and optimization against the task's reference, accuracy checker and scored benchmark. Loads the kernel skills; `auto` selects NCU on CUDA and rocprof on ROCm when the run environment supports it. |
 | `cli-tools` | Native command-line program optimization on CPU: observable-behavior preservation, task-owned build, correctness and measurement commands, and CPU profiling guidance. `auto` selects the host's native CPU profiler; no accelerator profiler applies. |

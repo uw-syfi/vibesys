@@ -11,16 +11,20 @@ The domain skills ship in their own plugins. Read `[agent] domain` and `backends
 | `domain = "kernel-writing"`, backend `cuda` | `vibesys-kernels-cuda` | `kernel-performance` |
 | `domain = "kernel-writing"`, backend `rocm` | `vibesys-kernels-rocm` | `kernel-performance` |
 | `domain = "kernel-writing"`, backend `trainium` | `vibesys-kernels-trainium` | `kernel-performance` |
+| `domain = "kernel-writing"`, any other backend | any kernels plugin, such as `vibesys-kernels-cuda` | `kernel-performance` |
 | `domain = "cli-tools"` | `vibesys-cli-tools` | `cli-tool-optimization` |
 
-A `cli-tools` task targets the `cpu` backend, so it needs `vibesys-cli-tools` and no backend plugin.
-A `llm-serving` task on backend `trainium` needs both `vibesys-llm-serving` and
+A `cli-tools` task targets the `cpu` backend, so it needs `vibesys-cli-tools` and no backend
+plugin. A `llm-serving` task on backend `trainium` needs both `vibesys-llm-serving` and
 `vibesys-kernels-trainium`, and on backend `rocm` both `vibesys-llm-serving` and
 `vibesys-kernels-rocm`, because `serving-systems` captures ROCm profiles with the
-`kernel-rocprof-analysis` skill. `generic` on any backend, and a listed domain on a backend the table
-does not pair it with, need no domain plugin. A domain that appears nowhere in this table and is
-not `generic` is one this plugin version does not know: carry on, and say in your first report
-that no domain skill was found for it.
+`kernel-rocprof-analysis` skill. A `kernel-writing` task on a backend with no kernels plugin of its
+own (`cpu`, `metal`) still uses the backend-neutral `kernel-correctness` and `kernel-performance`,
+which every kernels plugin lists: name only those two in briefs, since the plugin's analysis skills
+are for its own backend. `generic` on any backend, and a listed domain on a backend the table does
+not pair it with, need no domain plugin. A domain that appears nowhere in this table and is not
+`generic` is one this plugin version does not know: carry on, and say in your first report that no
+domain skill was found for it.
 
 A skill is installed when it appears among the skills your harness offers you, by its plugin
 name (`vibesys-kernels-cuda:kernel-performance`) or, where the harness has no plugin prefix, its

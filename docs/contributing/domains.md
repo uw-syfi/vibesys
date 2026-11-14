@@ -158,10 +158,11 @@ The bundle also supplies its objective, candidate contract, reference material,
 accuracy checker, and benchmark. This domain provides role guidance; those task
 files define the actual API, supported inputs, tolerances, and score.
 
-The preset `skills/domains/` root includes `kernel-correctness`,
-`kernel-performance`, `kernel-ncu-analysis` and `kernel-timeline-analysis` on
-CUDA, and `kernel-rocprof-analysis` on ROCm. Their sidecar metadata
-loads them only for `kernel-writing`. To add task-specific skills while keeping
+The preset `skills/domains/` root includes the backend-neutral
+`kernel-correctness` and `kernel-performance` on every backend,
+`kernel-ncu-analysis` and `kernel-timeline-analysis` on CUDA, and
+`kernel-rocprof-analysis` on ROCm. Their sidecar metadata loads them only for
+`kernel-writing`. To add task-specific skills while keeping
 these presets, pass `--extra-skills PATH`. Use `--skills-dir PATH` to replace the
 presets entirely. See [CLI skill flags](../cli-flags.md#skills) for the loading
 rules.
