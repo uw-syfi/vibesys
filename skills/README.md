@@ -42,7 +42,8 @@ Inside a Claude Code session (2.1.275 or later) each plugin also installs in one
 ```
 
 Install `vibesys` plus the domain plugin the task needs, chosen by the task's `[agent] domain` and
-`backends` (a Trainium LLM-serving task needs `vibesys-llm-serving` and `vibesys-kernels-trainium`);
+`backends` (a Trainium LLM-serving task needs `vibesys-llm-serving` and `vibesys-kernels-trainium`,
+and a ROCm one `vibesys-llm-serving` and `vibesys-kernels-rocm`);
 `optimize` stops with the install commands when one is missing. Skill names carry the plugin
 name, for example `vibesys-kernels-cuda:kernel-performance`. Codex reads the
 `.claude-plugin/marketplace.json` described below, so the repository has one manifest for both.
