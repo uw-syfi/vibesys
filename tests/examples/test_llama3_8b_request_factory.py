@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
 from tests.examples.example_task import load_example_task, task_root
 from tests.examples.request_factory_cpu_smoke import load_profile
 from tests.support import run_test_command
@@ -20,6 +21,7 @@ _BENCHMARK = task_root(_BUNDLE) / "benchmark" / "benchmark.py"
 _FAKE_ENGINE = Path(__file__).with_name("fakes") / "request_factory_sweep_engine.py"
 _FAKE_MODULES = Path(__file__).with_name("fakes")
 _TOKENIZER_REVISION = "0e9e39f249a16976918f6564b8830bc894c89659"
+_DEFAULT_SWEEP = (1, 2, 4, 8, 16, 32, 64, 128)
 
 
 def test_llama3_8b_uses_request_factory_and_declares_pareto_metrics() -> None:
@@ -118,7 +120,7 @@ def test_default_tokenizer_resolves_an_exact_revision_before_rf(tmp_path: Path) 
 def _run_sweep(
     tmp_path: Path,
     points: dict[int, list[tuple[float, float]]],
-    concurrencies: str,
+    concurrencies: str | None,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path, Path]:
     output = tmp_path / "result.jsonl"
     details = tmp_path / "details.json"
@@ -144,8 +146,7 @@ def _run_sweep(
             "8",
             "--output-tokens",
             "4",
-            "--concurrencies",
-            concurrencies,
+            *(() if concurrencies is None else ("--concurrencies", concurrencies)),
             "--output-json",
             details,
             "--vs-output",
@@ -240,3 +241,85 @@ def test_sweep_rejects_a_ceiling_that_is_still_rising_with_valid_error_protocol(
     measurement = read_measurement(parse_records(output.read_text(encoding="utf-8")))
     assert measurement.failed
     assert "still rising" in (measurement.failure or "")
+
+
+_DEFAULT_SWEEP_MAX = 128
+_CONCURRENCY_CAP = 1024
+_REQUESTS_PER_DEFAULT_POINT = 4  # `_run_sweep` passes --request-count 4
+_MIN_WAVES = 4
+
+
+def _saturating_server(peak: int) -> dict[int, list[tuple[float, float]]]:
+    """A server whose throughput scales linearly to ``peak`` concurrent requests, then flattens.
+
+    Past the peak, p99 latency grows with the square of the overshoot, so the wrapper sees overload.
+    Every concurrency a sweep might ask for has repeat observations ready.
+    """
+    return {
+        concurrency: [(100.0 * min(concurrency, peak), 10.0 * max(1.0, concurrency / peak) ** 2)]
+        * 3
+        for concurrency in range(1, _CONCURRENCY_CAP + 1)
+    }
+
+
+def _captured_invocations(path: Path) -> list[tuple[int, list[tuple[int, ...]]]]:
+    invocations = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    return [
+        (invocation["concurrency"], [tuple(prompt) for prompt in invocation["prompts"]])
+        for invocation in invocations
+    ]
+
+
+@pytest.mark.parametrize("peak", [64, 256, 512])
+def test_default_sweep_extends_until_the_peak_is_found(tmp_path: Path, peak: int) -> None:
+    completed, output, details, capture = _run_sweep(tmp_path, _saturating_server(peak), None)
+
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(details.read_text(encoding="utf-8"))
+    assert result["selected_concurrency"] == peak
+    measurement = read_measurement(parse_records(output.read_text(encoding="utf-8")))
+    assert measurement.values == result["metrics"]
+    swept = [point["concurrency"] for point in result["sweep"]]
+    assert set(_DEFAULT_SWEEP) <= set(swept)
+    # The sweep extends only as far as needed: one doubling past the peak, never beyond the cap.
+    assert max(swept) == max(2 * peak, _DEFAULT_SWEEP_MAX)
+    assert max(swept) <= _CONCURRENCY_CAP
+
+    invocations = _captured_invocations(capture)
+    for concurrency, prompts in invocations:
+        expected = (
+            _REQUESTS_PER_DEFAULT_POINT
+            if concurrency <= _DEFAULT_SWEEP_MAX
+            else _MIN_WAVES * concurrency
+        )
+        assert len(prompts) == expected, f"concurrency {concurrency}"
+    all_prompts = [prompt for _concurrency, prompts in invocations for prompt in prompts]
+    assert len(set(all_prompts)) == len(all_prompts)
+
+
+def test_default_sweep_still_rising_at_the_cap_fails_with_valid_error_protocol(
+    tmp_path: Path,
+) -> None:
+    completed, output, _details, capture = _run_sweep(tmp_path, _saturating_server(10**6), None)
+
+    assert completed.returncode == 1
+    measurement = read_measurement(parse_records(output.read_text(encoding="utf-8")))
+    assert measurement.failed
+    assert "still rising" in (measurement.failure or "")
+    assert f"concurrency {_CONCURRENCY_CAP}" in (measurement.failure or "")
+    highest = max(concurrency for concurrency, _prompts in _captured_invocations(capture))
+    assert highest == _CONCURRENCY_CAP
+
+
+def test_explicit_sweep_is_never_extended_or_rescaled(tmp_path: Path) -> None:
+    completed, output, _details, capture = _run_sweep(
+        tmp_path, _saturating_server(10**6), "64,128,256"
+    )
+
+    assert completed.returncode == 1
+    measurement = read_measurement(parse_records(output.read_text(encoding="utf-8")))
+    assert measurement.failed
+    assert "still rising" in (measurement.failure or "")
+    invocations = _captured_invocations(capture)
+    assert [concurrency for concurrency, _prompts in invocations] == [64, 128, 256]
+    assert {len(prompts) for _concurrency, prompts in invocations} == {_REQUESTS_PER_DEFAULT_POINT}
