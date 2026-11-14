@@ -1,9 +1,9 @@
 # dial9 (Tokio runtime trace skills + ranker)
 
 This bundle has three parts: **vendored** dial9 Agent Skills under `skills/`, a
-**first-party** trace ranker under `ranker/`, and a **first-party** workflow
-skill under `dial9-rank-bottlenecks/` that ties them together (see "First-party:
-the ranker and the ranking workflow").
+**first-party** workflow skill under `dial9-rank-bottlenecks/` that ties them
+together, and a **first-party** trace ranker in that skill's `scripts/` (see
+"First-party: the ranker and the ranking workflow").
 
 The skills are **vendored** from the open-source
 [`dial9-rs/dial9`](https://github.com/dial9-rs/dial9) project, licensed under
@@ -51,7 +51,7 @@ the Rust crates are intentionally omitted.
 
 ## First-party: the ranker and the ranking workflow
 
-`ranker/` is **not** vendored. It is first-party VibeSys tooling that turns a
+The ranker, `dial9-rank-bottlenecks/scripts/`, is **not** vendored. It is first-party VibeSys tooling that turns a
 dial9 trace into the profile-guided result protocol, and it is what makes this
 bundle useful for ranking rather than only for guided exploration. Upstream's
 `analyze.js` reports per-span **wall-clock** time keyed on spawn location, which
@@ -61,22 +61,23 @@ exactly one span, grouped per task) and emits one stable, validated JSON report.
 
 | Path | What it is |
 | ---- | ---------- |
-| `ranker/analyze_dial9.py` | Policy: which setup diagnostics invalidate a ranking, the cost model (in-window on-CPU poll seconds), the per-component evidence lines. Writes protocol v1. Stdlib only. |
-| `ranker/extract/dial9_extract.js` | Toolkit-side extractor: parses segments, claims on-CPU nanoseconds per span, writes one stable report. Resolves the sibling vendored `dial9-toolkit` by default, so no `--toolkit`/`DIAL9_TOOLKIT` is needed when run in place. |
-| `ranker/extract/check_invariants.js` | Independent cross-check of the extractor's claiming arithmetic. |
+| `dial9-rank-bottlenecks/scripts/analyze_dial9.py` | Policy: which setup diagnostics invalidate a ranking, the cost model (in-window on-CPU poll seconds), the per-component evidence lines. Writes protocol v1. Stdlib only. |
+| `dial9-rank-bottlenecks/scripts/extract/dial9_extract.js` | Toolkit-side extractor: parses segments, claims on-CPU nanoseconds per span, writes one stable report. Resolves the vendored `dial9-toolkit` skill by default, both here and where a run installs skills side by side, so no `--toolkit`/`DIAL9_TOOLKIT` is needed. |
+| `dial9-rank-bottlenecks/scripts/extract/check_invariants.js` | Independent cross-check of the extractor's claiming arithmetic. |
 
 All dial9 and Node knowledge sits on one side of a JSON boundary (`extract/`),
 all ranking policy on the other (`analyze_dial9.py`). `update.sh` wipes and
-recreates only `skills/`, so `ranker/` survives a re-vendor untouched. Because
+recreates only `skills/`, so the ranker survives a re-vendor untouched. Because
 it lives under `skills/domains/`, which the repo's ruff and ty configs exempt
 as vendored, the ranker is not linted or type-checked by repo tooling; it is
 held to the repo baseline by hand.
 
-`dial9-rank-bottlenecks/` is the first-party **workflow skill**: a single
-`SKILL.md` that teaches an agent to run the ranker, read the slow-versus-starved
-verdict, and hand off to the vendored `dial9-*` skills to root-cause a finding.
-It is the entry point to the bundle. Like `ranker/`, it is a sibling of
-`skills/`, so `update.sh` leaves it untouched, and the `dial9-tokio` routing
+`dial9-rank-bottlenecks/` is the first-party **workflow skill**: a `SKILL.md`
+that teaches an agent to run the ranker, read the slow-versus-starved verdict,
+and hand off to the vendored `dial9-*` skills to root-cause a finding. The
+ranker lives inside it because a run installs each skill directory on its own
+and nothing outside one; a tool beside the skills would never reach an agent.
+It is the entry point to the bundle. It is a sibling of `skills/`, so `update.sh` leaves it untouched, and the `dial9-tokio` routing
 rule in `../.vibesys.toml` already covers it, so no per-skill rule is needed.
 
 ## Provenance
@@ -87,4 +88,4 @@ rule in `../.vibesys.toml` already covers it, so no per-skill rule is needed.
 
 **Do not hand-edit the vendored files** under `skills/` — they are a vendored
 copy; re-vendor with `./update.sh` to pull a newer upstream revision. The
-first-party `ranker/`, `README.md`, and `NOTICE` are ours to edit.
+first-party `dial9-rank-bottlenecks/`, `README.md`, and `NOTICE` are ours to edit.

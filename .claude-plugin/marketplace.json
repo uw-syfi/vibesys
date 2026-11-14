@@ -42,7 +42,7 @@
       "name": "vibesys-microservices",
       "source": "./skills",
       "description": "Domain skills for optimizing microservices, including Tokio services profiled with dial9, for use with the vibesys optimization loop.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "strict": false,
       "skills": [
         "./domains/custom-rpc-optimization",
@@ -62,7 +62,7 @@
       "name": "vibesys-database",
       "source": "./skills",
       "description": "Tokio runtime diagnosis for database and other Tokio-based services.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "strict": false,
       "skills": [
         "./domains/dial9-tokio/dial9-rank-bottlenecks",

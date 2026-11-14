@@ -666,3 +666,35 @@ def test_selected_cli_tool_skill_materializes_every_file_and_every_link(tmp_path
     for markdown in [installed / "SKILL.md", *sorted((installed / "references").glob("*.md"))]:
         for link in _relative_links(markdown):
             assert link.is_file(), f"{markdown.relative_to(installed)} links to missing {link}"
+
+
+_DIAL9_RANK_SKILL = "dial9-rank-bottlenecks"
+_DIAL9_TOOLKIT_FILES = ("trace_parser.js", "trace_analysis.js", "decode.js", "diagnose_setup.js")
+_SKILL_DIR_COMMAND = re.compile(r"<this skill's directory>/(\S+)")
+
+
+def test_selected_dial9_ranker_is_installed_with_its_skill(tmp_path: Path) -> None:
+    """The ranker the workflow skill tells an agent to run reaches the agent's workspace.
+
+    A run installs each selected skill directory on its own, so a tool that lives beside the
+    skills in the bundle, and not inside one, never reaches the agent.
+    """
+    _, selected, _ = load_config_and_skills(
+        _args(tmp_path, ComputeBackend.CPU), domain=DomainName.DATABASE
+    )
+    assert selected is not None
+    workspace = tmp_path / "workspace"
+
+    materialize_skills(workspace, [Path(path) for path in selected])
+
+    installed = workspace / ".agents" / "skills" / _DIAL9_RANK_SKILL
+    commands = _SKILL_DIR_COMMAND.findall((installed / "SKILL.md").read_text(encoding="utf-8"))
+    assert commands, "the workflow skill no longer says how to run the ranker"
+    for command in commands:
+        assert (installed / command).is_file(), f"{_DIAL9_RANK_SKILL} runs missing {command}"
+    # The extractor's default toolkit when skills are installed side by side
+    # (`<skills>/dial9-rank-bottlenecks/scripts/extract/` -> `<skills>/dial9-toolkit/scripts/`).
+    extractor = installed / "scripts" / "extract" / "dial9_extract.js"
+    assert extractor.is_file()
+    toolkit = extractor.parent.parent.parent.parent / "dial9-toolkit" / "scripts"
+    assert all((toolkit / name).is_file() for name in _DIAL9_TOOLKIT_FILES)
