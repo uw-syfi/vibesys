@@ -530,8 +530,14 @@ def test_queue_evaluator_rejects_adversarial_histories() -> None:
         pytest.skip("Go and Rust are required by the trusted queue evaluator")
 
     evaluator = _queue_evaluator(Path(__file__).parents[2])
-    run_test_command(["go", "test", "./..."], cwd=evaluator, check=True)
-
+    completed = run_test_command(
+        ["go", "test", "./..."],
+        cwd=evaluator,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 @pytest.mark.usefixtures("queue_native_runner")
 def test_mpmc_baseline_builds_with_its_declared_build_and_passes_its_check(tmp_path: Path) -> None:
