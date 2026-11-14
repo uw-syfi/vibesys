@@ -49,10 +49,6 @@ _NOT_A_REPLY_FIELD: dict[tuple[str, str], tuple[int, str]] = {
     (f"{_ISSUE_QUEUE}/agent_evaluation.j2", "outcome"): (1, _TOOL_RESULT),
     ("src/vibesys/prompts/core_protocol/agent_evaluation.j2", "evidence"): (1, _TOOL_RESULT),
     ("src/vibesys/prompts/core_protocol/agent_evaluation.j2", "outcome"): (1, _TOOL_RESULT),
-    ("src/vibesys/prompts/backend/trainium/profiling_workflow.j2", "summary"): (
-        1,
-        "a neuron-explorer subcommand",
-    ),
     ("src/vibesys/prompts/environments/modal/runtime_notes.j2", "summary"): (
         1,
         "a keyword argument of an example Modal function",

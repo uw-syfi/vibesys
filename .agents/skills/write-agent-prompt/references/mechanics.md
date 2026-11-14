@@ -1,9 +1,8 @@
 # Prompt mechanics
 
 How a role prompt is assembled, for when a step in the skill needs more than
-its one-line rule. Read it before adding a domain role file, a modality, a
-backend fragment or a template root, or when a render fails in a way the
-error does not explain.
+its one-line rule. Read it before adding a domain role file, a modality or a
+template root, or when a render fails in a way the error does not explain.
 
 ## Rendering
 
@@ -56,16 +55,6 @@ replies gets each under its own variable, such as `implementer_reply`.
   `modality_not_in_domain`.
 - A new pack is registered in the domain registry; its byte digests join the
   domain prompt snapshot manifest.
-
-## Backend fragments
-
-- The backend prompt renderer injects every fragment of the run's backend as a
-  variable named by the file stem, on every render; an explicit keyword
-  overrides it.
-- A new backend needs its name in the fragment set and a fragment class
-  registered for it, next to the compute backend enum in vs-sandbox.
-- An empty fragment file is a hard skip; short prose saying the topic is not
-  supported yet is a soft skip that tells the agent the topic exists.
 
 ## Run-environment notes
 

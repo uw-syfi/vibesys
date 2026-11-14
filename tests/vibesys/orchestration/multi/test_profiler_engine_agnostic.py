@@ -11,8 +11,7 @@ prompt templates and the ``resources/profilers`` analyzer CLIs; this test
 keeps that true going forward.
 
 Scope is deliberately narrow: only the profiler prompt templates
-(``prompts/shared/profilers/*.j2`` and every backend's
-``profiling_workflow.j2`` fragment) and ``resources/profilers/**/*.py``.
+(``prompts/shared/profilers/*.j2``) and ``resources/profilers/**/*.py``.
 Other prompts (e.g. the implementer prompt) legitimately discuss vLLM/SGLang
 as candidate source trees the agent may be optimizing and are out of scope
 here.
@@ -30,10 +29,7 @@ if TYPE_CHECKING:
 
 _ENGINE_NAME_RE = re.compile(r"vllm|sglang", re.IGNORECASE)
 
-_PROMPT_GLOBS = (
-    "src/vibesys/prompts/shared/profilers/*.j2",
-    "src/vibesys/prompts/backend/*/profiling_workflow.j2",
-)
+_PROMPT_GLOBS = ("src/vibesys/prompts/shared/profilers/*.j2",)
 _PROFILER_CODE_ROOT = "resources/profilers"
 
 

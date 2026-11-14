@@ -194,11 +194,9 @@ Treat every prompt change as a behavior change that needs an explicit audit:
    prompt changes. Record what changed in agent-visible output and what evidence
    supports the intended behavior.
 
-For backend prompt fragments, verify the canonical fragment-name registry and
-every backend variant change together; an intentional skip still needs an
-explicit empty or explanatory fragment. For domain prompts, verify role-file
-mapping, optional-role fallback behavior, uniform render variables, and tests
-that prevent domain prose from leaking into neutral or unrelated prompts.
+For domain prompts, verify role-file mapping, optional-role fallback behavior,
+uniform render variables, and tests that prevent domain prose from leaking into
+neutral or unrelated prompts.
 
 For skill changes, also verify that the frontmatter description triggers on the
 intended requests without being overly broad, instructions are imperative and

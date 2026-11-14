@@ -124,9 +124,8 @@ def filter_skip_marked(
     """Drop any name explicitly marked deliberate in ``path``'s source.
 
     A template marks a name as an intentional, reviewed omission with
-    ``{# <skip_marker>: <name> - <reason> #}`` — the same convention
-    :class:`~vs_prompts.fragments.FragmentFamily` uses an empty file for.
-    Shared by :class:`TemplateContract` and by callers checking
+    ``{# <skip_marker>: <name> - <reason> #}``. Shared by
+    :class:`TemplateContract` and by callers checking
     :meth:`~vs_prompts.renderer.TemplateRenderer.unused_kwargs` results, so
     both directions honor the same marker.
 
@@ -161,8 +160,7 @@ class TemplateContract:
     A template that doesn't reference a required variable is a violation
     unless its source contains an explicit skip marker naming that variable —
     ``{# <skip_marker>: <var> - <reason> #}`` — so "deliberately unused" is
-    distinguishable from "forgotten" the same way an empty fragment file
-    marks a deliberate :class:`~vs_prompts.fragments.FragmentFamily` skip.
+    distinguishable from "forgotten".
     """
 
     required: frozenset[str]

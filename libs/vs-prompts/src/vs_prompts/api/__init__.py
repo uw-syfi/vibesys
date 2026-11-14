@@ -11,10 +11,6 @@ Two correctness properties every consumer gets for free:
   separately via :class:`~vs_prompts.api.TemplateContract`, since no
   undefined-variable check can see that direction.
 
-:class:`~vs_prompts.api.FragmentFamily` generalizes "every variant of
-this discriminator must define every required small fragment, an empty file
-is a deliberate skip" to any per-key fragment set.
-
 :class:`~vs_prompts.api.ReplyFields` is the ``reply`` template variable for a turn with a
 reply schema: ``{{ reply.some_field }}`` renders the backticked field name and fails
 rendering when the schema does not offer the field.
@@ -31,7 +27,6 @@ from vs_prompts.contract import (
     filter_skip_marked,
     resolve_free_variables,
 )
-from vs_prompts.fragments import FragmentFamily
 from vs_prompts.renderer import RenderedPrompt, TemplateRenderer
 from vs_prompts.reply_fields import (
     ReplyField,
@@ -42,7 +37,6 @@ from vs_prompts.reply_fields import (
 
 __all__ = [
     "ContractViolation",
-    "FragmentFamily",
     "RenderedPrompt",
     "ReplyField",
     "ReplyFields",

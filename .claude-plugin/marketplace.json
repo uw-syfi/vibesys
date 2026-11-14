@@ -32,7 +32,7 @@
       "name": "vibesys-llm-serving",
       "source": "./skills",
       "description": "Domain skills for optimizing LLM serving systems, for use with the vibesys optimization loop.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "strict": false,
       "skills": [
         "./domains/serving-systems"
