@@ -45,3 +45,18 @@ The vendored Python is kept byte-identical to upstream: `skills/domains` is
 excluded from Ruff, so do not reformat it. (Early repository-wide Ruff passes,
 #65 and #68, reformatted the first vendored copy; re-vendoring restores
 upstream's formatting, which the stale-revert check reports as undoing them.)
+
+## Known dangling links
+
+About a hundred relative Markdown links in the vendored files do not resolve
+inside the pack, because upstream copied documentation pages into the skills
+without the assets and pages they link to. In `neuron-nki-docs/references/`, 77
+point at figures under `_images/` and 14 at files under `downloads/`; both
+resolve inside the skill's own directory, which `update.sh` copies whole, so
+they dangle upstream too. A few more point at documentation pages outside the
+skill (under `about-neuron/`, `tools/`, `test/` and `programming/tutorials/`),
+and one in `neuron-nki-profile-querying` points at `schema/`. The text around
+each link is complete; a reader loses the figure, the download or the linked
+page. They are left as vendored: fixing them would mean rewriting upstream
+text, and the one fix-up `update.sh` applies adds a note rather than rewriting
+anything. Re-check them when re-vendoring.

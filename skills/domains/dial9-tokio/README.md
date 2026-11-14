@@ -17,9 +17,11 @@ how the runtime actually schedules work. The target is async Rust service
 performance, where the interesting question is usually "which poll blocked the
 worker, and why", not aggregate CPU time.
 
-These skills are routed to the `database` domain (see `../.vibesys.toml` and
-[Skill Metadata](../../../docs/contributing/skill-metadata.md)), so an agent
-optimizing a database or streaming engine gets them without per-example wiring.
+These skills are routed to the `database` and `microservices` domains (see
+`../.vibesys.toml` and [Skill Metadata](../../../docs/contributing/skill-metadata.md)),
+so an agent optimizing a database, a streaming engine or a Tokio service gets them
+without per-example wiring. Tokio cuts across both domains, so the
+`vibesys-database` and `vibesys-microservices` plugins list them too.
 
 ## What's vendored
 

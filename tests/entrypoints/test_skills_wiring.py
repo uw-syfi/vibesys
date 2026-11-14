@@ -51,6 +51,11 @@ NKI_SKILL_NAMES = {
     "neuron-nki-profiling",
     "neuron-nki-writing",
 }
+DIAL9_PACK_DIR = PROJECT_ROOT / "skills" / "domains" / "dial9-tokio"
+DIAL9_SKILL_NAMES = {
+    "dial9-rank-bottlenecks",
+    *(skill.parent.name for skill in (DIAL9_PACK_DIR / "skills").glob("*/SKILL.md")),
+}
 
 
 def _args(
@@ -357,6 +362,9 @@ def test_all_repository_skill_metadata_is_valid() -> None:
     assert metadata["kernel-rocprof-analysis"].backends == (ComputeBackend.ROCM,)
     assert metadata["cli-tool-optimization"].domains == (DomainName.CLI_TOOLS,)
     assert metadata["cli-tool-optimization"].backends == (ComputeBackend.CPU,)
+    for name in DIAL9_SKILL_NAMES:
+        assert metadata[name].domains == (DomainName.DATABASE, DomainName.MICROSERVICES)
+        assert metadata[name].backends is None
     assert set(metadata) >= NKI_SKILL_NAMES
 
 
@@ -388,6 +396,36 @@ def test_kernel_skills_follow_domain_and_backend(tmp_path: Path) -> None:
     assert (shared | analysis).isdisjoint(_skill_names(rocm_serving_skills))
     assert analysis.isdisjoint(_skill_names(trainium_skills))
     assert shared <= _skill_names(trainium_skills)
+
+
+@pytest.mark.parametrize("backend", [ComputeBackend.CPU, ComputeBackend.METAL])
+def test_backend_neutral_kernel_skills_load_on_a_backend_without_analysis_skills(
+    tmp_path: Path, backend: ComputeBackend
+) -> None:
+    """kernel-correctness and kernel-performance follow the domain alone, as the plugin docs say."""
+    _, skills, _ = load_config_and_skills(
+        _args(tmp_path, backend), domain=DomainName.KERNEL_WRITING
+    )
+
+    names = _skill_names(skills)
+    assert {"kernel-correctness", "kernel-performance"} <= names
+    assert names.isdisjoint(
+        {"kernel-ncu-analysis", "kernel-timeline-analysis", "kernel-rocprof-analysis"}
+    )
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("domain", list(DomainName), ids=lambda domain: domain.value)
+def test_dial9_skills_follow_the_tokio_domains(tmp_path: Path, domain: DomainName) -> None:
+    """A run installs the Tokio skills for database and microservices, as both plugins list them.
+
+    Microservice runs once lacked them: the sidecar routed the bundle to database alone.
+    """
+    _, skills, _ = load_config_and_skills(_args(tmp_path, ComputeBackend.CPU), domain=domain)
+
+    loaded = DIAL9_SKILL_NAMES & _skill_names(skills)
+    tokio = domain in {DomainName.DATABASE, DomainName.MICROSERVICES}
+    assert loaded == (DIAL9_SKILL_NAMES if tokio else set())
 
 
 def test_all_nki_skills_inherit_trainium_scope_from_wrapper_sidecar() -> None:
