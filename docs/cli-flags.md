@@ -710,12 +710,14 @@ A resumed host cancels and queries the recorded name; it removes the candidate o
 after the scheduler confirms that job is absent.
 
 `[agent].domain` in `vibesys.input.toml` supplies cross-cutting problem-space
-context for the agent and evolve loops. Registered domains include:
+context for the agent and evolve loops. The registered domains are:
 
 | Domain | Meaning |
 | --- | --- |
 | `llm-serving` | LLM-serving guidance, including serving-system skills and judge gates. |
 | `microservices` | Microservice workload guidance, lifecycle rules, and service-level evaluation context. |
+| `database` | In-place optimization of a vendored database or dataflow engine, judged by output equivalence against a pristine copy of the same engine. Loads the dial9 Tokio trace skills. |
+| `kernel-writing` | Compute-kernel implementation and optimization against the task's reference, accuracy checker and scored benchmark. Loads the kernel skills; `auto` selects NCU on CUDA and rocprof on ROCm when the run environment supports it. |
 | `cli-tools` | Native command-line program optimization on CPU: observable-behavior preservation, task-owned build, correctness and measurement commands, and CPU profiling guidance. `auto` selects the host's native CPU profiler; no accelerator profiler applies. |
 | `generic` | No extra domain guidance. Useful for custom/non-LLM targets. |
 
