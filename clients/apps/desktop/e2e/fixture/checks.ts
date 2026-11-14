@@ -164,6 +164,36 @@ export async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   ).toEqual([]);
 }
 
+/**
+ * One left edge (visual spec law 1): the first step of the trail and the title under it start at the
+ * same x, read from the ink (the arrow or the first letter) and not from the step's padding. A page
+ * with no trail has nothing to compare.
+ */
+export async function expectTitleOnTrailEdge(page: Page): Promise<void> {
+  const edges = await page.evaluate<{trail: number; title: number} | null>(`(() => {
+    const ink = element => {
+      const icon = element.querySelector('svg');
+      if (icon !== null) return icon.getBoundingClientRect().left;
+      const text = document.createTreeWalker(element, NodeFilter.SHOW_TEXT).nextNode();
+      if (text === null) return null;
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      return range.getBoundingClientRect().left;
+    };
+    const step = document.querySelector('main nav.vs-crumbs li:first-child .vs-crumb');
+    const title = document.querySelector('main h1');
+    if (step === null || title === null) return null;
+    const trail = ink(step);
+    const heading = ink(title);
+    return trail === null || heading === null ? null : {trail, title: heading};
+  })()`);
+  if (edges === null) return;
+  expect(
+    Math.abs(edges.trail - edges.title),
+    'the trail and the title share one left edge, to 2 px',
+  ).toBeLessThanOrEqual(2);
+}
+
 /** The semantics every top-level desktop destination exposes to keyboard and assistive-tech users. */
 export async function expectAccessibleShell(
   page: Page,

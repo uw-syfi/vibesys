@@ -87,6 +87,11 @@
   font-size: var(--text-small-size);
   line-height: var(--text-small-line);
 }
+/* The trail starts where the title under it does: the first step's own padding is not ink, so it
+   must not move the words (or the arrow before them) off the page's left edge. */
+.vs-crumbs li:first-child > .vs-crumb {
+  padding-inline-start: 0;
+}
 button.vs-crumb {
   cursor: pointer;
 }
