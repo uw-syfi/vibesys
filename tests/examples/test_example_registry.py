@@ -366,7 +366,12 @@ def _referenced_paths(entry: ExampleEntry, task: str) -> set[str]:
             and "${" not in text
             and bare != "."
             and not bare.startswith("..")
-            and (example_root(entry) / bare).exists()
+            # Bare executable names (including a wrapped `uv run python`) resolve on PATH.
+            # Only explicit paths can identify a directory; bare file arguments still count.
+            and (
+                (example_root(entry) / bare).is_file()
+                or ("/" in text and (example_root(entry) / bare).exists())
+            )
         ):
             found.add(bare)
         for match in _ROOT_REF.finditer(text):

@@ -35,7 +35,8 @@ export interface FakeProcess {
 }
 
 export function fakeProcess(kill: KillBehavior = 'dies'): FakeProcess {
-  const input = new PassThrough();
+  // Keep backpressure deterministic across Node versions (whose default buffer size differs).
+  const input = new PassThrough({highWaterMark: 16 * 1024});
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   const signals: KillSignal[] = [];
