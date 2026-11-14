@@ -25,8 +25,15 @@ name (`vibesys-kernels-cuda:kernel-performance`) or, where the harness has no pl
 bare name. It is also available when the user or the operator's instructions name a directory
 that holds it (such as a vibesys checkout's `skills/domains/<skill>/SKILL.md`): then point every
 brief at that file by its absolute path instead of the plugin name, so a fix to the skill reaches
-the next subagent. Otherwise do not search the filesystem for it. When one is missing, stop and tell the user to
-run, for Claude Code:
+the next subagent. Otherwise do not search the filesystem for it.
+
+In a run the orchestrator started (`VIBESYS_RUN` is set), the session loads only the `vibesys`
+plugin and no other plugin can be installed into it, so the install commands below cannot help.
+When a skill is missing there, send a `final` report whose headline names the missing skill and
+says the operator must start the run again with a brief that names its `SKILL.md` by absolute
+path (a release keeps it under `marketplace/skills/domains/`), and start nothing else.
+
+Otherwise, when one is missing, stop and tell the user to run, for Claude Code:
 
 ```
 claude plugin marketplace add uw-syfi/vibesys
