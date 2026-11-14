@@ -1,4 +1,5 @@
 import {
+  FigureStrip,
   OverviewGroup,
   OverviewTile,
   RailFrame,
@@ -78,7 +79,21 @@ export const OVERVIEW_ENTRIES: Pick<
   | 'OverviewTile'
   | 'OverviewGroup'
   | 'SummaryCard'
+  | 'FigureStrip'
 > = {
+  FigureStrip: {
+    render: () => (
+      <FigureStrip
+        label="Run summary"
+        figures={[
+          {label: 'Spend', value: '$4.20', detail: 'of $10.00', share: 0.42},
+          {label: 'Workstreams', value: '7', detail: 'explored'},
+          {label: 'Budget used', value: '92%', tone: 'warn', share: 0.92},
+          {label: 'Last hour', value: '—', tone: 'muted', detail: 'Not reported'},
+        ]}
+      />
+    ),
+  },
   RailFrame: {
     render: () => (
       <RailFrame
