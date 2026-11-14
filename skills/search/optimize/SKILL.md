@@ -51,8 +51,8 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    the task (for example, no placement offers a resource the task needs), stop and report the
    refusal as printed; never change the CLI's or the machine's configuration.
 3. From `vibesys.input.toml`, check that the domain skills the task needs are available, per
-   [domain-plugins.md](references/domain-plugins.md). If one is not listed among your skills, stop
-   and print its install commands from there; do not plan without it.
+   [domain-plugins.md](references/domain-plugins.md). If one is not available, stop as it says
+   (install commands, or in a run the orchestrator started a `final` report); do not plan without it.
 4. Create or resume the optimization (`vibesys:state`). A new one first needs a base that passes
    its check: run `vibesys-cli submit check <base> --wait` (a pass is saved and later measures reuse
    it). If it fails, the base can never be measured and every promotion would be refused
