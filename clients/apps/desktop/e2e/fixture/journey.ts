@@ -10,7 +10,7 @@ export interface FixtureScreen {
 
 /** Long names and enough live and ended runs to exercise the app-window layout. */
 const FIXTURE_PATH =
-  '/fixture.html?scenario=11-12-live-tree-3&fleet=30-10&long&host=local&host=ssh%3Ahost-a';
+  '/fixture.html?scenario=11-12-live-tree-3&fleet=30-10&long&generic&host=local&host=ssh%3Ahost-a';
 
 async function openRail(page: Page, name: string): Promise<void> {
   const navigation = page.getByRole('navigation', {name: 'Main'});
@@ -40,6 +40,23 @@ const runs: FixtureScreen = {
   open: async page => {
     await openRail(page, 'Runs');
     await expectScreen(page, 'Runs');
+  },
+};
+
+/** A run only the host's run index lists, opened on what its typed run log says it is doing. */
+const genericRun: FixtureScreen = {
+  slug: 'generic-run',
+  heading: 'serve',
+  activeDestination: 'Runs',
+  open: async page => {
+    await runs.open(page);
+    const card = page.getByRole('button', {name: 'Open run serve', exact: true});
+    await expect(card).toBeVisible();
+    await card.click();
+    await expectScreen(page, 'serve');
+    // The first read is in when every family has its facts: nothing on the page says it is reading.
+    await expect(page.getByRole('heading', {level: 2, name: 'Correctness checks'})).toBeVisible();
+    await expect(page.getByText('Reading', {exact: true})).toHaveCount(0);
   },
 };
 
@@ -106,6 +123,7 @@ function railScreen(slug: string, heading: string): FixtureScreen {
 /** The approval journey: Runs, its start page, then every other rail destination. */
 export const FIXTURE_SCREENS: readonly FixtureScreen[] = [
   runs,
+  genericRun,
   newRun,
   catalog,
   own,

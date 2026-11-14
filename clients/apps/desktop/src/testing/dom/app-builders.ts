@@ -34,6 +34,7 @@ export function hostSnapshotOf(overrides: Partial<HostSnapshot> = {}): HostSnaps
     agentFeeds: {},
     costFeeds: {},
     runHistory: {_tag: 'Idle'},
+    runDetails: {},
     history: {earlier: {_tag: 'Idle'}, wholes: {}},
     ...overrides,
   };
@@ -69,6 +70,7 @@ export function appCommandsOf(overrides: Partial<AppCommands> = {}): AppCommands
     beginSetup: () => undefined,
     completeSetup: () => undefined,
     retryComplete: () => undefined,
+    retryRunDetail: () => undefined,
     loadEarlier: () => undefined,
     expand: () => undefined,
     ...overrides,

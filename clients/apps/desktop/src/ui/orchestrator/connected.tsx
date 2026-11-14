@@ -10,7 +10,13 @@ import type * as Effect from 'effect/Effect';
 import * as AsyncResult from 'effect/reactivity/AsyncResult';
 import * as Atom from 'effect/reactivity/Atom';
 import {type JSX, useMemo} from 'react';
-import type {HistoryStatus, HostSession, Intent, RunHistoryStatus} from '../../core/index.js';
+import type {
+  HistoryStatus,
+  HostSession,
+  Intent,
+  RunDetailDelivery,
+  RunHistoryStatus,
+} from '../../core/index.js';
 import type {
   CommandProgress,
   CostFeedSnapshot,
@@ -72,6 +78,7 @@ export const NO_ISSUES: Issues = {
 };
 
 const NO_FOLDERS: Readonly<Record<string, string>> = {};
+const NO_RUN_DETAILS: Readonly<Record<string, RunDetailDelivery>> = {};
 const OPENING: FeedStatus = {_tag: 'Opening'};
 const IDLE: HistoryStatus = {_tag: 'Idle'};
 const RUN_HISTORY_IDLE: RunHistoryStatus = {_tag: 'Idle'};
@@ -125,8 +132,41 @@ const watchCost = (
       get(found.session.costs.watch(runId));
   });
 
+/**
+ * The detail of one generic-only run on its host, followed while this is mounted: a run the host's
+ * index lists and the managed model does not hold. A managed run's detail is its own history and
+ * cost streams, and a run no index lists has nothing to read, so neither opens this feed.
+ */
+const watchRunDetail = (
+  hosts: readonly ConnectedHost[],
+  host: string | undefined,
+  runId: string | undefined,
+): Atom.Atom<void> =>
+  Atom.make(get => {
+    const found = hosts.find(candidate => candidate.key === host);
+    if (found === undefined || runId === undefined) return;
+    if (isGenericOnlyRun(get, found.session, runId)) get(found.session.runDetail.watch(runId));
+  });
+
 /** How the atom below reads another atom. */
 type Reader = <A>(atom: Atom.Atom<A>) => A;
+
+/** Whether `runId` is a run only the host's generic index lists, as of its last whole snapshot. */
+const isGenericOnlyRun = (get: Reader, session: HostSession, runId: string): boolean => {
+  if (isManagedRun(get(session.model).data, runId)) return false;
+  const index = get(session.runIndex.index);
+  return index._tag === 'Ready' && index.runs.has(runId);
+};
+
+/** The detail of the open generic-only run, by run id; empty when the open run is not one. */
+const openRunDetails = (
+  get: Reader,
+  session: HostSession,
+  runId: string | undefined,
+): Readonly<Record<string, RunDetailDelivery>> =>
+  runId !== undefined && isGenericOnlyRun(get, session, runId)
+    ? {[runId]: get(session.runDetail.state(runId))}
+    : NO_RUN_DETAILS;
 
 /** Where the read of the open run's history stands on `session`; idle when no run of it is open. */
 const openRunHistory = (
@@ -200,6 +240,7 @@ const snapshotOfHost = (
           }
         : {},
     runHistory: openRunHistory(get, session, managedRun),
+    runDetails: here ? openRunDetails(get, session, open.openRun) : NO_RUN_DETAILS,
     history: openAgentHistory(get, session, agent),
   };
 };
@@ -328,8 +369,8 @@ function retryFeeds(
 
 /**
  * The streams the open screen needs, followed while it is open: the open agent's stream and the open
- * run's history, which the run stream does not carry, and the open run's cost stream, which is open
- * only while the Cost view shows (leaving it closes the stream).
+ * run's history, which the run stream does not carry, the open run's cost stream, which is open
+ * only while the Cost view shows (leaving it closes the stream), and the open generic run's detail.
  */
 function useOpenStreams(hosts: readonly ConnectedHost[], open: ReturnType<typeof openOf>): void {
   const {openHost, openAgent, openRun, costHost, costRun} = open;
@@ -340,6 +381,7 @@ function useOpenStreams(hosts: readonly ConnectedHost[], open: ReturnType<typeof
     ),
   );
   useAtomMount(useMemo(() => watchCost(hosts, costHost, costRun), [hosts, costHost, costRun]));
+  useAtomMount(useMemo(() => watchRunDetail(hosts, openHost, openRun), [hosts, openHost, openRun]));
 }
 
 function retryHostFeeds(
@@ -489,6 +531,7 @@ export function ConnectedApp(props: ConnectedAppProps): JSX.Element {
     retrySend: agentId => retry(issues.sends[agentId]),
     ...updateCommands(issue, retry, issues, setIssues),
     ...setupCommands(issue, retry, issues, setIssues),
+    retryRunDetail: (host, runId) => on(host, session => session.runDetail.retry(runId)),
     loadEarlier: (host, agentId, before) =>
       on(host, session => session.history.loadEarlier(agentId, before)),
     expand: (host, agentId, ordinal) =>
