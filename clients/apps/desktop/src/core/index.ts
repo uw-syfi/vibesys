@@ -81,6 +81,7 @@ export {
   PROTOCOL_VERSION,
 } from './protocol.js';
 export {makeRepositoryCheck, type RepositoryCheck} from './repository-check.js';
+export type {RunDetailDelivery, RunDetailFeed} from './run-detail/index.js';
 export {makeRunHistory, type RunHistory, type RunHistoryStatus} from './run-history.js';
 export {
   makeRunSearch,

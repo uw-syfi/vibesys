@@ -85,15 +85,14 @@ describe('generic run discovery', () => {
     expect(row.textContent).toContain('$4.25');
     screen.press(row);
     expect(screen.container.querySelector('h1')?.textContent).toBe('serve');
-    expect(screen.text()).toContain('Run details unavailable');
     expect(screen.text()).toContain('Input needed');
     expect(screen.text()).toContain(
-      'This run is waiting for a response. Return to the client or workflow that started it to continue.',
+      'this run is waiting for a response. Return to the client or workflow that started it to continue.',
     );
-    expect(screen.text()).toContain(
-      'This run is listed by the host. Detailed activity is not available in this app version.',
-    );
-    expect(screen.text()).toContain('Up to date');
+    // The detail feed has not delivered yet: every family is in its frame and says it is being read.
+    expect(screen.text()).toContain('Reading the run');
+    expect(screen.text()).not.toContain('not available in this app version');
+    expect(screen.text()).toContain('Run index up to date');
     expect(screen.text()).toContain('Project serve');
     expect(screen.text()).not.toContain('not on this host');
     expect(screen.container.querySelector('[data-mono-id]')?.textContent).toBe('generic-run');

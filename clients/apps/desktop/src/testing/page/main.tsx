@@ -9,7 +9,10 @@
  * `fleet=<runs>-<live>` gives each host that many runs instead (`long` names every third run very
  * long, `down=<n>` has the host at that position lose its link after its first snapshot,
  * `leftOut=<n>` has each host say its snapshot left that many older runs out);
- * `generic` adds one generic-only run to the host's independent typed run index;
+ * `generic=<live|refused|reading>` adds one generic-only run to the host's independent typed run index
+ * (`live` when it names none), and serves its typed detail: a recorded serving run with an agent, a
+ * workstream, a failed correctness check and 513 throughput readings; `refused` has the host refuse
+ * the detail, and `reading` never answers it;
  * `turnWindow=<n>` limits run history to its earliest n turns while agent streams still serve
  * their items, as a run beyond the host's bounded timeline does;
  * Every host serves the cost its own runs add up to (`served-host-cost.ts`), so the Cost page and the Runs
@@ -104,6 +107,7 @@ import {
 import {daemonRecording} from '../orchestrator/recordings.js';
 import {servedCost} from '../orchestrator/served-cost.js';
 import {servedHostCost} from '../orchestrator/served-host-cost.js';
+import {representativeRun, servingRunDetail, skeleton, tail} from '../run-detail/index.js';
 import {runEntryFrame, runsSyncedFrame, servingRuns} from '../runs-topic.js';
 import {makeFakePreferencesBridge} from '../settings/fakes.js';
 import {memoryMachineActions} from '../settings/machine-actions.js';
@@ -344,30 +348,55 @@ const selectedRecording =
         : machineCase === undefined
           ? served
           : machineCaseRecording(machineCase, served);
+/** The generic run's typed detail, as the address says the host serves it. */
+function genericDetail(base: Recording): Recording {
+  const recorded = representativeRun(GENERIC_RUN);
+  const served = servingRunDetail(
+    () => [skeleton(recorded.prefix, recorded.committedSequence)],
+    () => [tail(recorded.continuation), {hang: true}],
+  );
+  switch (query.get('generic')) {
+    case 'refused':
+      return servingRunDetail(
+        () => [{end: {message: 'no detail', status: RpcStatus.UNIMPLEMENTED}}],
+        () => [{hang: true}],
+      )(base);
+    case 'reading':
+      return servingRunDetail(
+        () => [{hang: true}],
+        () => [{hang: true}],
+      )(base);
+    default:
+      return served(base);
+  }
+}
+const GENERIC_RUN = 'generic-run';
 const recording = query.has('generic')
-  ? servingRuns(() => [
-      runEntryFrame('generic-run', {
-        liveness: RunLiveness.ALIVE,
-        projectRoot: '/projects/serve',
-        head: {
-          strategy: 'standard',
-          lifecycle: {state: {case: 'running', value: {}}},
-          objective: {
-            series: {
-              name: 'Throughput',
-              unit: 'requests/s',
-              direction: Direction.MAX,
-              role: SeriesRole.OBJECTIVE,
+  ? genericDetail(
+      servingRuns(() => [
+        runEntryFrame(GENERIC_RUN, {
+          liveness: RunLiveness.ALIVE,
+          projectRoot: '/projects/serve',
+          head: {
+            strategy: 'natural-language',
+            lifecycle: {state: {case: 'running', value: {}}},
+            objective: {
+              series: {
+                name: 'throughput',
+                unit: 'items/s',
+                direction: Direction.MAX,
+                role: SeriesRole.OBJECTIVE,
+              },
+              bestValue: 512,
             },
-            bestValue: 87.5,
+            usage: {costUsd: 4.25},
+            needsUser: true,
           },
-          usage: {costUsd: 4.25},
-          needsUser: true,
-        },
-      }),
-      runsSyncedFrame,
-      {hang: true},
-    ])(selectedRecording)
+        }),
+        runsSyncedFrame,
+        {hang: true},
+      ])(selectedRecording),
+    )
   : selectedRecording;
 const fake = makeFakeTransport(recording);
 const saved = savedAppearance(query);

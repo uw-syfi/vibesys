@@ -60,6 +60,19 @@ holds the same runs; open Cost on the rail to see it:
 
 Check each at windows of 1000 (the columns stack), 1440 and 1920 (main and side columns).
 
+## A run only the host's index lists
+
+A generic run has no managed report, so it has its own page, read from the host's typed run log
+(`?generic`, also in the approval journey). It adds one such run to the Runs list; open it from there.
+
+| Address | What the host does |
+| --- | --- |
+| `?generic` | Serves the run's log: an agent, a workstream, a failed correctness check and 513 throughput readings (one more than the app keeps), so every family of facts and the "left out" notes are on screen. |
+| `?generic=refused` | Refuses the log (a host too old to serve it): the page says so beside its state, with Retry, and every family says it was not read. |
+| `?generic=reading` | Never answers: the page stays in its first read. |
+
+Check each at windows of 640, 1280 and 1760.
+
 ## Add a case
 
 Add the state to the scenario generator in the `testing` folder's orchestrator Fakes, not to the

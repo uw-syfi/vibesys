@@ -309,6 +309,7 @@ export {
   type RunView,
   routeReducer,
 } from './route.js';
+export {presentRunDetail, type RunDetailPresentation} from './run-detail/index.js';
 export {isManagedRun} from './run-source.js';
 export {
   type AppearanceAction,

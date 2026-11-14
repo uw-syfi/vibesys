@@ -31,7 +31,7 @@ export const genericRunTitle = (row: Pick<GenericFleetRow, 'projectRoot'>): stri
 
 export const genericRunWord = (row: Pick<GenericFleetRow, 'state'>): Word => STATE_WORD[row.state];
 
-export const genericIndexWords = (row: GenericFleetRow): string =>
+export const genericIndexWords = (row: Pick<GenericFleetRow, 'indexFreshness'>): string =>
   row.indexFreshness === 'current' ? 'Up to date' : 'Last known';
 
 const INDEX_UNAVAILABLE: Readonly<Record<GenericRunIndexUnavailable, string>> = {

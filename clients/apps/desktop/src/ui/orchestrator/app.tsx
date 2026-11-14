@@ -5,11 +5,12 @@ import {
   type Run,
   RunStatus,
 } from '@vibesys/orchestrator-proto';
-import {Button, Chip, type Crumb, Page, Row, Stack, Text, withoutPaths} from '@vibesys/ui';
+import {Button, Chip, type Crumb, Page, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {
   HistoryStatus,
   ProvisionExample,
+  RunDetailDelivery,
   RunHistoryStatus,
   RunSearchState,
   RunsRefreshState,
@@ -23,7 +24,6 @@ import {
   type FolderListing,
   followedAgent,
   freshnessOf,
-  type GenericRunEntry,
   type GenericRunIndex,
   type HostConnectionState,
   type HostFreshness,
@@ -56,7 +56,8 @@ import {type ConnectionNote, ConnectionStatus} from './connection-status.js';
 import {costWords} from './cost-words.js';
 import {FleetScreen} from './fleet-screen.js';
 import {runTitle} from './fleet-words.js';
-import {genericIndexUnavailableWord, genericRunTitle, genericRunWord} from './generic-run-words.js';
+import {GenericRunScreen} from './generic-run/index.js';
+import {genericIndexUnavailableWord, genericRunTitle} from './generic-run-words.js';
 import {HistoryStatusWord} from './history-status.js';
 import {agentNames, nameOf} from './names.js';
 import {NewRun} from './new-run.js';
@@ -107,6 +108,8 @@ export interface HostSnapshot {
   readonly costFeeds: Readonly<Record<string, CostFeedSnapshot>>;
   /** Where the read of the open run's history (agents, turns, messages, check-ins) stands. */
   readonly runHistory: RunHistoryStatus;
+  /** What the open generic-only run's detail feed has delivered, by run id; empty for any other run. */
+  readonly runDetails: Readonly<Record<string, RunDetailDelivery>>;
   /** Where the reads of the open agent's past stand: earlier turns, and each large body by ordinal. */
   readonly history: {
     readonly earlier: HistoryStatus;
@@ -172,6 +175,8 @@ export interface AppCommands {
   /** Start optimizing the task of a run in setup; the host decides whether setup is complete. */
   readonly completeSetup: (host: string, runId: string, request: CompleteSetupRequest) => void;
   readonly retryComplete: (runId: string) => void;
+  /** Open a generic run's detail again after the host refused it or sent data the app could not read. */
+  readonly retryRunDetail: (host: string, runId: string) => void;
   /** Read the page of items of an agent before ordinal `before`. */
   readonly loadEarlier: (host: string, agentId: string, before: number) => void;
   /** Read the item at `ordinal` of an agent whole. */
@@ -520,7 +525,8 @@ function RunDestination(props: {
   const {runId} = route;
   const run = state.runs[runId];
   const goRuns = (): void => go({type: 'close-run'});
-  if (run === undefined) return <GenericOrMissingRun host={host} runId={runId} goRuns={goRuns} />;
+  if (run === undefined)
+    return <GenericOrMissingRun host={host} runId={runId} goRuns={goRuns} commands={commands} />;
   const agent = route.agentId === null ? undefined : state.agents[route.agentId];
   const followed = followedAgent(state, runId, route.agentId);
   const reading = runReading({
@@ -606,6 +612,7 @@ function GenericOrMissingRun(props: {
   readonly host: HostSnapshot;
   readonly runId: string;
   readonly goRuns: () => void;
+  readonly commands: AppCommands;
 }): JSX.Element {
   const runIndex = props.host.runIndex;
   if (runIndex._tag === 'Dormant' || runIndex._tag === 'Loading')
@@ -639,7 +646,16 @@ function GenericOrMissingRun(props: {
   return run === undefined ? (
     <MissingRun goRuns={props.goRuns} />
   ) : (
-    <GenericRunDestination run={run} freshness={runIndex.freshness} goRuns={props.goRuns} />
+    <GenericRunScreen
+      run={run}
+      freshness={runIndex.freshness}
+      delivery={props.host.runDetails[props.runId]}
+      retry={() => props.commands.retryRunDetail(props.host.key, props.runId)}
+      trail={[
+        {id: 'runs', label: TITLE, press: props.goRuns},
+        {id: run.runId, label: genericRunTitle({projectRoot: run.projectRoot})},
+      ]}
+    />
   );
 }
 
@@ -668,67 +684,6 @@ function GenericRunIndexState(props: {
         <Stack gap="space-1">
           <Text variant="code" title={props.runId}>
             {props.runId}
-          </Text>
-        </Stack>
-      </Stack>
-    </Page>
-  );
-}
-
-/** A generic-only run remains routable while its typed detail feed is introduced separately. */
-function GenericRunDestination(props: {
-  readonly run: GenericRunEntry;
-  readonly freshness: 'current' | 'stale';
-  readonly goRuns: () => void;
-}): JSX.Element {
-  const {run} = props;
-  const title = genericRunTitle({projectRoot: run.projectRoot});
-  const state = genericRunWord({state: run.state});
-  const availability = props.freshness === 'current' ? 'Up to date' : 'Last known';
-  return (
-    <Page
-      key="generic-run"
-      width="wide"
-      state="ready"
-      trail={[
-        {id: 'runs', label: TITLE, press: props.goRuns},
-        {id: run.runId, label: title},
-      ]}
-      title={title}
-    >
-      <Stack gap="space-4">
-        <Row gap="space-2" wrap>
-          <Chip label={state.label} tone={state.tone} dot />
-          <Chip label={availability} tone={props.freshness === 'current' ? 'neutral' : 'warn'} />
-          {run.needsUser ? <Chip label="Needs you" tone="warn" dot /> : null}
-        </Row>
-        {run.needsUser ? (
-          <Stack gap="space-1">
-            <Text as="h2" variant="heading">
-              Input needed
-            </Text>
-            <Text>
-              This run is waiting for a response. Return to the client or workflow that started it
-              to continue.
-            </Text>
-          </Stack>
-        ) : null}
-        <Stack gap="space-1">
-          <Text as="h2" variant="heading">
-            Run details unavailable
-          </Text>
-          <Text tone="muted">
-            This run is listed by the host. Detailed activity is not available in this app version.
-          </Text>
-        </Stack>
-        <Stack gap="space-1">
-          <Text variant="code" title={run.runId}>
-            {run.runId}
-          </Text>
-          <Text variant="small" tone="muted">
-            {run.projectRoot === null
-              ? 'Project unavailable'
-              : `Project ${withoutPaths(run.projectRoot)}`}
           </Text>
         </Stack>
       </Stack>

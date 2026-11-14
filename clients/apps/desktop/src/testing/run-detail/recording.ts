@@ -136,6 +136,7 @@ const recordedSpan = (
   kind: string,
   attrs: Any,
   parent?: string,
+  title: string = id,
 ): StoreRecord =>
   create(RecordSchema, {
     seq: sequence,
@@ -152,7 +153,7 @@ const recordedSpan = (
           name: kind,
           status: SpanStatus.RUNNING,
           startedAt: Number(sequence),
-          label: {kind, title: id, attrs},
+          label: {kind, title, attrs},
         }),
       }),
     },
@@ -280,6 +281,8 @@ export const representativeRun = (runId: string) => {
           sequence: 1,
         }),
       ),
+      undefined,
+      'Try the typed serving path',
     ),
     recordedSpan(
       4n,
@@ -303,6 +306,7 @@ export const representativeRun = (runId: string) => {
         }),
       ),
       'work-root',
+      'Candidate correctness',
     ),
     recordedSpan(
       5n,
