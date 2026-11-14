@@ -6,6 +6,7 @@ import {
   expectNoHorizontalOverflow,
   expectPageColumnScrollable,
   expectSingleDeclaredPageScroller,
+  expectTitleOnTrailEdge,
   horizontalOverflow,
   observePageIssues,
   verticalScrollReport,
@@ -40,6 +41,7 @@ for (const viewport of CHECK_VIEWPORTS) {
       await expectAccessibleShell(page, screen);
       await expectSingleDeclaredPageScroller(page);
       await expectNoHorizontalOverflow(page);
+      await expectTitleOnTrailEdge(page);
       if (screen.slug === 'runs') await expectPageColumnScrollable(page);
     }
 

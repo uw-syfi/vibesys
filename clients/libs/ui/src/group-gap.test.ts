@@ -56,3 +56,11 @@ describe('the window drag regions', () => {
     expect(declarations('rail.css', '.vs-window-drag')).toContain('--chrome-start-height');
   });
 });
+
+describe('the breadcrumb', () => {
+  test('starts its first step on the content edge, so the trail shares the title left edge', () => {
+    expect(declarations('frame.css', '.vs-crumbs li:first-child > .vs-crumb')).toContain(
+      'padding-inline-start: 0;',
+    );
+  });
+});
