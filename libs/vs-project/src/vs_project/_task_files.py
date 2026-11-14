@@ -108,6 +108,8 @@ class ExampleDomain(StrEnum):
     DATA_STRUCTURES = "data-structures"
     DATABASES = "databases"
     MICROSERVICES = "microservices"
+    CLI_TOOLS = "cli-tools"
+    KERNEL_WRITING = "kernel-writing"
 
 
 class ModelMaker(StrEnum):

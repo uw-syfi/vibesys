@@ -200,6 +200,8 @@ const (
 	ExampleDomain_EXAMPLE_DOMAIN_DATA_STRUCTURES ExampleDomain = 2
 	ExampleDomain_EXAMPLE_DOMAIN_DATABASES       ExampleDomain = 3
 	ExampleDomain_EXAMPLE_DOMAIN_MICROSERVICES   ExampleDomain = 4
+	ExampleDomain_EXAMPLE_DOMAIN_CLI_TOOLS       ExampleDomain = 5
+	ExampleDomain_EXAMPLE_DOMAIN_KERNEL_WRITING  ExampleDomain = 6
 )
 
 // Enum value maps for ExampleDomain.
@@ -210,6 +212,8 @@ var (
 		2: "EXAMPLE_DOMAIN_DATA_STRUCTURES",
 		3: "EXAMPLE_DOMAIN_DATABASES",
 		4: "EXAMPLE_DOMAIN_MICROSERVICES",
+		5: "EXAMPLE_DOMAIN_CLI_TOOLS",
+		6: "EXAMPLE_DOMAIN_KERNEL_WRITING",
 	}
 	ExampleDomain_value = map[string]int32{
 		"EXAMPLE_DOMAIN_UNSPECIFIED":     0,
@@ -217,6 +221,8 @@ var (
 		"EXAMPLE_DOMAIN_DATA_STRUCTURES": 2,
 		"EXAMPLE_DOMAIN_DATABASES":       3,
 		"EXAMPLE_DOMAIN_MICROSERVICES":   4,
+		"EXAMPLE_DOMAIN_CLI_TOOLS":       5,
+		"EXAMPLE_DOMAIN_KERNEL_WRITING":  6,
 	}
 )
 
@@ -12814,13 +12820,15 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"\fBACKEND_CUDA\x10\x02\x1a\b\xd2\xf3\x18\x04cuda\x12\x1a\n" +
 	"\fBACKEND_ROCM\x10\x03\x1a\b\xd2\xf3\x18\x04rocm\x12\x1c\n" +
 	"\rBACKEND_METAL\x10\x04\x1a\t\xd2\xf3\x18\x05metal\x12\"\n" +
-	"\x10BACKEND_TRAINIUM\x10\x05\x1a\f\xd2\xf3\x18\btrainium*\xfb\x01\n" +
+	"\x10BACKEND_TRAINIUM\x10\x05\x1a\f\xd2\xf3\x18\btrainium*\xdf\x02\n" +
 	"\rExampleDomain\x12\x1e\n" +
 	"\x1aEXAMPLE_DOMAIN_UNSPECIFIED\x10\x00\x12/\n" +
 	"\x1aEXAMPLE_DOMAIN_LLM_SERVING\x10\x01\x1a\x0f\xd2\xf3\x18\vllm-serving\x127\n" +
 	"\x1eEXAMPLE_DOMAIN_DATA_STRUCTURES\x10\x02\x1a\x13\xd2\xf3\x18\x0fdata-structures\x12+\n" +
 	"\x18EXAMPLE_DOMAIN_DATABASES\x10\x03\x1a\r\xd2\xf3\x18\tdatabases\x123\n" +
-	"\x1cEXAMPLE_DOMAIN_MICROSERVICES\x10\x04\x1a\x11\xd2\xf3\x18\rmicroservices*\xbf\x02\n" +
+	"\x1cEXAMPLE_DOMAIN_MICROSERVICES\x10\x04\x1a\x11\xd2\xf3\x18\rmicroservices\x12+\n" +
+	"\x18EXAMPLE_DOMAIN_CLI_TOOLS\x10\x05\x1a\r\xd2\xf3\x18\tcli-tools\x125\n" +
+	"\x1dEXAMPLE_DOMAIN_KERNEL_WRITING\x10\x06\x1a\x12\xd2\xf3\x18\x0ekernel-writing*\xbf\x02\n" +
 	"\n" +
 	"ModelMaker\x12\x1b\n" +
 	"\x17MODEL_MAKER_UNSPECIFIED\x10\x00\x12\x1e\n" +

@@ -82,3 +82,39 @@ func TestACatalogueIsHeldToItsDomain(t *testing.T) {
 		})
 	}
 }
+
+// A task names its domain as the enum value's name without its prefix, in lower case, with a hyphen
+// for each underscore. Every domain the contract defines is catalogued by that spelling, with the
+// facts its domain requires and no others; cli-tools and kernel-writing are the two that once had no
+// value, so a task of either could not be catalogued.
+func TestEveryDomainIsCataloguedByItsSpelling(t *testing.T) {
+	const hardware = "[catalogue.hardware]\naccelerator = \"CPU\"\ncount = 1\nvendor = \"cpu\"\n"
+	facts := map[cliv1.TaskDomain]string{
+		cliv1.TaskDomain_TASK_DOMAIN_LLM_SERVING:     "[catalogue.model]\nname = \"m\"\nmaker = \"meta\"\n",
+		cliv1.TaskDomain_TASK_DOMAIN_DATA_STRUCTURES: "[catalogue.workload]\nname = \"w\"\ndescription = \"d\"\n",
+	}
+	spellings := map[string]bool{}
+	values := cliv1.TaskDomain_TASK_DOMAIN_UNSPECIFIED.Descriptor().Values()
+	for i := range values.Len() {
+		value := cliv1.TaskDomain(values.Get(i).Number())
+		if value == cliv1.TaskDomain_TASK_DOMAIN_UNSPECIFIED {
+			continue
+		}
+		spelling := strings.ReplaceAll(strings.ToLower(strings.TrimPrefix(value.String(), "TASK_DOMAIN_")), "_", "-")
+		spellings[spelling] = true
+		t.Run(spelling, func(t *testing.T) {
+			got, err := decodeCatalogue("[catalogue]\ndomain = \"" + spelling + "\"\n" + hardware + facts[value])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.GetDomain() != value {
+				t.Fatalf("domain %q decoded as %v, want %v", spelling, got.GetDomain(), value)
+			}
+		})
+	}
+	for _, reported := range []string{"cli-tools", "kernel-writing"} {
+		if !spellings[reported] {
+			t.Errorf("no domain is spelled %q", reported)
+		}
+	}
+}
