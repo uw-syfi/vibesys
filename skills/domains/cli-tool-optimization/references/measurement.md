@@ -24,7 +24,9 @@ every timing you intend to believe.
 - **Wall-clock** time is what a user waits for. It includes waiting on disk,
   pipes, child processes and the scheduler, and it is the noisier of the two.
 - **CPU time** (user plus system) is steadier and shows work done, but it hides
-  waiting and can double-count when a program runs threads or children.
+  waiting. It sums across threads and across children the process waited for, so
+  it can exceed wall time. A child that is never waited for, or that outlives the
+  process, is not counted at all, so detaching work hides it.
 - Record both. A large gap between wall and CPU means the program waits (I/O,
   pipes, locks, sleeps); a CPU time that matches wall means the work is on-CPU.
 - Use the metric the task scores. Optimizing the other one is not progress.
@@ -40,9 +42,13 @@ fixed per invocation and puts a floor under every run.
 - Measure the floor: run the same program with trivial input or a no-op option.
 - Inspect dynamic loading with the loader's own diagnostics where available
   (for example `LD_DEBUG=statistics` on Linux).
-- Compare against a trivial program run the same way (for example one that
-  reads a tiny file and exits): whatever the harness itself costs is a floor
-  for every invocation, and a gain below it cannot be seen.
+- Compare against trivial programs run the same way. A minimal statically linked
+  program that exits at once measures the harness and `execve` floor, which no
+  change to your program can go below. A minimal dynamically linked one (for
+  example one that reads a tiny file) adds loader, libc and locale start-up, which
+  your program also pays and may be able to reduce. Use the first as the floor and
+  the second as a reference point; do not read the second as the floor, or the
+  start-up headroom looks far smaller than it is.
 - Estimate the ceiling of any per-input change: the saving cannot exceed the
   per-input share of the measured time, and a program that is mostly start-up
   gains little from a faster inner loop.
@@ -56,13 +62,15 @@ convenient. Do not mix states within one comparison. Prepare inputs outside the
 timed region, run one or more untimed warm-up repetitions when the evaluator
 does, and say what you did.
 
-## Quick and full measurements
+## Which measurement supports a claim
 
-Evaluators often offer a quick tier (a small subset, few repetitions) and a full
-tier. The quick one is a smoke test: use it to see that nothing broke and the effect
-has the right sign. Only the full tier, with every failure and error at zero,
-supports a claim. Full measurements are expensive and may be budgeted, so spend them
-on hypotheses whose ceiling is above the noise floor.
+The task says which measurement supports a claim. In a loop with a job system that
+is usually the verdict comparing the candidate's measure job with its parent's, plus
+any extra gate the objective names (for example a pass over the whole workload with
+zero failures). Evaluators often also offer a quick tier (a small subset, few
+repetitions): it is a smoke test that shows nothing broke and the effect has the
+right sign, never a claim. Measurements are expensive and may be budgeted, so spend
+them on hypotheses whose ceiling is above the noise floor.
 
 ## How the score aggregates
 
@@ -74,6 +82,11 @@ large saving in a few. Estimate ceilings and compare local results in that same
 aggregate, not in raw seconds.
 
 ## Comparing a candidate with the baseline
+
+In a loop where all load goes through jobs, a timing run of the whole program is
+load: run it as a job, or only the way the objective allows (for example under the
+task's machine lock). Only an in-process microbenchmark of one unit runs in your own
+shell. The method below applies wherever you are allowed to time.
 
 - **Interleave** baseline and candidate runs (A, B, A, B, ...) and alternate which
   goes first, so drift in machine load, temperature or cache state hits both.
@@ -93,7 +106,10 @@ aggregate, not in raw seconds.
 Short processes need extra care. Timer resolution, process-creation cost and
 scheduler placement are the same size as the signal. Time many launches and
 divide, or use instruction counts (hardware counters where permitted, otherwise
-callgrind), which are far steadier than time, as a cross-check. Note that launching through a shell, wrapper or harness adds
+callgrind), which are far steadier than time, as a cross-check. Instruction counts
+cover user space only: take system time and page faults from the process's resource
+usage (`/usr/bin/time -v` or `getrusage`), because fewer instructions is not less
+time when faults or syscalls grow. Launching through a shell, wrapper or harness adds
 its own cost to both sides; keep it identical.
 
 ## Contamination to rule out
@@ -107,6 +123,11 @@ its own cost to both sides; keep it identical.
   profiling or builds running while the evaluator measures.
 - A debug or sanitizer build timed against an optimized one.
 - Inputs that changed between baseline and candidate runs.
+- Code layout. Byte-identical or trivially different builds can time differently
+  through code alignment, link order or page placement, often by a percent or more.
+  A sub-percent gain needs a mechanism-level cross-check (instruction or syscall
+  counts that move in line with the claim) and an A/A of identical builds, not only
+  a timing.
 
 ## Reporting
 

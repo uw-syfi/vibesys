@@ -151,7 +151,4 @@ I/O. Re-classify as input size, option sets or cache state change.
 
 They are prompts for questions and a vocabulary for records, nothing more. They do
 not prescribe an optimization, and a technique that suits one program can be
-irrelevant or harmful for another. If a kind of program turns out to need
-substantially different correctness criteria, profiling techniques, build
-mechanisms or review rules, that is a sign it may deserve its own guidance; until
-then, this skill and these questions are the shared foundation.
+irrelevant or harmful for another.

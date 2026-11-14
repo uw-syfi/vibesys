@@ -15,8 +15,10 @@ The domain skills ship in their own plugins. Read `[agent] domain` and `backends
 
 A `cli-tools` task targets the `cpu` backend, so it needs `vibesys-cli-tools` and no backend plugin.
 A `llm-serving` task on backend `trainium` needs both `vibesys-llm-serving` and
-`vibesys-kernels-trainium`. Any other domain or backend (for example `generic` on `cpu`) needs
-no domain plugin.
+`vibesys-kernels-trainium`. `generic` on any backend, and a listed domain on a backend the table
+does not pair it with, need no domain plugin. A domain that appears nowhere in this table and is
+not `generic` is one this plugin version does not know: carry on, and say in your first report
+that no domain skill was found for it.
 
 A skill is installed when it appears among the skills your harness offers you, by its plugin
 name (`vibesys-kernels-cuda:kernel-performance`) or, where the harness has no plugin prefix, its

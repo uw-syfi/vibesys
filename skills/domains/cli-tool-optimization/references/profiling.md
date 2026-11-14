@@ -16,22 +16,30 @@ not the score.
    most expensive one.
 3. Reproduce each exactly: arguments, working directory, environment variables,
    locale, input files, and where output goes. A terminal, a pipe and a file can
-   take different code paths.
+   take different code paths. Also match inherited process state: signal
+   dispositions (an ignored `SIGPIPE` turns death by signal into a write error),
+   umask, open descriptors, resource limits, and whether standard output and
+   standard error share one pipe.
+4. Prefer the evaluator's own way of running one recorded invocation. An evaluator
+   that replays invocations in an isolated root runs them against its own libraries,
+   locale data and file layout; a hand-made reproduction on the host profiles
+   different code. If you reproduce by hand, say how your reproduction differs.
 
 ## Tools, when available and permitted
 
 Use what the task or the environment provides; an unavailable tool is a reason to
 use another, not to skip profiling. Containers and restricted hosts often block
 some of these, in particular hardware counters (`perf`). Where they are blocked,
-callgrind's instruction counts and `strace` counts are the usual substitutes.
-Run profilers only where the task allows load, never during a measurement.
+callgrind's instruction counts and `strace` counts are the usual substitutes, with
+system time and page faults taken from the process's resource usage. Run profilers
+only where the task allows load, never during a measurement.
 
 | Tool | Good for | Watch for |
 | --- | --- | --- |
 | `perf stat`, `perf record`, `perf report` (Linux) | Where CPU time goes; hardware counters (instructions, cycles, cache and branch misses) | Needs kernel permission; short runs give few samples; kernel symbols may be hidden |
 | `sample` or Instruments (macOS) | Where CPU time goes on macOS | Sampling interval limits short runs |
-| callgrind (Valgrind) | Exact instruction counts per function, steady even for short runs, good for before/after instruction comparison | Slow; models caches, so its timing is not real time |
-| `strace -c`, `strace -f -tt -T`, `ltrace` (Linux), `dtruss` (macOS, needs permission) | Syscall counts, order and latency; library call counts; subprocesses | Tracing slows the program and changes timing; use it to count, not to time |
+| callgrind (Valgrind) | Exact instruction counts per function, including the dynamic loader; steady even for short runs; good for before/after comparison | Slow; reports instructions, not time (caches are simulated only with `--cache-sim=yes`); sees user space only, so `execve`, page faults and `mmap` work in the kernel are invisible |
+| `strace -c`, `strace -f -tt -T`, `ltrace` (Linux), `dtruss` (macOS) | Syscall counts, order and latency; library call counts; subprocesses | Tracing slows the program and changes timing; use it to count, not to time. `ltrace` often fails on binaries linked with immediate binding; `dtruss` needs System Integrity Protection relaxed |
 | `/usr/bin/time -v` or equivalent | User, system and wall time, peak memory, page faults | Coarse |
 | Allocation profilers (`heaptrack`, `massif`, allocator statistics) | Allocation counts, sizes, lifetimes | Overhead; results depend on the allocator |
 | Compiler instrumentation (`-pg`, `-fprofile-generate`, `-finstrument-functions`) | Call counts and graphs when sampling is too coarse | Changes the build; keep it separate from the measured binary |
@@ -50,8 +58,11 @@ inclusive time (with callees) separately, and remember that inlining moves cost
 between functions.
 
 Build with debug symbols (`-g`) for readable output; this does not change code
-generation in normal toolchains. Frame-pointer or DWARF call graphs may need a
-separate build or a recording option. Do not time the profiling build.
+generation in normal toolchains. Distribution-style builds strip the shipped
+executable: the symbols are in the build tree or a separate debug package, so
+profile the same build with its symbols, and take library symbols from the system's
+debug packages. Frame-pointer or DWARF call graphs may need a separate build or a
+recording option. Do not time the profiling build.
 
 ## Separate start-up from steady state
 
@@ -87,6 +98,12 @@ Work through the costs that apply to this program, and say which are present:
 - **Allocation**: count and size of allocations, reallocations, page faults.
 - **Process creation**: forks, execs, pipes, waits.
 
+Attribute each cost center to code you may edit or to a library you may not (the C
+library's regular expressions, locale and character-set conversion data, a pattern
+library). For a library, the levers are calling it less, calling it differently, or
+an in-tree alternative where the objective allows one. Reimplementing a library's
+behavior byte for byte is a large semantic risk; bound it before funding it.
+
 ## Classify the workload
 
 Use measurements, not impressions:
@@ -94,7 +111,7 @@ Use measurements, not impressions:
 | Class | Typical evidence |
 | --- | --- |
 | CPU-bound | CPU time close to wall time; time concentrated in user-space functions |
-| Syscall-bound | High system time; syscall count large relative to work; time in kernel entry |
+| Syscall-bound | High system time; syscall count large relative to work; time in kernel entry. Page faults and `execve`/`mmap` work also show up as system time |
 | I/O-bound | Wall time well above CPU time; changes with cache state; waiting on reads or writes |
 | Allocation-bound | Allocator functions and page faults prominent; count of allocations scales with input |
 | Start-up dominated | Time on trivial input is close to time on representative input |

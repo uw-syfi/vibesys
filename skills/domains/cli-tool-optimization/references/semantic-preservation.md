@@ -16,7 +16,9 @@ Treat each of these as part of the contract:
   that is visible to a pipeline, and behavior when output is a terminal versus a
   pipe or file.
 - **Standard error bytes**: exact message text including the program name,
-  ordering relative to output, and when nothing is printed.
+  ordering relative to output, and when nothing is printed. When standard output
+  and standard error share one file description (one pipe or file), the points at
+  which standard output is flushed are observable in the interleaving.
 - **Exit status** for every outcome, and **signals** the program raises, handles
   or dies from.
 - **Timeouts and long-running behavior**: interruptibility, responsiveness to
@@ -26,6 +28,10 @@ Treat each of these as part of the contract:
   **metadata**, and other **side effects**. Creating a file the original did not
   (a temporary file, a cache, a lock file) is a change in behavior, and an
   evaluator may fail it as an extra write.
+- **How a file is replaced**: writing a new file and renaming it over the old one,
+  or rewriting the old one in place. The difference is visible through hard links,
+  symlinks, descriptors other processes hold open, ownership, permissions, security
+  labels, and what is left after a crash. An in-place editor depends on this.
 - **Locale and environment variables**: collation, character encoding, number and
   date formatting, and variables that change behavior (for example locale
   selection, terminal and color settings, `TZ`, and compatibility switches).
@@ -39,6 +45,10 @@ Treat each of these as part of the contract:
   carry on) because many scripts depend on it.
 - **Recursive traversal**: order, depth handling, symlink and mount policies,
   error continuation, and what is skipped.
+- **Features the evaluation environment lacks**: access control lists, extended
+  attributes, security contexts, real user and group databases, non-UTF-8 locales,
+  terminals, other filesystems. Behavior there is still behavior to keep, even
+  though no recorded case reaches it.
 
 ## Recorded cases versus complete semantics
 
@@ -51,6 +61,11 @@ because that is what is proven, and preserve complete program semantics because
 that is what users depend on, even where nothing proves it directly.
 
 ## How to test beyond the benchmark
+
+When: before the first measurement, run the task's check and a quick differential
+test of the behavior you changed. After a favorable verdict, and before the
+candidate goes to a judge, run the full differential, sanitizer and project
+test-suite pass, and report it with the candidate.
 
 - **Differential testing against the unmodified baseline build.** Run baseline and
   candidate on the same invocations and compare stdout, stderr, exit status and
@@ -69,7 +84,9 @@ that is what users depend on, even where nothing proves it directly.
 - **Held-out cases.** If the task provides cases it does not score, run them. If it
   does not, build your own, and keep them out of anything you tune against.
 - **Reason about reach.** For each function you changed, list the behaviors it
-  influences, then test those, including the ones the benchmark never touches.
+  influences, then test those, including the ones the benchmark never touches. One
+  source tree often builds several programs that share support code; a change there
+  reaches every program that links it, scored or not.
 
 ## Rules of thumb
 
@@ -78,7 +95,8 @@ that is what users depend on, even where nothing proves it directly.
 - Do not trade semantics for speed unless the objective says you may. If a
   difference is unavoidable (for example, ordering that was never guaranteed),
   state it explicitly in your record so a reviewer can decide.
-- Where the program is specified by a standard or documentation, the specification
-  is the contract; where it is not, current behavior is.
+- Current observable behavior is the contract. A standard or the documentation can
+  tell you that a behavior is allowed to vary, but a change it allows is still a
+  change: make it only if the objective permits, and disclose it.
 - Never fix a correctness failure by editing the check, the recorded cases, or the
   expected output.

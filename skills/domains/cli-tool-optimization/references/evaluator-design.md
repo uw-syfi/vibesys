@@ -15,9 +15,9 @@ own description first: it says what its evaluator actually does.
   standard output bytes, standard error bytes, the final state of files the
   original wrote, and no files written that the original did not write. If standard
   error is not compared, say so: that is a gap an agent must not use.
-- **Candidate and baseline are interleaved** on the same machine, with the baseline
-  rebuilt or recorded the same way, so drift cancels. The score is a ratio against
-  the baseline, not an absolute time.
+- **Drift is controlled.** Where the machine drifts over a run, candidate and
+  baseline are interleaved within a sample on the same machine, with the baseline
+  built or recorded the same way, and the score is a ratio against it.
 - **The environment is replayed**: arguments, working directory, environment
   variables, locale, input files and how input and output are connected.
 - **The scope is enforced mechanically.** A check refuses any change outside the
@@ -28,9 +28,12 @@ own description first: it says what its evaluator actually does.
 - **A noise floor comes from measurement**, from running the baseline against itself,
   and a result must beat it. Sample counts, the subset and the seed are fixed by the
   task so every candidate faces the same workload.
-- **Two tiers of measurement.** A quick tier is a smoke test and is diagnostic. The
-  full tier, over the whole workload, is what supports a claim, with failures and
-  errors at zero and an interval that excludes "no change".
+- **It says which measurement supports a claim.** A quick tier is a smoke test only.
+  If a claim needs more than the loop's own verdict (for example a pass over the
+  whole workload with zero failures and an interval that excludes "no change"), the
+  objective says so, so that the judge can require it.
+- **Outputs that depend on the current time** (today's date, file ages, relative
+  times) are pinned or excluded, or recorded expectations expire.
 - **Failures are loud.** A build error, a failed entry, a sandbox error or an
   unreproducible baseline gives no score, never a score with a warning.
 
@@ -44,6 +47,10 @@ exercise them:
   consumer beyond the recorded cut-offs.
 - File metadata (times, ownership), directory entry order, and anything the
   comparison deliberately ignores.
+- How a file was replaced: inode identity, hard links, and whether the program
+  renamed a new file into place or rewrote the old one.
+- Features the evaluation environment never has (access control lists, extended
+  attributes, security contexts, real user names, terminals).
 - Behavior on other platforms, other libraries and other CPUs than the evaluator's.
 - Whether the change is honest. Reading the diff for special cases is the only check.
 
@@ -51,10 +58,13 @@ Close the gap with the project's own test suite run through the task's commands,
 differential tests against the baseline ([semantic-preservation.md](semantic-preservation.md)),
 and review ([review-checklist.md](review-checklist.md)).
 
-## Proving that an evaluator works
+## For task authors: proving that an evaluator works
 
-Before trusting a task, run known-bad candidates and confirm each one is caught.
-Useful kinds, each applied to a copy of the program:
+This section is for whoever builds the task, not for agents optimizing it: an
+optimizing agent never spends jobs on known-bad candidates, and a task that seems
+broken is its owner's to fix. The general procedure (base check, mutants,
+sensitivity, noise floor) is in the `create-task` skill's validation reference of
+the vibesys plugin. The command-line specific known-bad candidates are:
 
 | Candidate | Must be caught by |
 | --- | --- |
