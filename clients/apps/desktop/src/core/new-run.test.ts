@@ -1,11 +1,20 @@
 import {create} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
-import {AgentSpecSchema, FitState, Harness, StartRunSchema} from '@vibesys/orchestrator-proto';
+import {
+  AgentSpecSchema,
+  CatalogueProblemReason,
+  FitState,
+  Harness,
+  StartRunSchema,
+} from '@vibesys/orchestrator-proto';
 import * as Effect from 'effect/Effect';
 import {NOT_READ} from '../state/index.js';
 import {type HostHarness, hostHarness} from '../testing/orchestrator/harness.js';
 import {FakeDaemon, generateScenario, methodPathOf} from '../testing/orchestrator/index.js';
-import {FIXTURE_REPOSITORIES_DIRECTORY} from '../testing/orchestrator/new-run-fixtures.js';
+import {
+  FIXTURE_REPOSITORIES_DIRECTORY,
+  fixtureCatalogueProblemResponse,
+} from '../testing/orchestrator/new-run-fixtures.js';
 import type {Intent} from './commands.js';
 
 const scenario = generateScenario({seed: 1, subagents: 1, live: false});
@@ -43,6 +52,22 @@ describe('what the New run screen asks of the host', () => {
         'cluster-a',
         'cluster-b',
       ]);
+    }),
+  );
+
+  it.effect('reads a classified catalogue problem as a successful reply, not a failure', () =>
+    Effect.gen(function* () {
+      const problem = fixtureCatalogueProblemResponse(
+        CatalogueProblemReason.NO_RELEASE,
+        'no release found next to this host',
+      );
+      const h = yield* hostHarness(new FakeDaemon(scenario), {catalogue: problem});
+      yield* h.session.newRun.load;
+      const catalogue = yield* h.read(h.session.newRun.catalogue);
+      expect(catalogue).toMatchObject({reading: false, failure: null});
+      expect(catalogue.data?.entries).toEqual([]);
+      expect(catalogue.data?.repositoriesDirectory).toBe(FIXTURE_REPOSITORIES_DIRECTORY);
+      expect(catalogue.data?.problem).toEqual(problem.problem);
     }),
   );
 

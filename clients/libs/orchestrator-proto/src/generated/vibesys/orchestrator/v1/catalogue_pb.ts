@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/catalogue.proto.
  */
 export const file_vibesys_orchestrator_v1_catalogue: GenFile = /*@__PURE__*/
-  fileDesc("Cid2aWJlc3lzL29yY2hlc3RyYXRvci92MS9jYXRhbG9ndWUucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxImMKA0ZpdBI8CgVzdGF0ZRgBIAEoDjIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkZpdFN0YXRlQgq6SAeCAQQQASAAEh4KBnBsYWNlcxgCIAMoCUIOukgLkgEIEEAiBHICEAEipQEKDkNhdGFsb2d1ZUVudHJ5EhsKB2V4YW1wbGUYASABKAlCCrpIB3IFEAEogAISLgoEY2FyZBgCIAEoCzIYLnZpYmVzeXMuY2xpLnYxLlRhc2tDYXJkQga6SAPIAQESEwoLbmVlZHNfY2xvbmUYAyABKAgSMQoDZml0GAQgASgLMhwudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuRml0Qga6SAPIAQEiFgoUTGlzdENhdGFsb2d1ZVJlcXVlc3QiqwEKFUxpc3RDYXRhbG9ndWVSZXNwb25zZRIZCgdyZWxlYXNlGAEgASgJQgi6SAVyAyiAARIyChZyZXBvc2l0b3JpZXNfZGlyZWN0b3J5GAIgASgJQhK6SA9yDTILXi9bXlx4MDBdKiQSQwoHZW50cmllcxgDIAMoCzInLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNhdGFsb2d1ZUVudHJ5Qgm6SAaSAQMQ0A8qmwEKCEZpdFN0YXRlEhkKFUZJVF9TVEFURV9VTlNQRUNJRklFRBAAEhIKDkZJVF9TVEFURV9GSVRTEAESHAoYRklUX1NUQVRFX05PX0FDQ0VMRVJBVE9SEAISIQodRklUX1NUQVRFX1VOS05PV05fQUNDRUxFUkFUT1IQAxIfChtGSVRfU1RBVEVfUExBQ0VTX1VOUkVBREFCTEUQBEJUWlJnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9vcmNoZXN0cmF0b3IvZ2VuL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL3YxO29yY2hlc3RyYXRvcnYxYgZwcm90bzM", [file_buf_validate_validate, file_vibesys_cli_v1_task]);
+  fileDesc("Cid2aWJlc3lzL29yY2hlc3RyYXRvci92MS9jYXRhbG9ndWUucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxImMKA0ZpdBI8CgVzdGF0ZRgBIAEoDjIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkZpdFN0YXRlQgq6SAeCAQQQASAAEh4KBnBsYWNlcxgCIAMoCUIOukgLkgEIEEAiBHICEAEipQEKDkNhdGFsb2d1ZUVudHJ5EhsKB2V4YW1wbGUYASABKAlCCrpIB3IFEAEogAISLgoEY2FyZBgCIAEoCzIYLnZpYmVzeXMuY2xpLnYxLlRhc2tDYXJkQga6SAPIAQESEwoLbmVlZHNfY2xvbmUYAyABKAgSMQoDZml0GAQgASgLMhwudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuRml0Qga6SAPIAQEiFgoUTGlzdENhdGFsb2d1ZVJlcXVlc3Qi5wEKFUxpc3RDYXRhbG9ndWVSZXNwb25zZRIZCgdyZWxlYXNlGAEgASgJQgi6SAVyAyiAARIyChZyZXBvc2l0b3JpZXNfZGlyZWN0b3J5GAIgASgJQhK6SA9yDTILXi9bXlx4MDBdKiQSQwoHZW50cmllcxgDIAMoCzInLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNhdGFsb2d1ZUVudHJ5Qgm6SAaSAQMQ0A8SOgoHcHJvYmxlbRgEIAEoCzIpLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNhdGFsb2d1ZVByb2JsZW0ieQoQQ2F0YWxvZ3VlUHJvYmxlbRJLCgZyZWFzb24YASABKA4yLy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5DYXRhbG9ndWVQcm9ibGVtUmVhc29uQgq6SAeCAQQQASAAEhgKBmRldGFpbBgCIAEoCUIIukgFcgMogCAqmwEKCEZpdFN0YXRlEhkKFUZJVF9TVEFURV9VTlNQRUNJRklFRBAAEhIKDkZJVF9TVEFURV9GSVRTEAESHAoYRklUX1NUQVRFX05PX0FDQ0VMRVJBVE9SEAISIQodRklUX1NUQVRFX1VOS05PV05fQUNDRUxFUkFUT1IQAxIfChtGSVRfU1RBVEVfUExBQ0VTX1VOUkVBREFCTEUQBCqcAQoWQ2F0YWxvZ3VlUHJvYmxlbVJlYXNvbhIoCiRDQVRBTE9HVUVfUFJPQkxFTV9SRUFTT05fVU5TUEVDSUZJRUQQABInCiNDQVRBTE9HVUVfUFJPQkxFTV9SRUFTT05fTk9fUkVMRUFTRRABEi8KK0NBVEFMT0dVRV9QUk9CTEVNX1JFQVNPTl9SRUxFQVNFX0lOQ09NUExFVEUQAkJUWlJnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9vcmNoZXN0cmF0b3IvZ2VuL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL3YxO29yY2hlc3RyYXRvcnYxYgZwcm90bzM", [file_buf_validate_validate, file_vibesys_cli_v1_task]);
 
 /**
  * Fit is advice computed per call from the current eval places; StartRun decides again.
@@ -116,6 +116,14 @@ export type ListCatalogueResponse = Message<"vibesys.orchestrator.v1.ListCatalog
    * @generated from field: repeated vibesys.orchestrator.v1.CatalogueEntry entries = 3;
    */
   entries: CatalogueEntry[];
+
+  /**
+   * Set, with entries empty, when the host has no release or an incomplete one: the catalogue is
+   * legible in degraded form rather than a plain call failure.
+   *
+   * @generated from field: vibesys.orchestrator.v1.CatalogueProblem problem = 4;
+   */
+  problem?: CatalogueProblem | undefined;
 };
 
 /**
@@ -124,6 +132,30 @@ export type ListCatalogueResponse = Message<"vibesys.orchestrator.v1.ListCatalog
  */
 export const ListCatalogueResponseSchema: GenMessage<ListCatalogueResponse> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_catalogue, 3);
+
+/**
+ * @generated from message vibesys.orchestrator.v1.CatalogueProblem
+ */
+export type CatalogueProblem = Message<"vibesys.orchestrator.v1.CatalogueProblem"> & {
+  /**
+   * @generated from field: vibesys.orchestrator.v1.CatalogueProblemReason reason = 1;
+   */
+  reason: CatalogueProblemReason;
+
+  /**
+   * Display only: the host's own words.
+   *
+   * @generated from field: string detail = 2;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.CatalogueProblem.
+ * Use `create(CatalogueProblemSchema)` to create a new message.
+ */
+export const CatalogueProblemSchema: GenMessage<CatalogueProblem> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_catalogue, 4);
 
 /**
  * FitState says whether a task's accelerator is given by any place the host can evaluate on.
@@ -172,4 +204,37 @@ export enum FitState {
  */
 export const FitStateSchema: GenEnum<FitState> = /*@__PURE__*/
   enumDesc(file_vibesys_orchestrator_v1_catalogue, 0);
+
+/**
+ * CatalogueProblemReason classifies why a host's catalogue could not be read, for the two causes a
+ * client can act on: no release installed, or one that is missing files.
+ *
+ * @generated from enum vibesys.orchestrator.v1.CatalogueProblemReason
+ */
+export enum CatalogueProblemReason {
+  /**
+   * @generated from enum value: CATALOGUE_PROBLEM_REASON_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The host runs no release: nothing was ever installed beside it.
+   *
+   * @generated from enum value: CATALOGUE_PROBLEM_REASON_NO_RELEASE = 1;
+   */
+  NO_RELEASE = 1,
+
+  /**
+   * The release is installed but is missing the catalogue or the examples it lists.
+   *
+   * @generated from enum value: CATALOGUE_PROBLEM_REASON_RELEASE_INCOMPLETE = 2;
+   */
+  RELEASE_INCOMPLETE = 2,
+}
+
+/**
+ * Describes the enum vibesys.orchestrator.v1.CatalogueProblemReason.
+ */
+export const CatalogueProblemReasonSchema: GenEnum<CatalogueProblemReason> = /*@__PURE__*/
+  enumDesc(file_vibesys_orchestrator_v1_catalogue, 1);
 

@@ -9,9 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/release"
@@ -103,14 +100,20 @@ func TestTheConfiguredRepositoriesDirectoryIsTheDefaultParent(t *testing.T) {
 	}
 }
 
-// A host with no release (a developer's build) answers ListCatalogue Unavailable naming the file it
-// lacks, never crashes, and still makes an empty repository.
-func TestAHostWithoutAReleaseAnswersTheCatalogueUnavailableNamingTheFile(t *testing.T) {
+// A host with no release (a developer's build) answers ListCatalogue not with a failure but with a
+// classified problem naming the file it lacks, never crashes, and still makes an empty repository.
+func TestAHostWithoutAReleaseAnswersTheCatalogueProblemNamingTheFile(t *testing.T) {
 	home := t.TempDir()
 	service := operatorService(t, developerBuild, &pb.HostConfig{}, home)
-	_, err := service.ListCatalogue(context.Background(), &pb.ListCatalogueRequest{})
-	if status.Code(err) != codes.Unavailable || !strings.Contains(err.Error(), release.ManifestName) {
-		t.Fatalf("got %v, want Unavailable naming %s", err, release.ManifestName)
+	resp, err := service.ListCatalogue(context.Background(), &pb.ListCatalogueRequest{})
+	if err != nil {
+		t.Fatalf("list catalogue of a developer build: %v", err)
+	}
+	if got := resp.GetProblem().GetReason(); got != pb.CatalogueProblemReason_CATALOGUE_PROBLEM_REASON_NO_RELEASE {
+		t.Fatalf("problem reason = %v, want NO_RELEASE", got)
+	}
+	if detail := resp.GetProblem().GetDetail(); !strings.Contains(detail, release.ManifestName) {
+		t.Fatalf("problem detail %q does not name %s", detail, release.ManifestName)
 	}
 	empty := &pb.ProvisionRepositoryRequest{RequestId: "r", Name: "fresh", Source: &pb.ProvisionRepositoryRequest_Empty{Empty: &pb.EmptyRepository{}}}
 	if res, err := service.ProvisionRepository(context.Background(), empty); err != nil || res.GetProvisioned() == nil {

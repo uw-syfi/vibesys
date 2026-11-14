@@ -1,5 +1,6 @@
 export {
   type CatalogueFilter,
+  catalogueProblemWords,
   type DomainGroup,
   domainOf,
   entryKey,

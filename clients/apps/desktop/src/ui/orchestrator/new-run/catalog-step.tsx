@@ -1,8 +1,9 @@
-import type {CatalogueEntry, EvalPlace} from '@vibesys/orchestrator-proto';
+import type {CatalogueEntry, CatalogueProblem, EvalPlace} from '@vibesys/orchestrator-proto';
 import {
   Button,
   Card,
   Chip,
+  EmptyState,
   Field,
   PathInput,
   PickCard,
@@ -19,6 +20,7 @@ import {
 } from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
+  catalogueProblemWords,
   completionsOf,
   type ExampleDraft,
   entryKey,
@@ -50,6 +52,27 @@ function copyDefault(host: StartHost | undefined): string {
 /** The draft as sent: a folder the person left empty is the machine's kept Repositories folder. */
 export const withKeptParent = (host: StartHost | undefined, draft: ExampleDraft): ExampleDraft =>
   draft.parent === '' ? {...draft, parent: host?.repositoriesDirectory ?? ''} : draft;
+
+/** The one-line fix for a host with no release, or an incomplete one: installed beside the binary
+ * the app already pushed there, so a classified catalogue problem is actionable, not just explained. */
+const INSTALL_COMMAND =
+  'curl -fsSL https://raw.githubusercontent.com/uw-syfi/vibesys/main/install.sh | sh';
+
+/**
+ * What the catalogue step shows instead of the card grid when the host names a classified problem
+ * (no release, or one missing files): its words, the fix as a literal command, and where to read
+ * more on the host itself.
+ */
+function CatalogueProblemState(props: {readonly problem: CatalogueProblem}): JSX.Element {
+  const words = catalogueProblemWords(props.problem);
+  return (
+    <Stack gap="space-3">
+      <EmptyState title={words.title} body={words.detail} align="start" />
+      <Text variant="code">{INSTALL_COMMAND}</Text>
+      <Text tone="muted">For more, run vibesys-client host status on the host.</Text>
+    </Stack>
+  );
+}
 
 /** The id line of a card: the example's folder and the task in it. */
 const idLine = (entry: CatalogueEntry): string =>
@@ -233,6 +256,7 @@ export function CatalogStep(props: {
 }): JSX.Element {
   const {host, example, places} = props;
   const entries = host?.catalogue.data?.entries ?? [];
+  const problem = host?.catalogue.data?.problem;
   const fitting = entries.filter(entry => fitsHere(entry, places)).length;
   const shown = visibleEntries(entries, {query: example.query, fitsOnly: false}).filter(
     entry => !example.fitsOnly || fitsHere(entry, places),
@@ -246,44 +270,48 @@ export function CatalogStep(props: {
       asideSticky
       main={
         <Stack gap="space-4">
-          <Row gap="space-3" wrap>
-            <SearchBox
-              label="Search"
-              value={example.query}
-              change={query => set({query})}
-              placeholder="Model, hardware, task"
-            />
-            <SegmentedControl
-              label="Show"
-              size="sm"
-              value={example.fitsOnly ? 'fits' : 'all'}
-              options={[
-                {value: 'fits', label: `Fits · ${fitting}`},
-                {value: 'all', label: `All · ${entries.length}`},
-              ]}
-              change={value => set({fitsOnly: value === 'fits'})}
-            />
-            <Text tone="muted">
-              {host?.catalogue.failure === null || host === undefined ? '' : 'Catalogue unreadable'}
-            </Text>
-          </Row>
-          <Stale stale={props.stale}>
-            <Stack gap="space-5">
-              {groupByDomain(shown).map(group => (
-                <Stack key={group.domain} gap="space-2">
-                  <Text variant="section">{`${domainWord(group.domain)} · ${group.entries.length}`}</Text>
-                  <PickCards label={domainWord(group.domain)} columns="fill">
-                    <Cards
-                      entries={group.entries}
-                      places={places}
-                      picked={entry === undefined ? null : example.picked}
-                      pick={props.pick}
-                    />
-                  </PickCards>
+          {problem !== undefined ? (
+            <CatalogueProblemState problem={problem} />
+          ) : (
+            <>
+              <Row gap="space-3" wrap>
+                <SearchBox
+                  label="Search"
+                  value={example.query}
+                  change={query => set({query})}
+                  placeholder="Model, hardware, task"
+                />
+                <SegmentedControl
+                  label="Show"
+                  size="sm"
+                  value={example.fitsOnly ? 'fits' : 'all'}
+                  options={[
+                    {value: 'fits', label: `Fits · ${fitting}`},
+                    {value: 'all', label: `All · ${entries.length}`},
+                  ]}
+                  change={value => set({fitsOnly: value === 'fits'})}
+                />
+                <Text tone="muted">{host?.catalogue.failure ?? ''}</Text>
+              </Row>
+              <Stale stale={props.stale}>
+                <Stack gap="space-5">
+                  {groupByDomain(shown).map(group => (
+                    <Stack key={group.domain} gap="space-2">
+                      <Text variant="section">{`${domainWord(group.domain)} · ${group.entries.length}`}</Text>
+                      <PickCards label={domainWord(group.domain)} columns="fill">
+                        <Cards
+                          entries={group.entries}
+                          places={places}
+                          picked={entry === undefined ? null : example.picked}
+                          pick={props.pick}
+                        />
+                      </PickCards>
+                    </Stack>
+                  ))}
                 </Stack>
-              ))}
-            </Stack>
-          </Stale>
+              </Stale>
+            </>
+          )}
         </Stack>
       }
       aside={

@@ -56,4 +56,26 @@ message ListCatalogueResponse {
   // Where ProvisionRepository puts a repository when the call names no parent.
   string repositories_directory = 2 [(buf.validate.field).string.pattern = "^/[^\\x00]*$"];
   repeated CatalogueEntry entries = 3 [(buf.validate.field).repeated.max_items = 2000];
+  // Set, with entries empty, when the host has no release or an incomplete one: the catalogue is
+  // legible in degraded form rather than a plain call failure.
+  CatalogueProblem problem = 4;
+}
+
+// CatalogueProblemReason classifies why a host's catalogue could not be read, for the two causes a
+// client can act on: no release installed, or one that is missing files.
+enum CatalogueProblemReason {
+  CATALOGUE_PROBLEM_REASON_UNSPECIFIED = 0;
+  // The host runs no release: nothing was ever installed beside it.
+  CATALOGUE_PROBLEM_REASON_NO_RELEASE = 1;
+  // The release is installed but is missing the catalogue or the examples it lists.
+  CATALOGUE_PROBLEM_REASON_RELEASE_INCOMPLETE = 2;
+}
+
+message CatalogueProblem {
+  CatalogueProblemReason reason = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Display only: the host's own words.
+  string detail = 2 [(buf.validate.field).string.max_bytes = 4096];
 }

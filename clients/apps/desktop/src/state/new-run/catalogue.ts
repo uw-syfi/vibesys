@@ -3,7 +3,14 @@
  * what is typed and by the host's own verdict on fit. The client never computes fit; an entry fits
  * when the host's `Fit` says so, and a place fits an entry when the host named it there.
  */
-import {type CatalogueEntry, type Fit, FitState, TaskDomain} from '@vibesys/orchestrator-proto';
+import {
+  type CatalogueEntry,
+  type CatalogueProblem,
+  CatalogueProblemReason,
+  type Fit,
+  FitState,
+  TaskDomain,
+} from '@vibesys/orchestrator-proto';
 
 /** The domains in the order the screen lists them; an entry of an unknown domain is listed last. */
 const DOMAIN_ORDER: readonly TaskDomain[] = [
@@ -101,4 +108,16 @@ export type FitWord = 'Fits' | 'Does not fit' | 'Places unreadable';
 export function fitWord(fit: Fit | undefined): FitWord {
   if (fit?.state === FitState.FITS) return 'Fits';
   return fit?.state === FitState.PLACES_UNREADABLE ? 'Places unreadable' : 'Does not fit';
+}
+
+/** The host's classified reason the catalogue could not be read, as a title and the host's detail. */
+export function catalogueProblemWords(problem: CatalogueProblem): {
+  readonly title: string;
+  readonly detail: string;
+} {
+  const title =
+    problem.reason === CatalogueProblemReason.NO_RELEASE
+      ? 'No release installed'
+      : 'Release incomplete';
+  return {title, detail: problem.detail};
 }
