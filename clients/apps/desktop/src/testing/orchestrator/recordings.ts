@@ -356,6 +356,35 @@ function listDirectorySteps(options: DaemonOptions, target: CallTarget): Readonl
   ];
 }
 
+/** What a `WatchAgent` call answers: the agent's first page, its scenario deltas, then changes, then the tail. */
+function watchAgentSteps(
+  daemon: FakeDaemon,
+  target: CallTarget,
+  tail: ReadonlyArray<Step>,
+): ReadonlyArray<Step> {
+  const request = fromBinary(WatchAgentRequestSchema, target.request);
+  const encode = (init: Parameters<typeof create<typeof WatchAgentResponseSchema>>[1]): Step => ({
+    frame: toBinary(WatchAgentResponseSchema, create(WatchAgentResponseSchema, init)),
+  });
+  const steps: Step[] = [];
+  let after = request.afterSequence;
+  if (after === 0n) {
+    const page = daemon.page(request.agentId, request.pageSize, 0);
+    after = page.sequence;
+    steps.push(encode({sequence: page.sequence, body: {case: 'page', value: page}}));
+    for (const delta of daemon.scenario.deltas) {
+      if (delta.agentId === request.agentId) {
+        steps.push(encode({sequence: page.sequence, body: {case: 'delta', value: delta}}));
+      }
+    }
+  }
+  for (const event of daemon.changesAfter(after)) {
+    const init = agentFrameOf(event, request.agentId);
+    if (init !== null) steps.push(encode(init));
+  }
+  return [...steps, ...tail];
+}
+
 export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {}): Recording {
   const tail: ReadonlyArray<Step> =
     options.closeStreams === true ? [{close: true}] : [{hang: true}];
@@ -385,30 +414,6 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
     if (fate === 'lose-reply') return [lost('connection lost before the reply arrived')];
     const bytes = toBinary(DispatchResponseSchema, create(DispatchResponseSchema, {receipt}));
     return [{frame: bytes}];
-  };
-
-  const watchAgent = (target: CallTarget): ReadonlyArray<Step> => {
-    const request = fromBinary(WatchAgentRequestSchema, target.request);
-    const encode = (init: Parameters<typeof create<typeof WatchAgentResponseSchema>>[1]): Step => ({
-      frame: toBinary(WatchAgentResponseSchema, create(WatchAgentResponseSchema, init)),
-    });
-    const steps: Step[] = [];
-    let after = request.afterSequence;
-    if (after === 0n) {
-      const page = daemon.page(request.agentId, request.pageSize, 0);
-      after = page.sequence;
-      steps.push(encode({sequence: page.sequence, body: {case: 'page', value: page}}));
-      for (const delta of daemon.scenario.deltas) {
-        if (delta.agentId === request.agentId) {
-          steps.push(encode({sequence: page.sequence, body: {case: 'delta', value: delta}}));
-        }
-      }
-    }
-    for (const event of daemon.changesAfter(after)) {
-      const init = agentFrameOf(event, request.agentId);
-      if (init !== null) steps.push(encode(init));
-    }
-    return [...steps, ...tail];
   };
 
   const newRun = newRunSteps(new Set<string>());
@@ -446,7 +451,7 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
         case methodPathOf('WatchRuns'):
           return runsSteps(daemon, target, options.live === true, tail);
         case methodPathOf('WatchAgent'):
-          return watchAgent(target);
+          return watchAgentSteps(daemon, target, tail);
         case methodPathOf('WatchRunCost'):
           return costSteps(daemon, target, tail);
         case methodPathOf('WatchHostCost'):

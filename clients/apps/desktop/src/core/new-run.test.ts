@@ -12,8 +12,8 @@ import {NOT_READ} from '../state/index.js';
 import {type HostHarness, hostHarness} from '../testing/orchestrator/harness.js';
 import {FakeDaemon, generateScenario, methodPathOf} from '../testing/orchestrator/index.js';
 import {
-  fixtureCatalogueProblemResponse,
   FIXTURE_REPOSITORIES_DIRECTORY,
+  fixtureCatalogueProblemResponse,
 } from '../testing/orchestrator/new-run-fixtures.js';
 import type {Intent} from './commands.js';
 
