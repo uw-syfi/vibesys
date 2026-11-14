@@ -314,7 +314,7 @@
   line-height: var(--text-section-line);
   font-weight: var(--text-section-weight);
   letter-spacing: var(--text-section-tracking);
-  text-transform: uppercase;
+  text-transform: var(--text-section-transform);
   text-align: left;
   white-space: nowrap;
 }

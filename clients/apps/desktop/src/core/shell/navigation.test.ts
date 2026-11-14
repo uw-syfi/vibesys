@@ -90,13 +90,15 @@ describe('the navigation of the window', () => {
         yield* keys.press(plain);
         yield* keys.press(plain);
         expect((yield* read).runs).toEqual({screen: 'runs'});
-        expect((yield* read).fleet).toMatchObject({
+        expect((yield* read).fleet).toEqual({
+          ...initialNavigation.fleet,
           state: 'live',
           host: 'host-b',
           selected: 'host-b/run-2',
         });
         yield* keys.press(plain);
-        expect((yield* read).fleet).toMatchObject({
+        expect((yield* read).fleet).toEqual({
+          ...initialNavigation.fleet,
           state: 'live',
           host: 'host-b',
           selected: 'host-b/run-2',

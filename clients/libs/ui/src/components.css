@@ -6,6 +6,8 @@
 @import './navigation.css';
 @import './rail.css';
 @import './overview-tiles.css';
+@import './figure-strip.css';
+@import './summary-card.css';
 @import './chat.css';
 @import './base.css';
 @import './inputs.css';

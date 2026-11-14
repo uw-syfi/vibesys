@@ -1,0 +1,192 @@
+/* A full-width operator summary with its visual result filling the end. Imported by components.css. */
+
+.vs-summary-card {
+  position: relative;
+  box-sizing: border-box;
+  min-width: 0;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  container-type: inline-size;
+  transition: border-color var(--duration-fast) var(--easing);
+}
+.vs-summary-card[data-attention] {
+  border-color: var(--chip-accent-border);
+  box-shadow: inset var(--space-1) 0 0 var(--accent);
+}
+.vs-summary-card:hover {
+  border-color: var(--muted);
+}
+/* A real button covers the surface while the content stays valid, non-interactive document markup. */
+.vs-summary-card-press {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+/* The press target overlays the content; global button states must never paint over it. */
+.vs-summary-card-press:hover,
+.vs-summary-card-press:active {
+  background: transparent;
+}
+.vs-summary-card-press:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-summary-card-content {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 6fr) minmax(var(--column-chart), 6fr);
+  min-width: 0;
+  min-height: var(--summary-card-chart);
+  pointer-events: none;
+}
+.vs-summary-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+}
+.vs-summary-card[data-menu] .vs-summary-card-copy {
+  padding-right: calc(var(--control-sm) + var(--space-4));
+}
+.vs-summary-card-title,
+.vs-summary-card-description,
+.vs-summary-card-latest-text,
+.vs-summary-card-metadata {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-summary-card-latest {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+.vs-summary-card-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  margin-top: auto;
+  padding-top: var(--space-2);
+}
+.vs-summary-card-metadata {
+  flex: 1;
+}
+.vs-summary-card-chart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: var(--summary-card-chart);
+  padding: var(--space-4);
+  border-left: var(--hairline) solid var(--line);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  background: var(--panel-2);
+}
+.vs-summary-card-plot {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-width: 0;
+  min-height: var(--summary-card-chart);
+}
+.vs-summary-card-plot > * {
+  flex: 1;
+  min-width: 0;
+}
+.vs-summary-card-plot > .vs-result-chart {
+  height: auto;
+  min-height: var(--summary-card-chart);
+}
+/* Status and reasons to look, in one wrapping row above the title. */
+.vs-summary-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+/* The figure strip: labelled cells that wrap as a row would, never one cell per character. */
+.vs-summary-card-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-5);
+  min-width: 0;
+  margin-top: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: var(--hairline) solid var(--line);
+}
+.vs-summary-card-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.vs-summary-card-stat-value,
+.vs-summary-card-stat-detail,
+.vs-summary-card-result-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-summary-card-stat .vs-meter {
+  margin: var(--space-1) 0;
+}
+/* The headline result sits over the plot's corner, outside the stretched drawing. */
+.vs-summary-card-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.vs-summary-card-menu {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 2;
+  pointer-events: auto;
+}
+
+/* Four figures when the copy column has room for them; two by two when it is narrower, never three and one. */
+@container (max-width: 900px) {
+  .vs-summary-card-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container (max-width: 760px) {
+  .vs-summary-card-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+@container (max-width: 520px) {
+  .vs-summary-card-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container (max-width: 760px) {
+  .vs-summary-card-content {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .vs-summary-card-chart {
+    border-top: var(--hairline) solid var(--line);
+    border-left: 0;
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  }
+}

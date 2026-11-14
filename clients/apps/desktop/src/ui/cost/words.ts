@@ -174,13 +174,14 @@ export function bucketWords(bucketMs: number): string {
 }
 
 /**
- * The name of a model: the id the host served. Every model label is drawn in the code face wherever it
- * appears, the harness's default included, so a column or a legend of them reads alike. No source of
- * display names for models exists (they are agentshim's and the host does not serve them), so none is
- * made up here. A harness's own default model has no id: it is the harness's name and the word `default`.
+ * The CLI provider and model a run's finished turns reported, as `<provider> · <id>`. The provider
+ * stays in the visible name so an operator scanning the per-provider cost split sees which provider
+ * served each model without hovering; two providers may serve the same model id. An empty model is
+ * that provider's own default.
  */
 export function modelName(model: CostModel, words: CostWords): string {
-  return model.model === '' ? `${words.harness(model.harness)} default` : model.model;
+  const harness = words.harness(model.harness);
+  return model.model === '' ? `${harness} · default` : `${harness} · ${model.model}`;
 }
 
 /** What identifies a model across views of a run. */

@@ -74,6 +74,11 @@ class OrchestratorServiceStub(object):
                 request_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetRunHistoryRequest.SerializeToString,
                 response_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetRunHistoryResponse.FromString,
                 _registered_method=True)
+        self.SearchRuns = channel.unary_unary(
+                '/vibesys.orchestrator.v1.OrchestratorService/SearchRuns',
+                request_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.SearchRunsRequest.SerializeToString,
+                response_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.SearchRunsResponse.FromString,
+                _registered_method=True)
         self.WatchRunCost = channel.unary_stream(
                 '/vibesys.orchestrator.v1.OrchestratorService/WatchRunCost',
                 request_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.WatchRunCostRequest.SerializeToString,
@@ -162,6 +167,14 @@ class OrchestratorServiceServicer(object):
     def GetRunHistory(self, request, context):
         """One run's history, paged: the agents, turns and check-ins it has and its messages, which a
         snapshot of detail SUMMARY leaves out.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SearchRuns(self, request, context):
+        """Search every run the host holds, including the older finished runs a bounded WatchRuns snapshot
+        left out. The answer is a bounded set of authoritative run/summary pairs, not another run feed.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -261,6 +274,11 @@ def add_OrchestratorServiceServicer_to_server(servicer, server):
                     servicer.GetRunHistory,
                     request_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetRunHistoryRequest.FromString,
                     response_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetRunHistoryResponse.SerializeToString,
+            ),
+            'SearchRuns': grpc.unary_unary_rpc_method_handler(
+                    servicer.SearchRuns,
+                    request_deserializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.SearchRunsRequest.FromString,
+                    response_serializer=vibesys_dot_orchestrator_dot_v1_dot_service__pb2.SearchRunsResponse.SerializeToString,
             ),
             'WatchRunCost': grpc.unary_stream_rpc_method_handler(
                     servicer.WatchRunCost,
@@ -489,6 +507,33 @@ class OrchestratorService(object):
             '/vibesys.orchestrator.v1.OrchestratorService/GetRunHistory',
             vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetRunHistoryRequest.SerializeToString,
             vibesys_dot_orchestrator_dot_v1_dot_service__pb2.GetRunHistoryResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SearchRuns(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vibesys.orchestrator.v1.OrchestratorService/SearchRuns',
+            vibesys_dot_orchestrator_dot_v1_dot_service__pb2.SearchRunsRequest.SerializeToString,
+            vibesys_dot_orchestrator_dot_v1_dot_service__pb2.SearchRunsResponse.FromString,
             options,
             channel_credentials,
             insecure,

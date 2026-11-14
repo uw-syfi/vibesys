@@ -1,4 +1,5 @@
 import {
+  FigureStrip,
   OverviewGroup,
   OverviewTile,
   RailFrame,
@@ -7,6 +8,7 @@ import {
   ResultChartKey,
   type SparkPoint,
   Stack,
+  SummaryCard,
   Text,
 } from '@vibesys/ui';
 import type {JSX} from 'react';
@@ -70,8 +72,28 @@ function Tiles(props: {readonly title: string}): JSX.Element {
 
 export const OVERVIEW_ENTRIES: Pick<
   Record<ComponentName, GalleryEntry>,
-  'RailFrame' | 'RailItem' | 'ResultChart' | 'ResultChartKey' | 'OverviewTile' | 'OverviewGroup'
+  | 'RailFrame'
+  | 'RailItem'
+  | 'ResultChart'
+  | 'ResultChartKey'
+  | 'OverviewTile'
+  | 'OverviewGroup'
+  | 'SummaryCard'
+  | 'FigureStrip'
 > = {
+  FigureStrip: {
+    render: () => (
+      <FigureStrip
+        label="Run summary"
+        figures={[
+          {label: 'Spend', value: '$4.20', detail: 'of $10.00', share: 0.42},
+          {label: 'Workstreams', value: '7', detail: 'explored'},
+          {label: 'Budget used', value: '92%', tone: 'warn', share: 0.92},
+          {label: 'Last hour', value: '—', tone: 'muted', detail: 'Not reported'},
+        ]}
+      />
+    ),
+  },
   RailFrame: {
     render: () => (
       <RailFrame
@@ -126,4 +148,22 @@ export const OVERVIEW_ENTRIES: Pick<
   },
   OverviewTile: {render: () => <Tiles title="Tiles" />},
   OverviewGroup: {render: () => <Tiles title="Running" />},
+  SummaryCard: {
+    render: () => (
+      <SummaryCard
+        title="Queue throughput"
+        description="Improve throughput while preserving bounded memory and FIFO ordering."
+        latest={{label: 'Latest workstream', text: 'Batch the consumer wake-up path'}}
+        chart={<Chart />}
+        metadata="7 workstreams · $4.20 · 1h 05m"
+        status={{tone: 'live', label: 'Running'}}
+        attention
+        menu={[
+          {id: 'details', label: 'Open details', press: noop},
+          {id: 'unread', label: 'Mark as unread', press: noop},
+        ]}
+        press={noop}
+      />
+    ),
+  },
 };

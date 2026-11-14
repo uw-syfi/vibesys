@@ -15,14 +15,22 @@ import type {
   MachineFolders,
   NavigationStore,
 } from '../../core/index.js';
+import {CLIENT_BUILD as DESKTOP_BUILD} from '../../core/index.js';
 import {
-  type Destination,
+  type AppearanceState,
   type MachineRow,
   machineRow,
+  type Navigation,
   type NavigationAction,
   staleForMs,
+  type Viewer,
 } from '../../state/index.js';
-import {type PlacesHost, useMachineControls} from '../machines/index.js';
+import {
+  AddMachinePage,
+  type MachineControls,
+  type PlacesHost,
+  useMachineControls,
+} from '../machines/index.js';
 import {nowMs} from '../orchestrator/clock.js';
 import {
   ConnectedApp,
@@ -97,19 +105,144 @@ const refreshPlaces =
 
 const NO_FOLDERS: Atom.Atom<Readonly<Record<string, string>>> = Atom.make({});
 
+interface ShellViewProps {
+  readonly current: Navigation;
+  readonly hosts: readonly ConnectedHost[];
+  readonly dispatch: Dispatch;
+  readonly controls: MachineControls | undefined;
+  readonly machineRows: readonly MachineRow[];
+  readonly places: readonly PlacesHost[];
+  readonly repositories: RepositoriesControls | undefined;
+  readonly kept: Readonly<Record<string, string>>;
+  readonly look: AppearanceState;
+  readonly choose: (appearance: Appearance) => void;
+  readonly viewer: Viewer | null;
+  readonly issues: Issues;
+  readonly setIssues: (update: (all: Issues) => Issues) => void;
+  readonly go: (action: NavigationAction) => void;
+}
+
+function MachineDestination(props: ShellViewProps): JSX.Element {
+  const {current, controls, repositories, go} = props;
+  if (current.machines.screen === 'add' && controls !== undefined) {
+    return (
+      <AddMachinePage
+        origin={current.machines.origin}
+        controls={controls.add}
+        close={() => go({type: 'close-add-machine'})}
+        openRuns={() => go({type: 'open-runs'})}
+        {...(repositories === undefined
+          ? {}
+          : {
+              saveRepositories: (
+                host: string,
+                folder: string,
+                done: (error: string | null) => void,
+              ) => repositories.save(host, folder, done),
+            })}
+      />
+    );
+  }
+  return (
+    <ConnectedMachines
+      hosts={props.hosts}
+      rows={props.machineRows}
+      {...(controls === undefined ? {} : {controls})}
+      addMachine={() => go({type: 'open-add-machine', origin: 'machines'})}
+      places={{
+        hosts: props.places,
+        refresh: refreshPlaces(props.hosts, props.dispatch),
+      }}
+      repositories={props.kept}
+    />
+  );
+}
+
+function SettingsDestination(props: ShellViewProps): JSX.Element {
+  return (
+    <SettingsScreen
+      appearance={props.look}
+      choose={props.choose}
+      viewer={props.viewer}
+      machines={{
+        count: props.machineRows.length,
+        manage: () => props.go({type: 'open-machines'}),
+        ...(props.controls === undefined
+          ? {}
+          : {add: () => props.go({type: 'open-add-machine', origin: 'machines'})}),
+      }}
+      diagnostics={{protocolVersion: String(DESKTOP_BUILD.protocolVersion)}}
+      {...(props.repositories === undefined ? {} : {repositories: props.repositories})}
+    />
+  );
+}
+
+function RunsDestination(props: ShellViewProps): JSX.Element {
+  const {current, hosts, dispatch, go} = props;
+  const {runs} = current;
+  if (runs.screen === 'run' && runs.view === 'catch-up') {
+    return (
+      <ConnectedCatchUp
+        hosts={hosts}
+        route={runs}
+        go={go}
+        dispatch={dispatch}
+        viewerId={props.viewer?.id ?? null}
+        words={{role: roleWord, fault: faultWord}}
+      />
+    );
+  }
+  return (
+    <ConnectedApp
+      hosts={hosts}
+      dispatch={dispatch}
+      route={runs}
+      fleet={current.fleet}
+      go={go}
+      issues={props.issues}
+      setIssues={props.setIssues}
+      repositories={props.kept}
+    />
+  );
+}
+
+/** The one destination selected by the navigation fold. */
+function DestinationScreen(props: ShellViewProps): JSX.Element {
+  const {current, hosts, dispatch, go} = props;
+  // Add is a child of the flow that opened it. From New run the Runs rail stays active; from the
+  // Machines page Machines stays active. The screen itself is shared and does not choose the rail.
+  if (current.machines.screen === 'add') return <MachineDestination {...props} />;
+  switch (current.destination) {
+    case 'runs':
+      return <RunsDestination {...props} />;
+    case 'cost':
+      return (
+        <ConnectedCost
+          hosts={hosts}
+          dispatch={dispatch}
+          open={(host, runId) => go({type: 'open-run', host, runId})}
+        />
+      );
+    case 'machines':
+      return <MachineDestination {...props} />;
+    case 'settings':
+      return <SettingsDestination {...props} />;
+  }
+}
+
 export function ConnectedShell(props: {
   readonly hosts: readonly ConnectedHost[];
   readonly dispatch: Dispatch;
   readonly navigation: NavigationStore;
   readonly appearance: AppearanceStore;
-  /** The id of this install as the hosts know it (`core/viewer`); null when the main process did not say. */
-  readonly viewerId: string | null;
+  /** This install as the hosts know it (`core/viewer`); null when the main process did not say. */
+  readonly viewer: Viewer | null;
   /** Adding and removing machines; a window without it lists them only. */
   readonly machines?: MachineActions;
   /** The Repositories folder of each machine; a window without it shows no such setting. */
   readonly folders?: MachineFolders;
 }): JSX.Element {
-  const {hosts, dispatch, navigation, appearance, viewerId, folders} = props;
+  const {hosts, dispatch, navigation, appearance, viewer, folders} = props;
   const [issues, setIssues] = useState<Issues>(NO_ISSUES);
   useAtomMount(useMemo(() => watchRuns(hosts), [hosts]));
   const current = useAtomValue(navigation.state);
@@ -120,12 +253,6 @@ export function ConnectedShell(props: {
   const kept = useAtomValue(folders?.state ?? NO_FOLDERS);
   const places = useAtomValue(useMemo(() => placesOf(hosts), [hosts]));
   const repositories = repositoryControls(folders, machineRows, kept, dispatch);
-  const {runs} = current;
-  /** The run whose catch-up page shows, when it does: it has a screen of its own over the run's views. */
-  const catchUp =
-    current.destination === 'runs' && runs.screen === 'run' && runs.view === 'catch-up'
-      ? runs
-      : null;
   return (
     <FocusMemory place={placeOf(current)}>
       {note => {
@@ -137,62 +264,24 @@ export function ConnectedShell(props: {
             for (const {session} of hosts) dispatch(session.newRun.loadPlaces, () => undefined);
           dispatch(navigation.go(action), () => undefined);
         };
-        /** The screens of the destinations that have no state of their own to keep. */
-        const pages: Record<Exclude<Destination, 'runs'>, JSX.Element> = {
-          cost: (
-            <ConnectedCost
-              key="cost"
-              hosts={hosts}
-              dispatch={dispatch}
-              open={(host, runId) => go({type: 'open-run', host, runId})}
-            />
-          ),
-          machines: (
-            <ConnectedMachines
-              key="machines"
-              hosts={hosts}
-              rows={machineRows}
-              {...(controls === undefined ? {} : {controls})}
-              places={{hosts: places, refresh: refreshPlaces(hosts, dispatch)}}
-            />
-          ),
-          settings: (
-            <SettingsScreen
-              key="settings"
-              appearance={look}
-              choose={choose}
-              {...(repositories === undefined ? {} : {repositories})}
-            />
-          ),
-        };
-
         return (
           <AppShell destination={current.destination} go={go}>
-            {catchUp !== null ? (
-              <ConnectedCatchUp
-                key="catch-up"
-                hosts={hosts}
-                route={catchUp}
-                go={go}
-                dispatch={dispatch}
-                viewerId={viewerId}
-                words={{role: roleWord, fault: faultWord}}
-              />
-            ) : current.destination === 'runs' ? (
-              <ConnectedApp
-                key="runs"
-                hosts={hosts}
-                dispatch={dispatch}
-                route={runs}
-                fleet={current.fleet}
-                go={go}
-                issues={issues}
-                setIssues={setIssues}
-                repositories={kept}
-              />
-            ) : (
-              pages[current.destination]
-            )}
+            <DestinationScreen
+              current={current}
+              hosts={hosts}
+              dispatch={dispatch}
+              controls={controls}
+              machineRows={machineRows}
+              places={places}
+              repositories={repositories}
+              kept={kept}
+              look={look}
+              choose={choose}
+              viewer={viewer}
+              issues={issues}
+              setIssues={setIssues}
+              go={go}
+            />
           </AppShell>
         );
       }}

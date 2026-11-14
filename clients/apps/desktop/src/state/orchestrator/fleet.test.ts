@@ -33,9 +33,12 @@ import {
   type FleetAttention,
   type FleetFilter,
   type FleetHostInput,
+  type FleetHostRef,
   type FleetRow,
+  fleetOverview,
   fleetRows,
   fleetView,
+  hostFleetOverview,
   isLive,
   NO_FLEET_FILTER,
 } from './fleet.js';
@@ -343,6 +346,7 @@ const fleet: fc.Arbitrary<readonly FleetHostInput[]> = fc
 const filter: fc.Arbitrary<FleetFilter> = fc.record({
   state: fc.constantFrom(...FLEET_STATES),
   host: fc.option(fc.constantFrom('host-0', 'host-1', 'host-2', 'host-3', 'nobody'), {nil: null}),
+  query: fc.constant(''),
 });
 
 const keysOf = (rows: readonly FleetRow[]): string[] => rows.map(row => row.key);
@@ -351,6 +355,18 @@ const shown = (hosts: readonly FleetHostInput[], by: FleetFilter): FleetRow[] =>
   const view = fleetView(hosts, by);
   return [...view.live, ...view.history, ...view.unknown];
 };
+
+/** What a run's search view says it started and tried, null for both when no view was read. */
+const searchCounts = (
+  search: OrchestratorState['searches'][string] | undefined,
+  runId: string,
+): [number | null, number | null] =>
+  search === undefined
+    ? [null, null]
+    : [
+        search.workstreams.filter(each => each.origin?.runId === runId).length,
+        search.ideas.filter(each => each.inRun).length,
+      ];
 
 const genericRun = (
   runId: string,
@@ -611,12 +627,12 @@ describe('the fleet of runs', () => {
       fc.property(fleet, filter, (hosts, by) => {
         const view = fleetView(hosts, by);
         expect(view.hosts.map(host => host.key)).toEqual(hosts.map(host => host.key));
-        const underState = shown(hosts, {state: by.state, host: null});
+        const underState = shown(hosts, {state: by.state, host: null, query: ''});
         for (const host of view.hosts) {
           expect(host.runs).toBe(underState.filter(row => row.host.key === host.key).length);
         }
         // The host filter never changes what the strip says about the other hosts.
-        const whole = fleetView(hosts, {state: by.state, host: null});
+        const whole = fleetView(hosts, {state: by.state, host: null, query: ''});
         expect(view.hosts).toEqual(whole.hosts);
       }),
     );
@@ -674,6 +690,32 @@ describe('the fleet of runs', () => {
               percentOfBound: bestPercentOfBound,
             })),
           );
+        }
+      }),
+    );
+  });
+
+  it('counts the workstreams and ideas of a run from its own search view, absent when none was read', () => {
+    fc.assert(
+      fc.property(fleet, hosts => {
+        for (const row of shown(hosts, NO_FLEET_FILTER)) {
+          if (row.source !== 'managed') continue;
+          const host = hosts.find(each => each.key === row.host.key);
+          const search = host?.data.searches[row.runId];
+          expect([row.workstreams, row.ideas]).toEqual(searchCounts(search, row.runId));
+          const limit = host?.data.runs[row.runId]?.fanoutLimit ?? 0;
+          expect(row.fanoutLimit).toBe(limit > 0 ? limit : null);
+        }
+      }),
+    );
+  });
+
+  it('reads what one host carries from its model alone, as the overview reads the managed rows', () => {
+    fc.assert(
+      fc.property(fleet, hosts => {
+        for (const host of hosts) {
+          const managed = fleetRows([host]).filter(row => row.source === 'managed');
+          expect(hostFleetOverview(host.data)).toEqual(fleetOverview(managed));
         }
       }),
     );
@@ -767,5 +809,122 @@ describe('the fleet of runs', () => {
         runsLeftOut: 0,
       },
     ]);
+  });
+});
+
+/** A host reference the overview never reads; present only so a row typechecks. */
+const OVERVIEW_HOST: FleetHostRef = {
+  key: 'host-0',
+  label: 'Host 0',
+  freshness: 'live',
+  status: {kind: 'live', cause: null, staleForMs: null},
+};
+
+/** What one row of the overview fold is made from; the fields `fleetOverview` actually reads. */
+interface OverviewRowSpec {
+  readonly live: boolean;
+  /** A warn-level attention fact (a stall): a call for a look. */
+  readonly warn: boolean;
+  /** A final-report attention fact: present, but not a call for a look. */
+  readonly final: boolean;
+  readonly reportUnavailable: boolean;
+  readonly agents: number | null;
+  readonly cost: number | null;
+}
+
+const overviewRow = (spec: OverviewRowSpec, index: number): FleetRow => ({
+  source: 'managed',
+  setup: false,
+  status: spec.live ? RunStatus.RUNNING : RunStatus.ENDED,
+  key: `host-0/run-${index}`,
+  host: OVERVIEW_HOST,
+  runId: `run-${index}`,
+  name: `run-${index}`,
+  card: null,
+  repository: '',
+  live: spec.live,
+  section: spec.live ? 'live' : 'history',
+  startedMs: null,
+  endedMs: null,
+  objectives: [],
+  costUsd: spec.cost,
+  budgetUsd: null,
+  agentsRunning: spec.agents,
+  lastReportMs: null,
+  reportUnavailable: spec.reportUnavailable,
+  deadlineMs: null,
+  attention: [
+    ...(spec.warn ? [{kind: 'stalled', sinceMs: 0} as const] : []),
+    ...(spec.final ? [{kind: 'final'} as const] : []),
+  ],
+});
+
+const overviewSpec: fc.Arbitrary<OverviewRowSpec> = fc.record({
+  live: fc.boolean(),
+  warn: fc.boolean(),
+  final: fc.boolean(),
+  reportUnavailable: fc.boolean(),
+  agents: fc.option(fc.integer({min: 0, max: 20}), {nil: null}),
+  cost: fc.option(
+    fc.integer({min: 0, max: 100_000}).map(cents => cents / 100),
+    {nil: null},
+  ),
+});
+
+/** Sum over a subset, kept null when the subset reported nothing, as the overview does. */
+const sumOrNull = (values: readonly (number | null)[]): number | null => {
+  const present = values.filter((value): value is number => value !== null);
+  return present.length === 0 ? null : present.reduce((total, value) => total + value, 0);
+};
+
+describe('fleetOverview', () => {
+  it('reads the empty fleet as zeros with no summed figure', () => {
+    expect(fleetOverview([])).toEqual({
+      shown: 0,
+      live: 0,
+      ended: 0,
+      attention: 0,
+      agentsWorking: null,
+      liveCostUsd: null,
+    });
+  });
+
+  it('counts, and sums only over live runs, matching an independent reading of the rows', () => {
+    fc.assert(
+      fc.property(fc.array(overviewSpec, {maxLength: 30}), specs => {
+        const rows = specs.map(overviewRow);
+        const liveSpecs = specs.filter(spec => spec.live);
+        expect(fleetOverview(rows)).toEqual({
+          shown: specs.length,
+          live: liveSpecs.length,
+          ended: specs.filter(spec => !spec.live).length,
+          attention: liveSpecs.filter(spec => spec.warn || spec.reportUnavailable).length,
+          agentsWorking: sumOrNull(liveSpecs.map(spec => spec.agents)),
+          liveCostUsd: sumOrNull(liveSpecs.map(spec => spec.cost)),
+        });
+      }),
+    );
+  });
+
+  it('does not count a final report, or any ended run, as wanting a look', () => {
+    const finalOnly = overviewRow(
+      {live: true, warn: false, final: true, reportUnavailable: false, agents: null, cost: null},
+      0,
+    );
+    const endedButTroubled = overviewRow(
+      {live: false, warn: true, final: false, reportUnavailable: true, agents: null, cost: null},
+      1,
+    );
+    expect(fleetOverview([finalOnly, endedButTroubled]).attention).toBe(0);
+  });
+
+  it('never sums an ended run’s cost or agents into the live figures', () => {
+    const endedWithCost = overviewRow(
+      {live: false, warn: false, final: false, reportUnavailable: false, agents: 3, cost: 9},
+      0,
+    );
+    const overview = fleetOverview([endedWithCost]);
+    expect(overview.agentsWorking).toBeNull();
+    expect(overview.liveCostUsd).toBeNull();
   });
 });

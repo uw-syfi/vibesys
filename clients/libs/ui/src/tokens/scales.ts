@@ -49,6 +49,8 @@ export type SizeToken =
   | 'column-figure'
   | 'column-metric'
   | 'column-chart'
+  | 'summary-card-chart'
+  | 'column-figure-cell'
   | 'chart-min'
   | 'chart-min-across'
   | 'chart-flex-min'
@@ -100,6 +102,8 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'column-figure': 320,
   'column-metric': 360,
   'column-chart': 248,
+  'summary-card-chart': 112,
+  'column-figure-cell': 112,
   'chart-min': 360,
   'chart-min-across': 290,
   'chart-flex-min': 480,
@@ -211,9 +215,10 @@ export const TYPE: Readonly<Record<TextStyle, TextSpec>> = {
   small: text('sans', 13, 18, 400),
   caption: text('sans', 12, 16, 500),
   code: text('mono', 12.5, 18, 400),
-  section: text('mono', 11.5, 16, 500, {tracking: 0.08, uppercase: true, color: 'muted'}),
-  metric: text('mono', 22, 28, 600),
-  hero: text('mono', 34, 40, 600, {tracking: -0.02}),
+  // Structural labels are quiet sentence case, not code-like eyebrow labels.
+  section: text('sans', 12, 18, 600, {tracking: 0.01, color: 'muted'}),
+  metric: text('sans', 22, 28, 600, {tracking: -0.01}),
+  hero: text('sans', 34, 40, 600, {tracking: -0.02}),
 };
 
 /**

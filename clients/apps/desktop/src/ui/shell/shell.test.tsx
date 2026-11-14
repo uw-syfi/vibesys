@@ -4,6 +4,7 @@ import {act, type JSX, useEffect, useReducer} from 'react';
 import {
   applyChange,
   defaultAppearance,
+  emptyAddMachine,
   emptyState,
   initialAppearance,
   initialNavigation,
@@ -17,7 +18,7 @@ import {appCommandsOf, hostSnapshotOf} from '../../testing/dom/app-builders.js';
 import {installDom, mount} from '../../testing/dom/harness.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
 import {CostOverviewScreen} from '../cost-overview/index.js';
-import {MachinesScreen} from '../machines/index.js';
+import {type AddMachineController, AddMachinePage, MachinesScreen} from '../machines/index.js';
 import {OrchestratorApp} from '../orchestrator/app.js';
 import {runTitle} from '../orchestrator/fleet-words.js';
 import {SettingsScreen} from '../settings/settings-screen.js';
@@ -41,6 +42,13 @@ const machines: readonly MachineRow[] = [
     status: {kind: 'stale', cause: null, staleForMs: 3 * 60_000},
   },
 ];
+const addMachine: AddMachineController = {
+  state: emptyAddMachine,
+  type: () => undefined,
+  pick: () => undefined,
+  submit: () => undefined,
+  reset: () => undefined,
+};
 /** The rail's destinations, in the order it lists them. */
 const RAIL_ORDER = ['Runs', 'Cost', 'Machines', 'Settings'];
 
@@ -70,7 +78,14 @@ function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
         };
         return (
           <AppShell destination={navigation.destination} go={go}>
-            {navigation.destination === 'runs' ? (
+            {navigation.machines.screen === 'add' ? (
+              <AddMachinePage
+                origin={navigation.machines.origin}
+                controls={addMachine}
+                close={() => go({type: 'close-add-machine'})}
+                openRuns={() => go({type: 'open-runs'})}
+              />
+            ) : navigation.destination === 'runs' ? (
               <OrchestratorApp
                 hosts={[host, quiet]}
                 nowMs={scenario.endMs}
@@ -89,9 +104,22 @@ function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
                 retry={() => undefined}
               />
             ) : navigation.destination === 'machines' ? (
-              <MachinesScreen rows={machines} />
+              <MachinesScreen
+                rows={machines}
+                addMachine={() => go({type: 'open-add-machine', origin: 'machines'})}
+              />
             ) : (
-              <SettingsScreen appearance={initialAppearance('light')} choose={() => undefined} />
+              <SettingsScreen
+                appearance={initialAppearance('light')}
+                choose={() => undefined}
+                viewer={{id: 'install-7', label: 'Ana'}}
+                machines={{
+                  count: machines.length,
+                  manage: () => go({type: 'open-machines'}),
+                  add: () => go({type: 'open-add-machine', origin: 'machines'}),
+                }}
+                diagnostics={{protocolVersion: '12'}}
+              />
             )}
           </AppShell>
         );
@@ -102,7 +130,7 @@ function Window(props: {readonly log: NavigationAction[]}): JSX.Element {
 
 /** The first run the list shows, as a person would press it. */
 const firstRun = (screen: ReturnType<typeof mount>): HTMLElement => {
-  const [row] = screen.container.querySelectorAll<HTMLElement>('[role="option"]');
+  const [row] = screen.container.querySelectorAll<HTMLElement>('.vs-summary-card-press');
   if (row === undefined) throw new Error('no run listed');
   return row;
 };
@@ -179,6 +207,57 @@ describe('the window shell', () => {
     screen.unmount();
   });
 
+  it('opens the Machines list and its dedicated Add flow from Settings', () => {
+    const {screen, log} = open();
+    screen.press(screen.control('Settings'));
+    screen.press(screen.control('Manage machines'));
+    expect(screen.container.querySelector('h1')?.textContent).toBe('Machines');
+
+    screen.press(screen.control('Settings'));
+    screen.press(screen.control('Add machine or server'));
+    expect(screen.container.querySelector('h1')?.textContent).toBe('Add machine or server');
+    screen.press(screen.control('Cancel'));
+    expect(screen.container.querySelector('h1')?.textContent).toBe('Machines');
+    expect(log.slice(-5).map(action => action.type)).toEqual([
+      'open-settings',
+      'open-machines',
+      'open-settings',
+      'open-add-machine',
+      'close-add-machine',
+    ]);
+    screen.unmount();
+  });
+
+  it('keeps Add machine in the New run trail and restores keyboard focus when it closes', () => {
+    const {screen} = open();
+    screen.press(screen.control('New run'));
+    const opener = screen.control('Add machine or server');
+    act(() => opener.focus());
+    screen.press(opener);
+
+    expect(screen.container.querySelector('h1')?.textContent).toBe('Add machine or server');
+    const rail = screen.container.querySelector('nav[aria-label="Main"]');
+    const railControl = (name: string): HTMLElement => {
+      const found = [...(rail?.querySelectorAll<HTMLElement>('button') ?? [])].find(
+        control => control.textContent === name,
+      );
+      if (found === undefined) throw new Error(`the rail has no ${name} control`);
+      return found;
+    };
+    expect(railControl('Runs').getAttribute('aria-current')).toBe('page');
+    expect(railControl('Machines').getAttribute('aria-current')).toBeNull();
+    expect(screen.container.querySelector('nav[aria-label="Where you are"]')?.textContent).toBe(
+      'Runs/New run/Add machine or server',
+    );
+
+    screen.press(screen.control('Cancel'));
+    expect(screen.container.querySelector('h1')?.textContent).toBe('New run');
+    expect(
+      document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent,
+    ).toBe('Add machine or server');
+    screen.unmount();
+  });
+
   it('the Runs breadcrumb of an open run returns to the list', () => {
     const {screen, log} = open();
     screen.press(firstRun(screen));
@@ -186,7 +265,7 @@ describe('the window shell', () => {
     if (crumb === undefined) throw new Error('the run has no Runs breadcrumb');
     screen.press(crumb);
     expect(log.map(action => action.type)).toEqual(['open-run', 'close-run']);
-    expect(screen.container.querySelectorAll('[role="option"]').length).toBeGreaterThan(0);
+    expect(screen.container.querySelectorAll('.vs-summary-card-press').length).toBeGreaterThan(0);
     screen.unmount();
   });
 
@@ -211,7 +290,7 @@ describe('the window shell', () => {
     // The list: a run opens on its report, with the focus on its heading.
     const row = firstRun(screen);
     act(() => row.focus());
-    const rowName = row.textContent;
+    const rowName = row.getAttribute('aria-label');
     screen.press(row);
     expect(focused()).toBe(`H1:${TASK}`);
     // The report's links open the cost and the agents, and Escape returns to each link.
@@ -240,8 +319,8 @@ describe('the window shell', () => {
     expect(focused()).toBe('BUTTON:Open agents');
     // Back to the list: the focus is on the row the run was opened from.
     pressEscape();
-    expect(document.activeElement?.getAttribute('role')).toBe('option');
-    expect(document.activeElement?.textContent).toBe(rowName);
+    expect(document.activeElement?.classList.contains('vs-summary-card-press')).toBe(true);
+    expect(document.activeElement?.getAttribute('aria-label')).toBe(rowName);
     screen.unmount();
   });
 
@@ -249,6 +328,32 @@ describe('the window shell', () => {
     const {screen, log} = open();
     const sent = (): Set<NavigationKind> => new Set(log.map(action => action.type));
     const row = (): HTMLElement => firstRun(screen);
+    const search = screen.container.querySelector<HTMLInputElement>('input[type="search"]');
+    if (search === null) throw new Error('the list has no search control');
+    const SearchView = search.ownerDocument.defaultView as unknown as {Event: typeof Event};
+    const setSearch = Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(search) as object,
+      'value',
+    )?.set;
+    if (setSearch === undefined) throw new Error('the search has no value setter');
+    act(() => {
+      search.focus();
+      setSearch.call(search, scenario.runId);
+      for (const name of ['input', 'change', 'keyup'])
+        search.dispatchEvent(new SearchView.Event(name, {bubbles: true}));
+    });
+    act(() => {
+      row()
+        .closest('article')
+        ?.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true}));
+    });
+    screen.press(screen.control('Mark as read'));
+    act(() => {
+      row()
+        .closest('article')
+        ?.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true}));
+    });
+    screen.press(screen.control('Mark as unread'));
     screen.press(row());
     screen.press(screen.control('Open agents'));
     const [agent] = screen.container.querySelectorAll<HTMLElement>(
@@ -265,6 +370,8 @@ describe('the window shell', () => {
     );
     screen.press(screen.control('Cost'));
     screen.press(screen.control('Machines'));
+    screen.press(screen.control('Add machine or server'));
+    screen.press(screen.control('Cancel'));
     screen.press(screen.control('Settings'));
     screen.press(screen.control('Runs'));
     // The list's New run opens the page that starts a run; the rail's Runs comes back to the list.
@@ -272,15 +379,6 @@ describe('the window shell', () => {
     screen.press(
       screen.controls('Runs').find(control => !control.classList.contains('vs-crumb')) ?? row(),
     );
-    // The list's headers sort it, and the edge of a column moves with the arrow keys.
-    screen.press(screen.control('Sort by Cost'));
-    const edge = screen.container.querySelector<HTMLElement>('hr.vs-columnlist-grip');
-    if (edge === null) throw new Error('the list has no column edge');
-    const Key = (edge.ownerDocument.defaultView as unknown as {KeyboardEvent: typeof KeyboardEvent})
-      .KeyboardEvent;
-    act(() => {
-      edge.dispatchEvent(new Key('keydown', {key: 'ArrowRight', bubbles: true, cancelable: true}));
-    });
     // The list's own controls: its state filter and, with two hosts, its host filter.
     screen.press(
       screen.container.querySelector<HTMLElement>('input[type="radio"][value="live"]') ?? row(),
@@ -343,21 +441,21 @@ describe('the settings screen', () => {
 });
 
 describe('the machines page', () => {
-  it('shows each host with its connection and how fresh it is, a long name cut short with the whole on hover', () => {
+  it('shows each host as a card with its connection and one freshness status', () => {
     const screen = mount(<MachinesScreen rows={machines} />);
-    const names = [...screen.container.querySelectorAll<HTMLElement>('td[data-clip]')];
-    expect(names.map(cell => cell.textContent)).toEqual(machines.map(row => row.label));
-    expect(names.map(cell => cell.getAttribute('title'))).toEqual(machines.map(row => row.label));
+    const names = [...screen.container.querySelectorAll<HTMLElement>('.vs-card-title')];
+    expect(names.map(title => title.textContent)).toEqual(machines.map(row => row.label));
     expect(screen.text()).toContain('Live');
     expect(screen.text()).toContain('Stale 3m');
     expect(screen.text()).not.toContain('Freshness');
     screen.unmount();
   });
 
-  it('shows an empty list as a table with one quiet row, not as an error', () => {
+  it('shows an empty list as a quiet empty state, not as an error', () => {
     const screen = mount(<MachinesScreen rows={[]} />);
-    const rows = [...screen.container.querySelectorAll('tbody tr')];
-    expect(rows.map(row => row.textContent)).toEqual(['No machines']);
+    expect(screen.text()).toContain('No machines connected');
+    expect(screen.container.querySelector('.vs-card-title')).toBeNull();
+    expect(screen.container.querySelector('[role="alert"]')).toBeNull();
     screen.unmount();
   });
 });

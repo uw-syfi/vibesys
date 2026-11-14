@@ -13,6 +13,7 @@ const Arrival = pageArrival.Provider;
 
 /** Where the window is, as one word: the same word for the same screen, however often it is drawn. */
 export function placeOf(navigation: Navigation): string {
+  if (navigation.machines.screen === 'add') return `add-machine/${navigation.machines.origin}`;
   if (navigation.destination !== 'runs') return navigation.destination;
   const {runs} = navigation;
   if (runs.screen !== 'run') return runs.screen;
@@ -52,7 +53,10 @@ function arrive(page: HTMLElement, opener: string | undefined): void {
 
 /** The moves that open a page of a run, which the person comes back from. */
 const opensFromAControl = (action: NavigationAction): boolean =>
-  action.type === 'open-run' || action.type === 'show' || action.type === 'pick-agent';
+  action.type === 'open-run' ||
+  action.type === 'show' ||
+  action.type === 'pick-agent' ||
+  action.type === 'open-add-machine';
 
 /** The moves of the rail, which start the window's trail afresh. */
 const startsAfresh = (action: NavigationAction): boolean =>

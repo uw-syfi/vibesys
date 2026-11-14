@@ -98,6 +98,21 @@ const watchOpen = (
     get(found.session.runHistory.watch(runId));
   });
 
+/** Whole-history search while Runs is open; each session owns its refresh and stale-answer rules. */
+const watchRunSearch = (
+  hosts: readonly ConnectedHost[],
+  query: string,
+  selected: string | null,
+  open: boolean,
+): Atom.Atom<void> =>
+  Atom.make(get => {
+    if (!open) return;
+    for (const host of hosts) {
+      if (query.trim() === '' || selected === null || selected === host.key)
+        get(host.session.runSearch.watch(query));
+    }
+  });
+
 /** One run's cost stream on its host, followed while this is mounted. */
 const watchCost = (
   hosts: readonly ConnectedHost[],
@@ -166,6 +181,8 @@ const snapshotOfHost = (
     freshness: get(session.connection.freshness),
     runsFeed: get(session.runs.status),
     runIndex: get(session.runIndex.index),
+    runsRefresh: get(session.runs.refreshState),
+    runSearch: get(session.runSearch.state),
     repositoryChecked: get(session.repositoryCheck.state),
     directories: get(session.directories.state),
     catalogue: get(session.newRun.catalogue),
@@ -338,6 +355,39 @@ function retryHostFeeds(
   retryFeeds(dispatch, session, managedRun === undefined ? undefined : agentId, managedRun);
 }
 
+/** Mount the route-owned reads and return their current folded snapshot. */
+function useConnectedState(
+  hosts: readonly ConnectedHost[],
+  issues: Issues,
+  route: Route,
+  fleet: FleetPlace,
+  repositories: Readonly<Record<string, string>>,
+) {
+  const open = openOf(route);
+  const {openHost, openAgent, openRun, costHost, costRun} = open;
+  useOpenStreams(hosts, open);
+  useAtomMount(
+    useMemo(
+      () => watchRunSearch(hosts, fleet.query ?? '', fleet.host, route.screen === 'runs'),
+      [hosts, fleet.query, fleet.host, route.screen],
+    ),
+  );
+  const view = useAtomValue(
+    useMemo(
+      () =>
+        snapshots(
+          hosts,
+          issues,
+          {host: openHost, agent: openAgent, run: openRun},
+          costHost === undefined || costRun === undefined ? null : {host: costHost, runId: costRun},
+          repositories,
+        ),
+      [hosts, issues, openHost, openAgent, openRun, costHost, costRun, repositories],
+    ),
+  );
+  return {open, view};
+}
+
 /** The commands that change a live run's settings, whose last outcome is kept by run id. */
 function updateCommands(
   issue: (host: string, intent: Intent, kept: (issued: Issued) => void) => void,
@@ -377,7 +427,7 @@ function setupCommands(
  * The runs of every host, one open at a time. The run streams are followed by the window (the
  * shell mounts them), and where the person is comes from the shell's navigation.
  */
-export function ConnectedApp(props: {
+interface ConnectedAppProps {
   readonly hosts: readonly ConnectedHost[];
   readonly dispatch: Dispatch;
   readonly route: Route;
@@ -387,25 +437,14 @@ export function ConnectedApp(props: {
   readonly setIssues: (update: (all: Issues) => Issues) => void;
   /** The Repositories folder kept for each machine, by host key: New run's Copy to starts there. */
   readonly repositories?: Readonly<Record<string, string>>;
-}): JSX.Element {
+}
+
+export function ConnectedApp(props: ConnectedAppProps): JSX.Element {
   const {hosts, dispatch, route, fleet, go, issues, setIssues} = props;
   const repositories = props.repositories ?? NO_FOLDERS;
-  const {openHost, openAgent, openRun, costHost, costRun} = openOf(route);
-  useOpenStreams(hosts, openOf(route));
+  const {open, view} = useConnectedState(hosts, issues, route, fleet, repositories);
+  const {openHost, openAgent, openRun} = open;
   const clock = useAtomValue(nowMs);
-  const view = useAtomValue(
-    useMemo(
-      () =>
-        snapshots(
-          hosts,
-          issues,
-          {host: openHost, agent: openAgent, run: openRun},
-          costHost === undefined || costRun === undefined ? null : {host: costHost, runId: costRun},
-          repositories,
-        ),
-      [hosts, issues, openHost, openAgent, openRun, costHost, costRun, repositories],
-    ),
-  );
   const sessionOf = (host: string): HostSession | undefined =>
     hosts.find(candidate => candidate.key === host)?.session;
   /** Runs what `act` makes on the host's session, if the window has one for it. */
@@ -432,6 +471,7 @@ export function ConnectedApp(props: {
       on(host, session => session.directories.want(folder, hidden, fresh)),
     ...newRunCommands(sessionOf, dispatch, setIssues),
     retryStart: () => retry(issues.start),
+    refreshRuns: host => on(host, session => session.runs.refresh),
     stopRun: (host, runId) =>
       issue(host, stopIntent(runId), stop =>
         setIssues(all => ({...all, stops: {...all.stops, [runId]: stop}})),

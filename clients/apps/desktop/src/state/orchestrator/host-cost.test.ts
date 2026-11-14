@@ -20,7 +20,14 @@ import {
 import fc from 'fast-check';
 import {applyHostFrame, emptyHostModel} from '../host-model.js';
 import {applyHostCost} from './fold.js';
-import {type HostCostWindow, readHostCost, sinceWindow, windowSinceMs} from './host-cost.js';
+import {
+  COST_DAY_MS,
+  type HostCostWindow,
+  lastDayWindow,
+  readHostCost,
+  sinceWindow,
+  windowSinceMs,
+} from './host-cost.js';
 import {emptyState} from './state.js';
 
 /** The view a message reads as; a test that expects one fails with the field the read names. */
@@ -260,6 +267,14 @@ describe('the windows of a host cost view', () => {
       }),
     );
     expect(sinceWindow(1500.9)).toBe('since:1500');
+  });
+
+  it('opens the last-day window at exactly 24 hours before the supplied instant', () => {
+    fc.assert(
+      fc.property(fc.integer({min: COST_DAY_MS + 1, max: 4_000_000_000_000}), openedAtMs => {
+        expect(windowSinceMs(lastDayWindow(openedAtMs))).toBe(openedAtMs - COST_DAY_MS);
+      }),
+    );
   });
 
   it('keep the newest view of each window apart, the later arrival of equals, and the rest of the state alone', () => {

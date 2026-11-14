@@ -2,14 +2,15 @@ import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
 import {foreignFontMessage, foreignFontUses} from '../../../tools/e2e/bundled-fonts.mjs';
 
-/** The faces and weights the type scale uses; each must be the bundled font, not a fallback. */
+/** The faces and weights components use; each must be the bundled font, not a fallback. */
 const FONTS = [
   '400 14px "Schibsted Grotesk"',
   '500 14px "Schibsted Grotesk"',
-  '600 24px "Schibsted Grotesk"',
+  '600 12px "Schibsted Grotesk"',
   '400 12.5px "JetBrains Mono"',
-  '500 11.5px "JetBrains Mono"',
-  '600 22px "JetBrains Mono"',
+  '500 12.5px "JetBrains Mono"',
+  '600 12.5px "JetBrains Mono"',
+  '700 30px "JetBrains Mono"',
 ];
 
 async function themeNames(page: Page): Promise<string[]> {

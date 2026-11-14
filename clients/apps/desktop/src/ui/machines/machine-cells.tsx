@@ -212,27 +212,3 @@ export function Reading(props: {
     </Text>
   );
 }
-
-/**
- * The widest `which` cell of a row will be, for its column to hold before any reading arrives: an
- * empty meter and a figure as wide as the widest, and for the GPU the count of a machine of sixteen.
- */
-export function ReadingReserve(props: {readonly which: ReadingPart}): JSX.Element {
-  const {which} = props;
-  const empty = (width: number): JSX.Element => (
-    <Gauge bare label={which} share={null} figure="" figureWidth={width} />
-  );
-  switch (which) {
-    case 'cpu':
-      return empty(PERCENT_WIDTH);
-    case 'memory':
-      return empty(MEMORY_WIDTH);
-    case 'gpu':
-      return (
-        <Row gap="space-2">
-          {empty(PERCENT_WIDTH)}
-          <Text variant="small">· 16 GPUs</Text>
-        </Row>
-      );
-  }
-}

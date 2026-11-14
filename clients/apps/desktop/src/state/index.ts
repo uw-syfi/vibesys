@@ -70,6 +70,7 @@ export {
   type HostFrame,
   type HostModel,
   runsCursor,
+  withRunSearchResult,
 } from './host-model.js';
 export {
   HOST_PREREQUISITES,
@@ -119,31 +120,40 @@ export {
   type SpendSeriesView,
 } from './orchestrator/cost.js';
 export {
-  FLEET_COLUMNS,
+  type ExploredWorkstreams,
+  exploredWorkstreams,
+} from './orchestrator/cost-workstreams.js';
+export {
+  FLEET_SEARCH_REGISTRY,
   FLEET_STATES,
   type FleetAbsence,
   type FleetAttention,
-  type FleetColumn,
   type FleetDiscoveryStatus,
   type FleetFilter,
   type FleetHostInput,
   type FleetHostRef,
   type FleetHostView,
   type FleetObjective,
+  type FleetOverview,
+  type FleetRemoteSearch,
   type FleetRow,
-  type FleetSort,
+  type FleetSearchEntry,
+  type FleetSearchField,
   type FleetState,
+  type FleetUpdate,
   type FleetView,
   fleetKey,
+  fleetOverview,
   fleetRows,
+  fleetSearchScore,
   fleetView,
   type GenericDiscoveryStatus,
   type GenericFleetRow,
+  hostFleetOverview,
   isLive,
   type ManagedFleetRow,
   measuredObjectives,
   NO_FLEET_FILTER,
-  pressedSort,
   rowObjectives,
 } from './orchestrator/fleet.js';
 export {
@@ -159,13 +169,16 @@ export {
   isFinalItem,
   type OlderFrame,
   type RunHistoryFrame,
+  replaceSnapshot,
   type WholeViewPhase,
 } from './orchestrator/fold.js';
 export {
+  COST_DAY_MS,
   type HostCostRead,
   type HostCostView,
   type HostCostWindow,
   type HostRunCostView,
+  lastDayWindow,
   type OtherRunsCostView,
   readHostCost,
   sinceWindow,
@@ -309,6 +322,13 @@ export {
 } from './settings/appearance.js';
 export {type Reach, reachOf, unreadableDetail} from './settings/eval-places.js';
 export {
+  emptyMachineDraft,
+  type MachineConnectionKind,
+  type MachineDraft,
+  type MachineDraftResult,
+  machineDraftResult,
+} from './settings/machine-draft.js';
+export {
   type MachineHost,
   type MachineRow,
   machineRow,
@@ -374,11 +394,14 @@ export {
   type Destination,
   type FleetPlace,
   initialNavigation,
+  type MachinesPlace,
   NAVIGATION_KINDS,
   type Navigation,
   type NavigationAction,
   type NavigationKind,
   navigationReducer,
+  type RunReceipt,
+  runIsUnread,
 } from './shell/navigation.js';
 export {
   labelFromName,

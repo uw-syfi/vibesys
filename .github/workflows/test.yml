@@ -474,10 +474,10 @@ jobs:
       - name: Build TypeScript packages
         run: ./support/repoctl/repoctl run-checks --group clients_build
 
-  # The UI gallery's measuring and accessibility suite (Playwright, Chromium on Linux; no pixel snapshots), the one
-  # browser suite of the clients. The desktop app's own screens are checked by the vitest suites of
-  # `clients-tests`. Pin the OS because Playwright 1.55 refuses Ubuntu 26.04 before it can install
-  # Chromium; `ubuntu-latest` moved underneath this required check on 2026-11-12.
+  # The UI gallery and desktop fixture measuring suites (Playwright, Chromium on Linux; no pixel
+  # snapshots). Product behavior remains covered by the deterministic suites in `clients-tests`.
+  # Pin the OS because Playwright 1.55 refuses Ubuntu 26.04 before it can install Chromium;
+  # `ubuntu-latest` moved underneath this required check on 2026-11-12.
   clients-e2e:
     needs: changes
     if: needs.changes.outputs.clients == 'true'
@@ -491,7 +491,7 @@ jobs:
         with:
           playwright: true
 
-      - name: Test the UI gallery
+      - name: Test the client UIs
         run: ./support/repoctl/repoctl run-checks --group clients_e2e
 
   queue-native:

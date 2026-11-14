@@ -28,6 +28,7 @@ import {defaultReconnect} from './reconnect.js';
 import {makeRepositoryCheck, type RepositoryCheck} from './repository-check.js';
 import {makeRunDetailFeed, type RunDetailFeed} from './run-detail/index.js';
 import {makeRunHistory, type RunHistory} from './run-history.js';
+import {makeRunSearch, type RunSearch} from './run-search.js';
 import {makeRunsTopicFeed, type RunsTopicFeed} from './runs-topic-feed.js';
 import {makeRunsView, type RunsView} from './runs-view.js';
 import type {GatewayTransport} from './transport/gateway-transport.js';
@@ -42,6 +43,8 @@ export interface HostSession {
   readonly history: AgentHistory;
   /** Reads of a run's history, which a snapshot of runs does not hold. */
   readonly runHistory: RunHistory;
+  /** Search of every durable run, including old finished runs omitted from the bounded snapshot. */
+  readonly runSearch: RunSearch;
   readonly costs: CostFeed;
   /** What every run of the host has cost, in the window a screen asks for. */
   readonly hostCosts: HostCostFeed;
@@ -93,6 +96,7 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
     agents: yield* makeAgentView(parts),
     history: yield* makeAgentHistory(parts),
     runHistory: yield* makeRunHistory(parts),
+    runSearch: yield* makeRunSearch(parts),
     costs: yield* makeCostFeed(parts),
     hostCosts: yield* makeHostCostFeed(parts),
     machine: yield* makeMachineStatsFeed({

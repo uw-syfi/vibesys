@@ -32,8 +32,15 @@ import {
  */
 export type HostCostWindow = 'all' | `since:${number}`;
 
+/** One rolling day in milliseconds: the Cost destination fixes this window when it opens. */
+export const COST_DAY_MS = 24 * 60 * 60 * 1000;
+
 /** The window of the turns that finished at or after `sinceMs`. */
 export const sinceWindow = (sinceMs: number): HostCostWindow => `since:${Math.trunc(sinceMs)}`;
+
+/** The exact 24-hour window ending when the Cost destination opened. */
+export const lastDayWindow = (openedAtMs: number): HostCostWindow =>
+  sinceWindow(openedAtMs - COST_DAY_MS);
 
 /** Where the window begins, or null when it counts everything the host holds. */
 export const windowSinceMs = (window: HostCostWindow): number | null =>

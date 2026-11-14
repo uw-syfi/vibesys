@@ -60,14 +60,18 @@ const summariesOf = (summaries: readonly RunSummary[]): OrchestratorState['summa
  * Search facts and summaries always replace the held maps, including omitted runs: their revisions
  * restart with the host, independently of the stored event sequence.
  */
-export function applySnapshot(state: OrchestratorState, snapshot: RunsSnapshot): OrchestratorState {
+function snapshotState(
+  state: OrchestratorState,
+  snapshot: RunsSnapshot,
+  replace: boolean,
+): OrchestratorState {
   const searches = Object.fromEntries(snapshot.searches.map(search => [search.runId, search]));
   const searchRevisions = Object.fromEntries(
     snapshot.searches.map(search => [search.runId, search.revision]),
   );
   const cut = {truncated: snapshot.truncated, runsLeftOut: snapshot.runsLeftOut};
   const models = snapshot.models ?? null;
-  if (snapshot.sequence < state.sequence && state.gap === null) {
+  if (!replace && snapshot.sequence < state.sequence && state.gap === null) {
     return {
       ...state,
       searches,
@@ -96,6 +100,23 @@ export function applySnapshot(state: OrchestratorState, snapshot: RunsSnapshot):
     checkIns: checkInsOfSnapshot(snapshot.checkIns),
     gap: null,
   };
+}
+
+export function applySnapshot(state: OrchestratorState, snapshot: RunsSnapshot): OrchestratorState {
+  return snapshotState(state, snapshot, false);
+}
+
+/**
+ * Replace the run stream's facts with a snapshot explicitly read from sequence zero. Unlike a
+ * snapshot that arrived while resuming a stream, this read is authoritative even when the host
+ * restarted at a lower sequence. The replacement is one fold, so callers retain the old state
+ * until the snapshot has arrived and never expose an invented gap between the two.
+ */
+export function replaceSnapshot(
+  state: OrchestratorState,
+  snapshot: RunsSnapshot,
+): OrchestratorState {
+  return snapshotState(state, snapshot, true);
 }
 
 /**

@@ -63,7 +63,7 @@ function openCost(host: HostSnapshot) {
   const log: string[] = [];
   const retries: string[] = [];
   const screen = mount(<Window host={host} log={log} retries={retries} />);
-  const [row] = screen.container.querySelectorAll<HTMLElement>('[role="option"]');
+  const [row] = screen.container.querySelectorAll<HTMLElement>('.vs-summary-card-press');
   if (row === undefined) throw new Error('no run listed');
   screen.press(row);
   return {screen, log, retries};

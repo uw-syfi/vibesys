@@ -1,54 +1,17 @@
 import {describe, expect, it} from '@effect/vitest';
 import * as Effect from 'effect/Effect';
-import {act, type JSX} from 'react';
-import type {MachineActions, MachineUndo} from '../../../core/index.js';
-import {
-  type MachineRow,
-  matchAliases,
-  SshCommandError,
-  targetFromInput,
-} from '../../../state/index.js';
+import {act, type JSX, useState} from 'react';
+import type {MachineActions} from '../../../core/index.js';
+import type {MachineRow} from '../../../state/index.js';
 import {installDom, mount} from '../../../testing/dom/harness.js';
-import {memoryFolders} from '../../../testing/settings/machine-folders.js';
+import {memoryMachineActions} from '../../../testing/settings/machine-actions.js';
 import {MachinesScreen} from '../machines-screen.js';
+import {AddMachinePage} from './add-machine-page.js';
 import {type MachineDispatch as Dispatch, useMachineControls} from './machine-controls.js';
 
 const dom = installDom().window;
 
 const ALIASES = ['host-a', 'host-b', 'my-host-c'];
-
-/** `MachineActions` over a set of saved keys in memory, parsing with the same functions the main process uses. */
-function fakeActions() {
-  const saved = new Set<string>();
-  const actions: MachineActions = {
-    ...memoryFolders().actions,
-    match: query => Effect.succeed(matchAliases(ALIASES, query)),
-    add: input =>
-      Effect.sync(() => {
-        try {
-          const host = `ssh:${targetFromInput(input).destination}`;
-          const created = !saved.has(host);
-          saved.add(host);
-          return {kind: 'added', host, created} as const;
-        } catch (error) {
-          if (error instanceof SshCommandError)
-            return {kind: 'refused', reason: error.message} as const;
-          throw error;
-        }
-      }),
-    remove: host =>
-      Effect.sync(() => {
-        saved.delete(host);
-        return {kind: 'removed', host, undo: {host} as unknown as MachineUndo} as const;
-      }),
-    undo: host =>
-      Effect.sync(() => {
-        saved.add(host);
-        return {kind: 'added', host, created: true} as const;
-      }),
-  };
-  return {actions, saved};
-}
 
 /** A dispatch that holds each effect until the test runs it, so a test runs them as an effect. */
 function queue() {
@@ -78,12 +41,28 @@ function Screen(props: {
   readonly actions: MachineActions;
   readonly dispatch: Dispatch;
   readonly hosts: readonly string[];
+  readonly saveRepositories?: (
+    host: string,
+    folder: string,
+    done: (error: string | null) => void,
+  ) => void;
 }): JSX.Element {
   const machines = useMachineControls(props.actions, props.dispatch);
-  return (
+  const [adding, setAdding] = useState(false);
+  if (machines === undefined) throw new Error('machine actions are required');
+  return adding ? (
+    <AddMachinePage
+      origin="machines"
+      controls={machines.add}
+      close={() => setAdding(false)}
+      openRuns={() => undefined}
+      {...(props.saveRepositories === undefined ? {} : {saveRepositories: props.saveRepositories})}
+    />
+  ) : (
     <MachinesScreen
       rows={rows(props.hosts)}
-      {...(machines === undefined ? {} : {controls: machines})}
+      controls={machines}
+      addMachine={() => setAdding(true)}
     />
   );
 }
@@ -111,18 +90,39 @@ function key(target: HTMLElement, name: string): void {
 }
 
 const box = (container: HTMLElement): HTMLInputElement => {
-  const input = container.querySelector('input');
+  const input = container.querySelector<HTMLInputElement>('input.vs-input');
   if (input === null) throw new Error('no input is open');
   return input;
+};
+
+const namedField = (container: HTMLElement, label: string): HTMLElement => {
+  const found = [...container.querySelectorAll<HTMLElement>('.vs-field')].find(
+    item => item.querySelector('.vs-field-label')?.textContent === label,
+  );
+  if (found === undefined) throw new Error(`no field named ${label}`);
+  return found;
+};
+
+const fieldInput = (container: HTMLElement, label: string): HTMLInputElement => {
+  const input = namedField(container, label).querySelector<HTMLInputElement>('input');
+  if (input === null) throw new Error(`field ${label} has no input`);
+  return input;
+};
+
+const segment = (container: HTMLElement, label: string): HTMLElement => {
+  const control = container.querySelector<HTMLElement>(`label[data-label="${label}"]`);
+  if (control === null) throw new Error(`no segment named ${label}`);
+  return control;
 };
 
 describe('adding and removing a machine', () => {
   it.effect('offers matches as it is typed, adds the one picked, and closes', () =>
     Effect.gen(function* () {
-      const {actions, saved} = fakeActions();
+      const memory = memoryMachineActions({aliases: ALIASES});
+      const {actions} = memory;
       const {dispatch, flush} = queue();
       const screen = mount(<Screen actions={actions} dispatch={dispatch} hosts={['local']} />);
-      screen.press(screen.control('Add machine'));
+      screen.press(screen.control('Add machine or server'));
       yield* flush;
       expect(document.activeElement).toBe(box(screen.container));
       type(box(screen.container), 'ho');
@@ -131,36 +131,37 @@ describe('adding and removing a machine', () => {
       expect(screen.controls('my-host-c')).toHaveLength(1);
       expect(screen.controls('host-b')[0]).toBeDefined();
       screen.press(screen.control('host-b'));
+      screen.press(screen.control('Add machine'));
       yield* flush;
-      expect([...saved]).toEqual(['ssh:host-b']);
+      expect(memory.saved()).toEqual(['ssh:host-b']);
       expect(screen.container.querySelector('input')).toBeNull();
       screen.unmount();
     }),
   );
 
-  it.effect('adds on Enter, reads a refusal under the input, and closes on Escape', () =>
+  it.effect('adds on Enter, reads a refusal under the input, and closes on Cancel', () =>
     Effect.gen(function* () {
-      const {actions, saved} = fakeActions();
+      const memory = memoryMachineActions({aliases: ALIASES});
+      const {actions} = memory;
       const {dispatch, flush} = queue();
       const screen = mount(<Screen actions={actions} dispatch={dispatch} hosts={['local']} />);
-      screen.press(screen.control('Add machine'));
+      screen.press(screen.control('Add machine or server'));
       yield* flush;
+      screen.press(segment(screen.container, 'Paste SSH command'));
       type(box(screen.container), 'ssh -X host-a');
       yield* flush;
       key(box(screen.container), 'Enter');
       yield* flush;
       expect(screen.text()).toContain('-X is not accepted');
-      expect(saved.size).toBe(0);
+      expect(memory.saved()).toEqual([]);
       type(box(screen.container), 'ssh -p 2222 user@host-a -J jump-a');
       yield* flush;
       key(box(screen.container), 'Enter');
       yield* flush;
-      expect([...saved]).toEqual(['ssh:user@host-a']);
-      screen.press(screen.control('Add machine'));
+      expect(memory.saved()).toEqual(['ssh:user@host-a']);
+      screen.press(screen.control('Add machine or server'));
       yield* flush;
-      // The first Escape closes the list of matches, the second the panel.
-      key(box(screen.container), 'Escape');
-      key(box(screen.container), 'Escape');
+      screen.press(screen.control('Cancel'));
       expect(screen.container.querySelector('input')).toBeNull();
       screen.unmount();
     }),
@@ -168,8 +169,8 @@ describe('adding and removing a machine', () => {
 
   it.effect('removes a machine from its row, and Undo puts it back', () =>
     Effect.gen(function* () {
-      const {actions, saved} = fakeActions();
-      saved.add('ssh:host-a');
+      const memory = memoryMachineActions({aliases: ALIASES, saved: ['host-a']});
+      const {actions} = memory;
       const {dispatch, flush} = queue();
       const screen = mount(
         <Screen actions={actions} dispatch={dispatch} hosts={['local', 'ssh:host-a']} />,
@@ -177,12 +178,75 @@ describe('adding and removing a machine', () => {
       expect(screen.controls('Remove This Mac from this app')).toHaveLength(0);
       screen.press(screen.control('Remove host-a from this app'));
       yield* flush;
-      expect(saved.size).toBe(0);
+      expect(memory.saved()).toEqual([]);
       expect(screen.text()).toContain('Removed host-a');
       screen.press(screen.control('Undo'));
       yield* flush;
-      expect([...saved]).toEqual(['ssh:host-a']);
+      expect(memory.saved()).toEqual(['ssh:host-a']);
       expect(screen.controls('Undo')).toHaveLength(0);
+      screen.unmount();
+    }),
+  );
+
+  it.effect('puts each direct validation error under its own field', () =>
+    Effect.gen(function* () {
+      const memory = memoryMachineActions({aliases: ALIASES});
+      const {dispatch, flush} = queue();
+      const screen = mount(
+        <Screen actions={memory.actions} dispatch={dispatch} hosts={['local']} />,
+      );
+      screen.press(screen.control('Add machine or server'));
+      yield* flush;
+      screen.press(segment(screen.container, 'Connection details'));
+      type(fieldInput(screen.container, 'Host name or address *'), 'host-a');
+      type(fieldInput(screen.container, 'Port'), '70000');
+
+      expect(namedField(screen.container, 'Port').textContent).toContain(
+        'Port must be a whole number from 1 to 65535.',
+      );
+      expect(namedField(screen.container, 'Host name or address *').textContent).not.toContain(
+        'Port must be',
+      );
+
+      type(fieldInput(screen.container, 'Port'), '22');
+      type(fieldInput(screen.container, 'Repositories folder'), 'relative/repos');
+      expect(namedField(screen.container, 'Repositories folder').textContent).toContain(
+        'Repositories: absolute path or ~',
+      );
+      expect(namedField(screen.container, 'Host name or address *').textContent).not.toContain(
+        'Repositories:',
+      );
+      expect(memory.saved()).toEqual([]);
+      screen.unmount();
+    }),
+  );
+
+  it.effect('keeps a repository save refusal on the workspace field', () =>
+    Effect.gen(function* () {
+      const memory = memoryMachineActions({aliases: ALIASES});
+      const {dispatch, flush} = queue();
+      const screen = mount(
+        <Screen
+          actions={memory.actions}
+          dispatch={dispatch}
+          hosts={['local']}
+          saveRepositories={(_host, _folder, done) => done('Folder cannot be reached.')}
+        />,
+      );
+      screen.press(screen.control('Add machine or server'));
+      yield* flush;
+      type(fieldInput(screen.container, 'SSH host or alias *'), 'host-a');
+      type(fieldInput(screen.container, 'Repositories folder'), '~/work');
+      screen.press(screen.control('Add machine'));
+      yield* flush;
+
+      expect(namedField(screen.container, 'Repositories folder').textContent).toContain(
+        'Folder cannot be reached.',
+      );
+      expect(namedField(screen.container, 'SSH host or alias *').textContent).not.toContain(
+        'Folder cannot be reached.',
+      );
+      expect(memory.saved()).toEqual(['ssh:host-a']);
       screen.unmount();
     }),
   );

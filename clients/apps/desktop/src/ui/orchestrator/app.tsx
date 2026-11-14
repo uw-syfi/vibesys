@@ -7,7 +7,13 @@ import {
 } from '@vibesys/orchestrator-proto';
 import {Button, Chip, type Crumb, Page, Row, Stack, Text, withoutPaths} from '@vibesys/ui';
 import type {JSX} from 'react';
-import type {HistoryStatus, ProvisionExample, RunHistoryStatus} from '../../core/index.js';
+import type {
+  HistoryStatus,
+  ProvisionExample,
+  RunHistoryStatus,
+  RunSearchState,
+  RunsRefreshState,
+} from '../../core/index.js';
 import {
   type CommandProgress,
   type CostFeedSnapshot,
@@ -40,6 +46,7 @@ import {
   setupOf,
   staleForMs,
   UNREAD_SETUP,
+  withRunSearchResult,
 } from '../../state/index.js';
 import {AgentPage} from '../agents/agent-page.js';
 import {AgentsScreen} from '../agents/agents-screen.js';
@@ -78,6 +85,10 @@ export interface HostSnapshot {
   readonly runsFeed: FeedStatus;
   /** The renderer-safe generic run index at its last atomic publication boundary. */
   readonly runIndex: GenericRunIndex;
+  /** The last explicit authoritative refresh of the run list. */
+  readonly runsRefresh: RunsRefreshState;
+  /** The latest search of durable runs beyond the bounded run list. */
+  readonly runSearch: RunSearchState;
   /** The host's latest answer about the repository path typed in the Start form. */
   readonly repositoryChecked: RepositoryChecked | undefined;
   /** The host's listing of each folder the Start form has asked for, by `listingKey`. */
@@ -144,6 +155,8 @@ export interface AppCommands {
   /** Forget what `host` said of the last copy of an example. */
   readonly forgetProvision: (host: string) => void;
   readonly retryStart: () => void;
+  /** Replace one host's run list from a fresh authoritative summary snapshot. */
+  readonly refreshRuns: (host: string) => void;
   readonly stopRun: (host: string, runId: string) => void;
   readonly retryStop: (runId: string) => void;
   /** Stop one agent of a run (not its lead): the host interrupts its turn and closes its session. */
@@ -343,7 +356,7 @@ function NewRunPage(props: {
       setUpInNewRepository={commands.setUpInNewRepository}
       openRun={(host, runId) => go({type: 'open-run', host, runId})}
       openRuns={() => go({type: 'open-runs'})}
-      editMachines={() => go({type: 'open-machines'})}
+      editMachines={() => go({type: 'open-add-machine', origin: 'new-run'})}
     />
   );
 }
@@ -373,7 +386,9 @@ export function OrchestratorApp(props: {
         place={props.fleet}
         nowMs={props.nowMs}
         go={go}
-        retryHost={props.retryHost}
+        refreshStates={Object.fromEntries(hosts.map(host => [host.key, host.runsRefresh]))}
+        refreshHost={commands.refreshRuns}
+        searchStates={Object.fromEntries(hosts.map(host => [host.key, host.runSearch]))}
         newRun={<NewRunButton hosts={hosts} commands={commands} go={go} />}
       />
     );
@@ -386,11 +401,17 @@ export function OrchestratorApp(props: {
       </Page>
     );
   }
+  const found =
+    host.model.data.runs[route.runId] === undefined && host.runSearch._tag === 'Found'
+      ? host.runSearch.response.results.find(result => result.run?.id === route.runId)
+      : undefined;
+  const shown =
+    found === undefined ? host : {...host, model: withRunSearchResult(host.model, found)};
   return (
     <RunDestination
       route={route}
       hosts={hosts}
-      host={host}
+      host={shown}
       nowMs={props.nowMs}
       commands={commands}
       retryHost={props.retryHost}

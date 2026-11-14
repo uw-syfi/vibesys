@@ -63,7 +63,7 @@ const R = 6;
 const R_SMALL = 4;
 const R_RING = 10;
 const GLYPH = TYPE.section.size * MONO_ADVANCE;
-/** One glyph of a tracked `section` label, which every word on the chart's axes is set in. */
+/** A conservative glyph advance for the tracked `section` labels on the chart's axes. */
 const LABEL_GLYPH = TYPE.section.size * (MONO_ADVANCE + TYPE.section.tracking);
 const BETTER = 'Better ↗';
 /** What a y axis' title starts with, before its words. */

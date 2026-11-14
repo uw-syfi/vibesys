@@ -12,6 +12,7 @@
 import type {AgentRole, RunStatus} from '@vibesys/orchestrator-proto';
 import {
   bucketsInRange,
+  type ExploredWorkstreams,
   type HostCostView,
   type RunSort,
   rangeOf,
@@ -95,12 +96,26 @@ export interface TotalFigures {
   readonly lastHour: string | null;
   /** The last hour's spend is a floor too, on the same ground as the spend. */
   readonly lastHourFloor: boolean;
+  /** What priced turns in the exact 24-hour views cost. */
+  readonly lastDay: string | null;
+  readonly lastDayFloor: boolean;
   readonly runs: {readonly count: string; readonly what: string};
   readonly turns: {readonly count: string; readonly what: string};
   /** The turns with tokens and no price, or null when there are none. */
   readonly unpriced: {readonly count: string; readonly what: string} | null;
   /** Whether every host has served a view: until then the figures are partial. */
   readonly complete: boolean;
+  /** Named workstreams with at least one idea, counted once in each run. */
+  readonly workstreams: string | null;
+  readonly workstreamsFloor: boolean;
+  readonly workstreamHosts: number;
+  /** Operator-wide priced spend divided by exact explored run-workstreams, or why it is unsafe. */
+  readonly costPerWorkstream:
+    | {readonly kind: 'average'; readonly figure: string}
+    | {readonly kind: 'unavailable'; readonly reason: string};
+  readonly servedHosts: number;
+  readonly lastDayHosts: number;
+  readonly hostCount: number;
 }
 
 /** A range of the chart as a segment names it. */
@@ -152,8 +167,69 @@ function shareOf(part: number | null, whole: number | null): string {
   return share > 0 && share < 0.005 ? '<1%' : `${Math.round(share * 100)}%`;
 }
 
-/** The headline: the sum of the totals the hosts served, over `hostCount` hosts of which `views` served one. */
-export function totalFigures(views: readonly HostCostView[], hostCount: number): TotalFigures {
+/**
+ * The requested operator-wide average, deliberately not a per-workstream attribution. Both its
+ * numerator and denominator must be whole before division; every failed proof is named.
+ */
+function averagePerWorkstream(
+  spendUsd: number,
+  views: readonly HostCostView[],
+  hostCount: number,
+  unpricedTurns: number,
+  workstreams: readonly ExploredWorkstreams[],
+  workstreamCount: number,
+): TotalFigures['costPerWorkstream'] {
+  const completeWorkstreamHosts = workstreams.filter(view => view.complete).length;
+  const reasons = [
+    ...(views.length === hostCount
+      ? []
+      : [`${formatCount(views.length)} of ${formatCount(hostCount)} machine cost views available`]),
+    ...(unpricedTurns === 0
+      ? []
+      : [
+          `${formatCount(unpricedTurns)} unpriced ${unpricedTurns === 1 ? 'turn remains' : 'turns remain'}`,
+        ]),
+    ...(workstreams.length === hostCount && completeWorkstreamHosts === hostCount
+      ? []
+      : [
+          `${formatCount(completeWorkstreamHosts)} of ${formatCount(hostCount)} machines have complete workstream views`,
+        ]),
+    ...(workstreamCount > 0 ? [] : ['No explored workstreams']),
+  ];
+  if (reasons.length > 0) return {kind: 'unavailable', reason: reasons.join(' · ')};
+  const average = spendUsd / workstreamCount;
+  return {
+    kind: 'average',
+    figure: usdOrNothing(average, precisionOf(average)) ?? NOT_REPORTED,
+  };
+}
+
+/** The exact-day spend as one independent served window; no all-time fact is reused for it. */
+function lastDayFigures(
+  views: readonly HostCostView[],
+  hostCount: number,
+): Pick<TotalFigures, 'lastDay' | 'lastDayFloor' | 'lastDayHosts'> {
+  const costs = views.flatMap(view => (view.total.costUsd === null ? [] : [view.total.costUsd]));
+  const sum = costs.reduce((all, usd) => all + usd, 0);
+  const unpriced = views.reduce((all, view) => all + view.unpricedTurns, 0);
+  return {
+    lastDay: costs.length === 0 ? null : (usdOrNothing(sum, precisionOf(sum)) ?? null),
+    lastDayFloor: costs.length > 0 && (unpriced > 0 || views.length < hostCount),
+    lastDayHosts: views.length,
+  };
+}
+
+/**
+ * The operator summary: the sum of the whole-history views and, separately, the exact 24-hour
+ * views the hosts served. A missing host makes a shown dollar figure a floor; an absent price stays
+ * absent rather than becoming zero.
+ */
+export function totalFigures(
+  views: readonly HostCostView[],
+  hostCount: number,
+  lastDayViews: readonly HostCostView[] = [],
+  workstreams: readonly ExploredWorkstreams[] = [],
+): TotalFigures {
   const costs = views.flatMap(view => (view.total.costUsd === null ? [] : [view.total.costUsd]));
   const sum = costs.reduce((all, usd) => all + usd, 0);
   const hours = views.flatMap(view => (view.lastHourUsd === null ? [] : [view.lastHourUsd]));
@@ -161,6 +237,16 @@ export function totalFigures(views: readonly HostCostView[], hostCount: number):
   const unpriced = views.reduce((all, view) => all + view.unpricedTurns, 0);
   const runs = views.reduce((all, view) => all + view.runCount, 0);
   const turns = views.reduce((all, view) => all + view.turns, 0);
+  const workstreamCount = workstreams.reduce((all, view) => all + view.count, 0);
+  const costPerWorkstream = averagePerWorkstream(
+    sum,
+    views,
+    hostCount,
+    unpriced,
+    workstreams,
+    workstreamCount,
+  );
+  const lastDay = lastDayFigures(lastDayViews, hostCount);
   return {
     figure: costs.length === 0 ? null : (usdOrNothing(sum, precision) ?? null),
     floor: costs.length > 0 && (unpriced > 0 || views.length < hostCount),
@@ -172,6 +258,7 @@ export function totalFigures(views: readonly HostCostView[], hostCount: number):
             hours.reduce((all, usd) => all + usd, 0),
             precision,
           ),
+    ...lastDay,
     runs: {count: formatCount(runs), what: plural(runs, 'run', 'runs')},
     turns: {count: formatCount(turns), what: plural(turns, 'turn', 'turns')},
     unpriced:
@@ -182,6 +269,14 @@ export function totalFigures(views: readonly HostCostView[], hostCount: number):
             what: plural(unpriced, 'turn unpriced', 'turns unpriced'),
           },
     complete: views.length === hostCount,
+    workstreams: workstreams.length === 0 ? null : formatCount(workstreamCount),
+    workstreamsFloor:
+      workstreams.length > 0 &&
+      (workstreams.length < hostCount || workstreams.some(view => !view.complete)),
+    workstreamHosts: workstreams.length,
+    costPerWorkstream,
+    servedHosts: views.length,
+    hostCount,
   };
 }
 

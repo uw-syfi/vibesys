@@ -82,6 +82,33 @@ describe('the host cost a fleet serves', () => {
     expect(cents(cost.lastHourUsd)).toBeGreaterThan(0);
   });
 
+  it('serves an exact since window without turns or ended runs from before it', () => {
+    const scenario = fleetOf(11, 12, 2);
+    const state = scenario.changes.reduce(applyChange, emptyState);
+    const since = NOW - 24 * HOUR;
+    const cost = servedHostCost(scenario.changes, NOW, since);
+    const countedRuns = Object.values(state.runs).filter(run => {
+      const ended = ms(run.endedAt);
+      return ended === null || ended >= since;
+    });
+    const countedRunIds = new Set(countedRuns.map(run => run.id));
+    const countedTurns = Object.values(state.turns).filter(turn => {
+      const agent = state.agents[turn.agentId];
+      const ended = ms(turn.endedAt);
+      return (
+        agent !== undefined && countedRunIds.has(agent.runId) && ended !== null && ended >= since
+      );
+    });
+
+    expect(cost.runCount).toBe(countedRuns.length);
+    expect(cost.turns).toBe(countedTurns.length);
+    expect(ms(cost.series?.start)).toBe(since);
+    expect(cents(cost.total?.costUsd)).toBe(
+      countedTurns.reduce((sum, turn) => sum + cents(turn.usage?.costUsd), 0),
+    );
+    decodeValidated(HostCostSchema, encodeMessage(HostCostSchema, cost));
+  });
+
   it('has unpriced turns somewhere in a fleet, and none that carry a dollar', () => {
     const cost = servedHostCost(fleetOf(11, 8, 2).changes, NOW);
     expect(cost.unpricedTurns).toBeGreaterThan(0);

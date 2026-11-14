@@ -10,8 +10,6 @@ import {defaultName, parentOf} from './provision.js';
 
 export interface ExampleDraft {
   readonly query: string;
-  /** List only what the host says fits. */
-  readonly fitsOnly: boolean;
   /** The entry picked, by `entryKey`, or null. */
   readonly picked: string | null;
   /** The eval place the person picked, or null for the first fitting one. */
@@ -24,7 +22,6 @@ export interface ExampleDraft {
 
 export const emptyExampleDraft: ExampleDraft = {
   query: '',
-  fitsOnly: true,
   picked: null,
   place: null,
   name: null,

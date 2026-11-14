@@ -101,8 +101,8 @@ interface Plot {
 
 /**
  * The plot area, its left gutter as wide as the longest y label needs, so a label is never cut at
- * the drawing's edge whatever its length. The labels are drawn in the mono `section` style, each
- * glyph `MONO_ADVANCE` em wide.
+ * the drawing's edge whatever its length. Label width uses the same conservative advance as the
+ * other pure chart-layout calculations; the browser still draws the proportional `section` face.
  */
 function plotFor(
   yTicks: readonly ChartTick[],

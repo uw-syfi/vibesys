@@ -62,7 +62,9 @@ function runs(status: HostStatus) {
       place={initialNavigation.fleet}
       nowMs={0}
       go={() => undefined}
-      retryHost={() => undefined}
+      refreshStates={{'ssh:host-a': {_tag: 'Idle'}}}
+      refreshHost={() => undefined}
+      searchStates={{'ssh:host-a': {_tag: 'Idle'}}}
       newRun={null}
     />,
   );
@@ -108,10 +110,11 @@ describe('a host status keeps its meaning on every screen', () => {
     );
   });
 
-  it('has one status column in Settings: no separate Freshness', () => {
+  it('has one status in the machine card header, with no separate Freshness', () => {
     const screen = settings({kind: 'stale', cause: null, staleForMs: 60_000});
-    const headers = [...screen.container.querySelectorAll('th')].map(th => th.textContent);
-    expect(headers).toEqual(['Name', 'Status']);
+    expect(chips(screen)).toEqual(['Stale 1m']);
+    expect(screen.container.querySelectorAll('section.vs-card')).toHaveLength(1);
+    expect(screen.text()).not.toContain('Freshness');
     screen.unmount();
   });
 });

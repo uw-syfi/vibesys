@@ -24,7 +24,13 @@ export type Route =
 
 export type RouteAction =
   | {readonly type: 'open-new-run'}
-  | {readonly type: 'open-run'; readonly host: string; readonly runId: string}
+  | {
+      readonly type: 'open-run';
+      readonly host: string;
+      readonly runId: string;
+      /** The Runs card revision being opened; navigation records it as read when present. */
+      readonly activityKey?: string;
+    }
   | {readonly type: 'close-run'}
   | {readonly type: 'show'; readonly view: RunView}
   | {readonly type: 'show-ideas'; readonly window: IdeaWindow}

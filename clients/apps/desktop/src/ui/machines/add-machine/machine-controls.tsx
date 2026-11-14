@@ -1,4 +1,4 @@
-import {Button, ToastStack} from '@vibesys/ui';
+import {ToastStack} from '@vibesys/ui';
 import type * as Effect from 'effect/Effect';
 import {type JSX, type ReactNode, useState} from 'react';
 import type {MachineActions, MachineUndo} from '../../../core/index.js';
@@ -10,17 +10,21 @@ import {
   hostFromKey,
   hostLabel,
 } from '../../../state/index.js';
-import {AddMachine} from './add-machine.js';
 
 /** Runs `effect` and hands its answer to `then`; the entry owns where it runs. */
 export type MachineDispatch = <A>(effect: Effect.Effect<A>, then: (value: A) => void) => void;
 
-/** What the Machines page shows of the machines controls: Add machine and its input, a remove, and the toasts of a removal. */
+export interface AddMachineController {
+  readonly state: AddMachineState;
+  readonly type: (input: string) => void;
+  readonly pick: (alias: string) => void;
+  readonly submit: (input: string, added?: (host: string) => void) => void;
+  readonly reset: () => void;
+}
+
+/** What the Machines pages show of machine actions: the dedicated add form, remove, and undo. */
 export interface MachineControls {
-  /** The Add machine button, for the page's header; it waits while the input is open. */
-  readonly action: ReactNode;
-  /** The open input that adds a machine, or nothing while it is closed. */
-  readonly form: ReactNode;
+  readonly add: AddMachineController;
   /** Removes the machine of this host key, offering to put it back. */
   readonly remove: (key: string) => void;
   /** The toasts a removal leaves. */
@@ -37,25 +41,21 @@ interface Removed {
 }
 
 /**
- * The state of the machines controls over `actions`: whether the input is open, what it holds, and
- * the removals that can still be undone; none without actions. Every action runs through `dispatch`; a row appears or
+ * The state of the machines controls over `actions`: what the add form holds, and the removals that
+ * can still be undone; none without actions. Every action runs through `dispatch`; a row appears or
  * goes with the host's session, which the actions open and end.
  */
 export function useMachineControls(
   actions: MachineActions | undefined,
   dispatch: MachineDispatch,
 ): MachineControls | undefined {
-  const [open, setOpen] = useState(false);
   const [add, setAdd] = useState<AddMachineState>(emptyAddMachine);
   const [selected, select] = useState<string | null>(null);
   const [removed, setRemoved] = useState<readonly Removed[]>([]);
   const step = (event: AddMachineEvent): void => setAdd(state => addMachineStep(state, event));
-  const close = (): void => {
-    setOpen(false);
-    setAdd(emptyAddMachine);
-  };
+  const reset = (): void => setAdd(emptyAddMachine);
   if (actions === undefined) return undefined;
-  const submitText = (input: string): void => {
+  const submitText = (input: string, added?: (host: string) => void): void => {
     if (add.busy || input.trim() === '') return;
     step({type: 'submitted'});
     dispatch(actions.add(input), outcome => {
@@ -63,17 +63,14 @@ export function useMachineControls(
       else {
         // A host already saved is selected, not saved twice.
         select(outcome.host);
-        close();
+        reset();
+        added?.(outcome.host);
       }
     });
   };
   const type = (input: string): void => {
     step({type: 'typed', input});
     dispatch(actions.match(input), aliases => step({type: 'matched', query: input, aliases}));
-  };
-  const opened = (): void => {
-    setOpen(true);
-    dispatch(actions.match(''), aliases => step({type: 'matched', query: '', aliases}));
   };
   const remove = (key: string): void => {
     dispatch(actions.remove(key), outcome => {
@@ -83,24 +80,6 @@ export function useMachineControls(
     });
   };
   const drop = (id: string): void => setRemoved(list => list.filter(item => item.id !== id));
-  const action: JSX.Element = (
-    <Button
-      variant="secondary"
-      icon="plus"
-      text="Add machine"
-      press={opened}
-      {...(open ? {disabledReason: 'Type a host or paste an ssh command', quietReason: true} : {})}
-    />
-  );
-  const form: JSX.Element | null = open ? (
-    <AddMachine
-      state={add}
-      type={type}
-      pick={alias => submitText(alias)}
-      submit={() => submitText(add.input)}
-      close={close}
-    />
-  ) : null;
   const toasts: JSX.Element = (
     <ToastStack
       label="Machines"
@@ -121,5 +100,17 @@ export function useMachineControls(
       }}
     />
   );
-  return {action, form, remove, toasts, selected, select};
+  return {
+    add: {
+      state: add,
+      type,
+      pick: alias => submitText(alias),
+      submit: submitText,
+      reset,
+    },
+    remove,
+    toasts,
+    selected,
+    select,
+  };
 }

@@ -45,6 +45,9 @@ service OrchestratorService {
   // One run's history, paged: the agents, turns and check-ins it has and its messages, which a
   // snapshot of detail SUMMARY leaves out.
   rpc GetRunHistory(GetRunHistoryRequest) returns (GetRunHistoryResponse);
+  // Search every run the host holds, including the older finished runs a bounded WatchRuns snapshot
+  // left out. The answer is a bounded set of authoritative run/summary pairs, not another run feed.
+  rpc SearchRuns(SearchRunsRequest) returns (SearchRunsResponse);
   // What one run has cost: its whole cost view, then the whole view again each time it changes. The
   // host works it out, so the client sums nothing.
   rpc WatchRunCost(WatchRunCostRequest) returns (stream WatchRunCostResponse);
@@ -365,6 +368,40 @@ message GetRunHistoryRequest {
   string run_id = 1 [(buf.validate.field).string.min_len = 1];
   // Zero reads the first page; otherwise the next_cursor of the page before.
   uint64 cursor = 2;
+}
+
+// SearchRunsRequest is an operator's plain-text query over semantic run facts. Matching is
+// case-insensitive and conjunctive: every word must occur in a registered field (task/title,
+// description, model or harness, objective, repository, run id, report, plan or workstream).
+message SearchRunsRequest {
+  string query = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+}
+
+// RunSearchResult is enough authoritative state to list and open a run. Detailed history remains in
+// GetRunHistory; live search state remains on WatchRuns, so a search answer cannot grow with either.
+message RunSearchResult {
+  option (buf.validate.message).cel = {
+    id: "run_search_result.ids_agree"
+    message: "the summary must describe the result's run"
+    expression: "this.summary.run_id == this.run.id"
+  };
+
+  Run run = 1 [(buf.validate.field).required = true];
+  RunSummary summary = 2 [(buf.validate.field).required = true];
+}
+
+// SearchRunsResponse carries Runs and RunSummaries from one consistent cut, named by sequence.
+// Plans and workstreams used only for matching come from their latest derived search views; they are
+// not returned and are not claimed current to sequence. Results are in relevance order, then newest
+// start first, then run id. At most 25 and at most the server's response byte budget are returned;
+// truncated says matching runs remain beyond either bound.
+message SearchRunsResponse {
+  uint64 sequence = 1;
+  repeated RunSearchResult results = 2 [(buf.validate.field).repeated.max_items = 25];
+  bool truncated = 3;
 }
 
 // GetRunHistoryResponse is one page of a run's history. The first page also holds what is not paged:

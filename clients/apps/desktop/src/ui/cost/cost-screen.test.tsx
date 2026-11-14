@@ -84,8 +84,8 @@ describe('the Cost screen over served views', () => {
       expect(text).toContain(word);
     }
     expect(text).toMatch(/Profiler No price/);
-    // By model, as the host named them.
-    expect(text).toContain('model-a');
+    // By actual CLI provider and model, as the finished turns reported them.
+    expect(text).toContain('Claude Code · model-a');
     expect(text).toContain('$206');
     // By kind, from the host's own totals.
     for (const word of ['Cache read', '212.4M', 'Reasoning', '5.2M', 'Cache write', '9.6M']) {
@@ -203,8 +203,8 @@ describe('the Cost screen over served views', () => {
     const html = screen(LONG_NAMES);
     const longest = LONG_NAMES.models[0]?.model.model ?? '';
     expect(longest.length).toBeGreaterThan(60);
-    expect(html).toContain(`title="${longest}"`);
-    // An id is an identifier: it is drawn in the code face.
+    expect(html).toContain(`title="Claude Code · ${longest}"`);
+    // A provider/model pair is an identifier: it is drawn in the code face.
     expect(html).toContain('data-mono="true"');
   });
 
@@ -217,6 +217,12 @@ describe('the Cost screen over served views', () => {
       }),
       {numRuns: 40},
     );
+  });
+
+  it('says when provider and model attribution was truncated without weakening the totals', () => {
+    const text = textOf(screen({...PRICED_AND_UNPRICED, modelsTruncated: true}));
+    expect(text).toContain('Some provider and model rows are not shown');
+    expect(text).toContain('≥ $318');
   });
 });
 

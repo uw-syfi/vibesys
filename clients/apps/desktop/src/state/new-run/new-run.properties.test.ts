@@ -20,7 +20,6 @@ import {
   defaultName,
   domainOf,
   entryKey,
-  fits,
   fitWord,
   folderName,
   groupByDomain,
@@ -148,28 +147,22 @@ describe('the catalogue grouped by domain', () => {
 });
 
 describe('the catalogue filter', () => {
-  it('only narrows: what it shows is a subset, in the host’s order, and fits-only shows fits', () => {
+  it('only narrows: what it shows is a subset in the host’s order', () => {
     fc.assert(
-      fc.property(
-        entriesArb,
-        fc.string({maxLength: 6}),
-        fc.boolean(),
-        (entries, query, fitsOnly) => {
-          const shown = visibleEntries(entries, {query, fitsOnly});
-          expect(shown.every(entry => entries.includes(entry))).toBe(true);
-          expect(shown.map(entry => entries.indexOf(entry))).toEqual(
-            shown.map(entry => entries.indexOf(entry)).sort((a, b) => a - b),
-          );
-          if (fitsOnly) expect(shown.every(fits)).toBe(true);
-        },
-      ),
+      fc.property(entriesArb, fc.string({maxLength: 6}), (entries, query) => {
+        const shown = visibleEntries(entries, {query});
+        expect(shown.every(entry => entries.includes(entry))).toBe(true);
+        expect(shown.map(entry => entries.indexOf(entry))).toEqual(
+          shown.map(entry => entries.indexOf(entry)).sort((a, b) => a - b),
+        );
+      }),
     );
   });
 
-  it('an empty query with fits off shows everything', () => {
+  it('an empty query shows every example, including ones that do not fit this machine', () => {
     fc.assert(
       fc.property(entriesArb, entries => {
-        expect(visibleEntries(entries, {query: '  ', fitsOnly: false})).toEqual(entries);
+        expect(visibleEntries(entries, {query: '  '})).toEqual(entries);
       }),
     );
   });
@@ -182,9 +175,7 @@ describe('the catalogue filter', () => {
         (entries, at) => {
           const entry = entries[at % entries.length];
           if (entry === undefined) return;
-          expect(visibleEntries(entries, {query: folderName(entry), fitsOnly: false})).toContain(
-            entry,
-          );
+          expect(visibleEntries(entries, {query: folderName(entry)})).toContain(entry);
         },
       ),
     );

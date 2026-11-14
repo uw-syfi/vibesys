@@ -157,7 +157,7 @@ async function checkTheNewRunPageOpensAndCloses(page: Page): Promise<void> {
   await expect(page.getByRole('heading', {level: 1, name: 'New run'})).toBeVisible();
   await expect(page.getByRole('button', {name: /Start from an example/})).toBeVisible();
   await expect(page.getByRole('button', {name: /Bring a repository/})).toBeVisible();
-  await expect(page.getByRole('button', {name: 'Edit in Machines'})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Add machine or server'})).toBeVisible();
   const folder = process.env['VIBESYS_E2E_SHOTS'];
   if (folder !== undefined && folder !== '')
     await page.screenshot({path: join(folder, '1b-start.png')});
@@ -169,15 +169,16 @@ async function checkTheNewRunPageOpensAndCloses(page: Page): Promise<void> {
 const REPORT_SHOT = '2-report';
 
 async function checkRunIsListedAndRunning(page: Page, world: World): Promise<void> {
-  // The lead's final report ended the run, so it is in the run history; a row is named by its run
-  // (the task) and says the rest, its state first, in its description.
-  const history = page.getByRole('listbox', {name: 'Run history'});
-  const row = history.getByRole('option', {name: new RegExp(`^${world.task}\\b`)});
-  await expect(row).toBeVisible();
-  await expect(row).toContainText('Finished');
+  // The lead's final report ended the run, so it is in the Ended section of the run list; each run
+  // is a card named by its run (the task), whose status chip says the rest and whose one primary
+  // action opens it.
+  const ended = page.getByRole('region', {name: 'Ended runs'});
+  const card = ended.getByRole('article', {name: new RegExp(`^${world.task}\\b`)});
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('Finished');
   await seen(page, '1-runs');
   await checkTheNewRunPageOpensAndCloses(page);
-  await row.click();
+  await card.getByRole('button', {name: `Open run ${world.task}`}).click();
   await expect(page.getByRole('navigation', {name: 'Where you are'})).toContainText(world.task);
   await seen(page, REPORT_SHOT);
   // Stop is offered only while a run runs.

@@ -221,22 +221,36 @@ function otherRunsOf(rest: readonly Group<Run>[]): OtherRunsCost {
 }
 
 /** When the view is worked out: the clock while a run is live, else the latest end. */
-function windowOf(runs: readonly Run[], nowMs: number): Window {
+function windowOf(runs: readonly Run[], nowMs: number, sinceMs: number | null): Window {
   const live = runs.some(run => isLive(run.status));
   const asOfMs =
     live || runs.length === 0 ? nowMs : Math.max(...runs.map(run => ms(run.endedAt) ?? nowMs));
-  const startMs = Math.min(asOfMs, ...runs.map(run => ms(run.createdAt) ?? asOfMs));
+  const startMs = sinceMs ?? Math.min(asOfMs, ...runs.map(run => ms(run.createdAt) ?? asOfMs));
   return {startMs, asOfMs, widthMs: widthFor(asOfMs - startMs)};
 }
 
 /**
  * The host cost view of the runs `changes` build, as of `nowMs` while a run is live and as of the
- * latest end once none is.
+ * latest end once none is. With `sinceMs`, it follows the service contract: a run ended before the
+ * window is absent, and only turns finished in the window contribute to its figures.
  */
-export function servedHostCost(changes: readonly RunChange[], nowMs: number): HostCost {
-  const {runs, agents, turns} = foldedTurns(changes);
+export function servedHostCost(
+  changes: readonly RunChange[],
+  nowMs: number,
+  sinceMs: number | null = null,
+): HostCost {
+  const folded = foldedTurns(changes);
+  const runs = folded.runs.filter(run => {
+    const endedAtMs = ms(run.endedAt);
+    return sinceMs === null || endedAtMs === null || endedAtMs >= sinceMs;
+  });
+  const runIds = new Set(runs.map(run => run.id));
+  const agents = folded.agents.filter(agent => runIds.has(agent.runId));
+  const turns = folded.turns.filter(
+    turn => runIds.has(turn.agent.runId) && (sinceMs === null || turn.endMs >= sinceMs),
+  );
   const all = tallyOf(turns);
-  const window = windowOf(runs, nowMs);
+  const window = windowOf(runs, nowMs, sinceMs);
   const ofRun = new Map(
     groupsOf(
       turns,
