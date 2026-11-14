@@ -235,6 +235,9 @@ func workstreamViews(all []*idea) (views []*pb.WorkstreamView, truncated bool) {
 		for _, name := range slices.Sorted(maps.Keys(best[n])) {
 			v.Best = append(v.Best, best[n][name])
 		}
+		// The field holds at most maxGainsPerIdea, as a single idea's best does; a workstream's ideas
+		// can together measure more objectives than one, so the union is cut the same way its parts are.
+		v.Best = v.Best[:min(len(v.Best), maxGainsPerIdea)]
 		views = append(views, v)
 	}
 	return views, truncated

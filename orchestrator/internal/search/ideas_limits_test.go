@@ -46,6 +46,49 @@ func TestAnIdeaKeepsItsNewestCandidatesAndTheBestGainOfAll(t *testing.T) {
 	}
 }
 
+// A workstream's best is kept within the field's limit even when its ideas together measure more
+// objectives than one idea may: each idea's best is already within the limit, but their union over
+// the workstream can exceed it, and an over-long best makes the whole SearchState break its rules.
+func TestAWorkstreamsBestIsKeptWithinTheFieldLimit(t *testing.T) {
+	const ws = 7
+	plan := func(number uint32) *cli.TaskFact {
+		return &cli.TaskFact{Fact: &cli.TaskFact_Plan{Plan: &cli.Plan{Number: number, Workstream: ws, Origin: originOf(thisRun, 1)}}}
+	}
+	// One job per plan, each measuring five distinct objectives (all stated, ratio 1): ten across the
+	// workstream, over the eight the field allows.
+	measuring := func(id string, number uint32, names []string) []*cli.TaskFact {
+		metrics := make([]*cli.Metric, len(names))
+		var obs []*cli.Observation
+		for i, name := range names {
+			metrics[i] = &cli.Metric{Name: name, Direction: maximize}
+			if i > 0 {
+				obs = append(obs, &cli.Observation{Name: name, Value: proto.Float64(10)})
+			}
+		}
+		m := &cli.MeasureResult{Metric: metrics[0], Value: 10, Objectives: &cli.Objectives{Metrics: metrics}, Observations: obs}
+		return []*cli.TaskFact{
+			{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: id, Plans: []uint32{number}, Submitters: mine}}},
+			{Fact: &cli.TaskFact_Result{Result: &cli.Result{JobId: id, Commit: "c", RecordedAt: at(1), Outcome: &cli.Result_Measure{Measure: m}}}},
+		}
+	}
+	facts := []*cli.TaskFact{plan(1), plan(2)}
+	facts = append(facts, measuring("jA", 1, []string{"m0", "m1", "m2", "m3", "m4"})...)
+	facts = append(facts, measuring("jB", 2, []string{"m5", "m6", "m7", "m8", "m9"})...)
+	s := project(t, facts...)
+	var view *pb.WorkstreamView
+	for _, v := range s.WorkstreamViews {
+		if v.Number == ws {
+			view = v
+		}
+	}
+	if view == nil {
+		t.Fatalf("no view for workstream %d: %v", ws, s.WorkstreamViews)
+	}
+	if len(view.Best) != 8 {
+		t.Fatalf("a workstream best over the field limit is kept at eight, got %d: %v", len(view.Best), view.Best)
+	}
+}
+
 // When the bytes force a cut, a plan and its idea go together (the lists stay one to one), what is cut
 // is the oldest, and no more is cut than the budget asks: what is left is within one plan and one idea
 // of the budget.
