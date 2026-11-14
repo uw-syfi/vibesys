@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vibesys.orchestration.skill_selection import resolve_agent_resource_paths
@@ -97,11 +97,14 @@ _PATH_PART = st.from_regex(r"[a-z][a-z0-9_-]{0,12}", fullmatch=True).filter(
 )
 
 
+@pytest.mark.regression
 @settings(max_examples=examples(pr=8, nightly=100))
 @given(
     st.lists(_PATH_PART, min_size=0, max_size=2),
     st.lists(_PATH_PART, min_size=1, max_size=3),
 )
+# The reported citation: a vendored pack's skill, `<pack>/skills/<skill>/SKILL.md`.
+@example(wrappers=["dial9-tokio", "skills"], parts=["SKILL"])
 def test_nested_skill_citations_resolve_to_the_installed_skill(
     wrappers: list[str], parts: list[str]
 ) -> None:
