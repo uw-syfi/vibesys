@@ -173,7 +173,7 @@ def test_root_distribution_discovers_internal_packages_from_their_source_roots()
     packages, package_dirs = module.discover_distribution_packages(PROJECT_ROOT)
 
     assert {"entrypoints", "vibesys", *INTERNAL_IMPORT_PACKAGES} <= set(packages)
-    assert "vibesys.prompts.backend.cuda" in packages
+    assert "vibesys.prompts.environments.slurm" in packages
     assert "vibesys.prompts" in packages
     assert "vibesys.domains" in packages
     assert package_dirs["vibesys"] == "src/vibesys"
