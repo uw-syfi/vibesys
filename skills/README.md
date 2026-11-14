@@ -20,7 +20,7 @@ Every plugin installs from the one source directory and differs only by the skil
 | --- | --- |
 | `vibesys` | the optimization loop (`search/`): install it first |
 | `vibesys-llm-serving` | `serving-systems` |
-| `vibesys-microservices` | `microservice-optimization` and the Tokio `dial9-*` skills |
+| `vibesys-microservices` | `microservice-optimization`, `custom-rpc-optimization` and the Tokio `dial9-*` skills |
 | `vibesys-database` | the Tokio `dial9-*` skills, which are listed in both `vibesys-database` and `vibesys-microservices` |
 | `vibesys-kernels-cuda` | `kernel-correctness`, `kernel-performance`, `kernel-ncu-analysis`, `kernel-timeline-analysis` |
 | `vibesys-kernels-rocm` | `kernel-correctness`, `kernel-performance`, `kernel-rocprof-analysis` |
