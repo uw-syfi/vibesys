@@ -107,6 +107,7 @@ type FakeCatalogueSource struct {
 	mu        sync.Mutex
 	catalogue daemon.Catalogue
 	err       error
+	problem   *pb.CatalogueProblem
 }
 
 var _ daemon.CatalogueSource = (*FakeCatalogueSource)(nil)
@@ -125,11 +126,26 @@ func (f *FakeCatalogueSource) Fail(err error) {
 	f.err = err
 }
 
+// Classify makes Problem answer p for a failure the client can act on; nil keeps Unavailable. It
+// stands in for the real source's reading of the release errors, which this layer may not import.
+func (f *FakeCatalogueSource) Classify(p *pb.CatalogueProblem) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.problem = p
+}
+
 // Catalogue implements daemon.CatalogueSource.
 func (f *FakeCatalogueSource) Catalogue(context.Context) (daemon.Catalogue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.catalogue, f.err
+}
+
+// Problem implements daemon.CatalogueSource: the problem set by Classify, independent of the error.
+func (f *FakeCatalogueSource) Problem(error) *pb.CatalogueProblem {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.problem
 }
 
 // FakeProvisioner is a daemon.Provisioner that makes no repository. It answers each request with the

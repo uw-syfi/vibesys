@@ -38,6 +38,23 @@ func (c ReleaseCatalogue) Catalogue(context.Context) (daemon.Catalogue, error) {
 	return out, nil
 }
 
+// Problem implements daemon.CatalogueSource: it classifies the two causes a client can act on (no
+// release at all, or one missing files), the same release errors problemReason reads for the parts of
+// HostControlService.Identify. Any other failure (a corrupt catalogue.pb, a places read that cannot
+// run) is nil, so ListCatalogue keeps answering Unavailable for it.
+func (ReleaseCatalogue) Problem(err error) *pb.CatalogueProblem {
+	var notInstalled *release.NotInstalledError
+	var incomplete *release.IncompleteError
+	switch {
+	case errors.As(err, &notInstalled):
+		return &pb.CatalogueProblem{Reason: pb.CatalogueProblemReason_CATALOGUE_PROBLEM_REASON_NO_RELEASE, Detail: err.Error()}
+	case errors.As(err, &incomplete):
+		return &pb.CatalogueProblem{Reason: pb.CatalogueProblemReason_CATALOGUE_PROBLEM_REASON_RELEASE_INCOMPLETE, Detail: err.Error()}
+	default:
+		return nil
+	}
+}
+
 // ReleaseExamples serves the source of an example from the trees the release carries. It is the
 // real implementation behind the provisioner's example port, daemon.ExampleTrees.
 type ReleaseExamples struct {

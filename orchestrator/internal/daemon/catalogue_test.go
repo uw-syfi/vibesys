@@ -17,7 +17,6 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
-	"github.com/uw-syfi/vibesys/orchestrator/release"
 )
 
 const (
@@ -204,29 +203,23 @@ func TestListCatalogueFailsWhenTheCatalogueCannotBeRead(t *testing.T) {
 	}
 }
 
-// TestListCatalogueReportsAClassifiedProblemInsteadOfFailing covers the two release.Finder errors
-// problemReason also classifies for HostControlService.Identify's parts (see production/parts.go):
-// a host that has no release at all, and one whose release is missing a file. Either answers a
-// successful, valid reply naming the problem, with no entries and the repositories directory kept,
-// rather than the opaque Unavailable every other read failure still gets.
+// TestListCatalogueReportsAClassifiedProblemInsteadOfFailing covers the daemon's handling once the
+// source classifies a read failure as a client-actionable problem (no release at all, or one missing
+// a file): a successful, valid reply naming the problem, with no entries and the repositories
+// directory kept, rather than the opaque Unavailable every unclassified read failure still gets. The
+// source owns which release error maps to which reason; that mapping is tested in production, where the
+// release layout may be imported.
 func TestListCatalogueReportsAClassifiedProblemInsteadOfFailing(t *testing.T) {
-	for name, arrange := range map[string]struct {
-		fail   error
-		reason pb.CatalogueProblemReason
-	}{
-		"no release": {
-			fail:   &release.NotInstalledError{Program: "/opt/vibesys/bin/vibesys-host", Manifest: "/opt/vibesys/release.json"},
-			reason: pb.CatalogueProblemReason_CATALOGUE_PROBLEM_REASON_NO_RELEASE,
-		},
-		"an incomplete release": {
-			fail:   &release.IncompleteError{Dir: "/opt/vibesys", Missing: []string{"catalogue.pb"}},
-			reason: pb.CatalogueProblemReason_CATALOGUE_PROBLEM_REASON_RELEASE_INCOMPLETE,
-		},
+	for name, reason := range map[string]pb.CatalogueProblemReason{
+		"no release":            pb.CatalogueProblemReason_CATALOGUE_PROBLEM_REASON_NO_RELEASE,
+		"an incomplete release": pb.CatalogueProblemReason_CATALOGUE_PROBLEM_REASON_RELEASE_INCOMPLETE,
 	} {
 		t.Run(name, func(t *testing.T) {
+			detail := "the release is " + name
 			r := daemontest.NewRig(t)
 			r.Catalogue.Set(daemon.Catalogue{RepositoriesDirectory: "/home/user/.vibesys/repos"})
-			r.Catalogue.Fail(arrange.fail)
+			r.Catalogue.Fail(errors.New("the catalogue cannot be read"))
+			r.Catalogue.Classify(&pb.CatalogueProblem{Reason: reason, Detail: detail})
 			resp, err := r.Service.ListCatalogue(context.Background(), &pb.ListCatalogueRequest{})
 			if err != nil {
 				t.Fatalf("got an error, want a classified reply: %v", err)
@@ -234,11 +227,11 @@ func TestListCatalogueReportsAClassifiedProblemInsteadOfFailing(t *testing.T) {
 			if err := wire.Validate(resp); err != nil {
 				t.Fatalf("response is not valid: %v", err)
 			}
-			if resp.GetProblem().GetReason() != arrange.reason {
-				t.Errorf("reason %v, want %v", resp.GetProblem().GetReason(), arrange.reason)
+			if resp.GetProblem().GetReason() != reason {
+				t.Errorf("reason %v, want %v", resp.GetProblem().GetReason(), reason)
 			}
-			if resp.GetProblem().GetDetail() != arrange.fail.Error() {
-				t.Errorf("detail %q, want %q", resp.GetProblem().GetDetail(), arrange.fail.Error())
+			if resp.GetProblem().GetDetail() != detail {
+				t.Errorf("detail %q, want %q", resp.GetProblem().GetDetail(), detail)
 			}
 			if len(resp.GetEntries()) != 0 {
 				t.Errorf("%d entries, want none", len(resp.GetEntries()))

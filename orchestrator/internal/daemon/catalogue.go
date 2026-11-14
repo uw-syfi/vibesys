@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"sort"
 
 	"google.golang.org/grpc/codes"
@@ -12,13 +11,16 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/fit"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
-	"github.com/uw-syfi/vibesys/orchestrator/release"
 )
 
 // CatalogueSource serves the example tasks of the release the host runs, without their fit, which the
 // daemon works out from the places.
 type CatalogueSource interface {
 	Catalogue(ctx context.Context) (Catalogue, error)
+	// Problem classifies an error from Catalogue into the cause a client can act on (no release at
+	// all, or an incomplete one), or nil when the error is not one the client can act on. The daemon
+	// keeps the release-layout knowledge out of its layer by asking the source, which owns it.
+	Problem(err error) *pb.CatalogueProblem
 }
 
 // Catalogue is what a CatalogueSource holds.
@@ -33,8 +35,8 @@ type Catalogue struct {
 // ListCatalogue implements OrchestratorService: the example tasks, grouped by domain (the domains in
 // the contract's order, the source's order within one), each with its fit over the eval places as they
 // are now. It answers Unimplemented on a host with no catalogue; when the catalogue cannot be read it
-// answers Unavailable, unless the cause is one catalogueProblem classifies (no release, or an
-// incomplete one), which it reports instead as a successful reply naming the problem.
+// answers Unavailable, unless the source classifies the cause as a client-actionable problem (no
+// release, or an incomplete one), which it reports instead as a successful reply naming the problem.
 //
 // The fit is advice. Places that cannot be asked make every entry PLACES_UNREADABLE rather than fail the
 // call: the catalogue is still worth showing, and StartRun decides the fit again.
@@ -54,7 +56,7 @@ func (s *Service) ListCatalogue(ctx context.Context, req *pb.ListCatalogueReques
 	}
 	catalogue, err := bound(s.Bounds, ctx, s.Catalogue.Catalogue)
 	if err != nil {
-		problem := catalogueProblem(err)
+		problem := s.Catalogue.Problem(err)
 		if problem == nil {
 			return nil, status.Error(codes.Unavailable, err.Error())
 		}
@@ -92,21 +94,4 @@ func withFit(entries []*pb.CatalogueEntry, places []*pb.EvalPlace) []*pb.Catalog
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].GetCard().GetDomain() < out[j].GetCard().GetDomain() })
 	return out
-}
-
-// catalogueProblem classifies the two causes a client can act on (no release at all, or one missing
-// files), the same types production.problemReason reads for HostControlService.Identify's parts. Any
-// other failure (a corrupt catalogue.pb, a places read that cannot run) is nil: ListCatalogue keeps
-// answering Unavailable for it, unchanged.
-func catalogueProblem(err error) *pb.CatalogueProblem {
-	var notInstalled *release.NotInstalledError
-	var incomplete *release.IncompleteError
-	switch {
-	case errors.As(err, &notInstalled):
-		return &pb.CatalogueProblem{Reason: pb.CatalogueProblemReason_CATALOGUE_PROBLEM_REASON_NO_RELEASE, Detail: err.Error()}
-	case errors.As(err, &incomplete):
-		return &pb.CatalogueProblem{Reason: pb.CatalogueProblemReason_CATALOGUE_PROBLEM_REASON_RELEASE_INCOMPLETE, Detail: err.Error()}
-	default:
-		return nil
-	}
 }

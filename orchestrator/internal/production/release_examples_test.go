@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"testing/fstest"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/release"
 	"github.com/uw-syfi/vibesys/orchestrator/release/assemble"
@@ -144,5 +146,25 @@ func TestTheSourcesFailAsTheReleaseDoes(t *testing.T) {
 	}
 	if gotIncomplete.RepositoriesDirectory != "/home/u/repos" {
 		t.Fatalf("repositories directory on an incomplete catalogue = %q", gotIncomplete.RepositoriesDirectory)
+	}
+}
+
+// Problem turns the two release errors a client can act on into the matching reason, naming the cause,
+// and leaves every other failure to the opaque Unavailable by answering nil.
+func TestTheCatalogueSourceClassifiesTheProblemsAClientCanActOn(t *testing.T) {
+	source := ReleaseCatalogue{}
+	noRelease := source.Problem(&release.NotInstalledError{Program: "/opt/vibesys/bin/vibesys-host", Manifest: "/opt/vibesys/" + release.ManifestName})
+	if noRelease.GetReason() != pb.CatalogueProblemReason_CATALOGUE_PROBLEM_REASON_NO_RELEASE {
+		t.Errorf("no release: reason %v", noRelease.GetReason())
+	}
+	if !strings.Contains(noRelease.GetDetail(), release.ManifestName) {
+		t.Errorf("no release: detail %q does not name %s", noRelease.GetDetail(), release.ManifestName)
+	}
+	incomplete := source.Problem(&release.IncompleteError{Dir: "/opt/vibesys", Missing: []string{release.CatalogueName}})
+	if incomplete.GetReason() != pb.CatalogueProblemReason_CATALOGUE_PROBLEM_REASON_RELEASE_INCOMPLETE {
+		t.Errorf("incomplete release: reason %v", incomplete.GetReason())
+	}
+	if other := source.Problem(errors.New("the catalogue.pb is corrupt")); other != nil {
+		t.Errorf("an unclassified failure: got %v, want nil", other)
 	}
 }
