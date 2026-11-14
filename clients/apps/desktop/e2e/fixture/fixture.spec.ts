@@ -13,6 +13,18 @@ import {
 } from './checks.js';
 import {FIXTURE_SCREENS, openFixture} from './journey.js';
 
+test('run cards keep their contents uncovered when hovered or focused', async ({page}) => {
+  await openFixture(page);
+  const cards = page.getByRole('button', {name: /^Open run /});
+  expect(await cards.count()).toBeGreaterThan(0);
+  for (const card of await cards.all()) {
+    await card.hover();
+    await expect(card).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await card.focus();
+    await expect(card).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  }
+});
+
 for (const viewport of CHECK_VIEWPORTS) {
   test(`rail destinations keep their semantics and layout at ${viewport.width}x${viewport.height}`, async ({
     page,

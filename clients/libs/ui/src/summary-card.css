@@ -31,6 +31,11 @@
   color: inherit;
   cursor: pointer;
 }
+/* The press target overlays the content; global button states must never paint over it. */
+.vs-summary-card-press:hover,
+.vs-summary-card-press:active {
+  background: transparent;
+}
 .vs-summary-card-press:focus-visible {
   outline: var(--focus-ring) solid var(--accent);
   outline-offset: var(--focus-offset);
