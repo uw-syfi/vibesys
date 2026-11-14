@@ -124,16 +124,30 @@ class _Model:
             for key, reason in sorted(self.rejected.items())
         )
 
+    def collides(self, request_id: str) -> bool:
+        """Whether a different held id differs from ``request_id`` only by case.
+
+        Such ids would name one file on a case-insensitive filesystem, so the inbox refuses
+        the later one everywhere, before it reads the run's end or writes anything.
+        """
+        folded = request_id.lower()
+        return any(key != request_id and key.lower() == folded for key in self.posted)
+
     def refuses(self, request_id: str, payload: bytes) -> bool:
         """Whether posting ``payload`` under ``request_id`` must raise."""
-        return request_id in self.posted and self.posted[request_id] != payload
+        return self.collides(request_id) or (
+            request_id in self.posted and self.posted[request_id] != payload
+        )
 
     def refusal(self, request_id: str) -> str:
         """The message of the refusal of a post under ``request_id``.
 
-        An entry the inbox cannot read cannot be compared, so the post fails with whatever
+        A case collision is named first, as the inbox checks it before anything else. An
+        entry the inbox cannot read cannot be compared, so the post fails with whatever
         says why it cannot be read; a readable one is named as a different request.
         """
+        if self.collides(request_id):
+            return "differs only by case"
         return "different request" if self.posted.get(request_id) is not None else ""
 
     def apply(self, operation: tuple[object, ...]) -> None:
@@ -217,6 +231,7 @@ def _fake_inbox(_: Path) -> _Opened:
 @example(operations=[("post", "a", b"1"), ("end", "completed"), ("post-as-it-ends", "a", b"2")])
 @example(operations=[("unreadable", "a", "directory"), ("post", "a", b"1")])
 @example(operations=[("unreadable", "a", "symlink"), ("post-as-it-ends", "a", b"1")])
+@example(operations=[("post", "C", b"1"), ("post", "c", b"1")])
 def test_an_inbox_lists_what_was_posted_in_posting_order_and_reports_each_status(
     tmp_path_factory: pytest.TempPathFactory,
     opener: Callable[[Path], _Opened],
@@ -226,7 +241,9 @@ def test_an_inbox_lists_what_was_posted_in_posting_order_and_reports_each_status
 
     An unreadable entry is listed until it is set aside. Once the run has ended, a post of
     a request it applied succeeds, any other post is refused before writing, and a request
-    never marked reads as rejected; a post the run ends during is written and refused.
+    never marked reads as rejected; a post the run ends during is written and refused. An
+    id that differs from a held one only by case is refused as well, since the two would
+    name one file on a case-insensitive filesystem.
     """
     opened = opener(tmp_path_factory.mktemp("inbox"))
     inbox = opened.reopen()
@@ -350,6 +367,23 @@ def test_an_id_that_is_not_one_file_name_is_refused(
     inbox = opener(tmp_path).reopen()
     with pytest.raises(ProjectStateError, match="control request id"):
         inbox.post(request_id, b"{}", ended=_live)
+
+
+@pytest.mark.parametrize("opener", [_file_inbox, _fake_inbox], ids=["file", "fake"])
+def test_ids_that_differ_only_by_case_are_refused_on_every_filesystem(
+    tmp_path: Path, opener: Callable[[Path], _Opened]
+) -> None:
+    """``C`` and ``c`` would name one file on a case-insensitive filesystem, so the
+    second is refused up front everywhere and the first request is left as it was."""
+    inbox = opener(tmp_path).reopen()
+    inbox.post("C", b"first", ended=_live)
+
+    with pytest.raises(ProjectStateError, match="differs only by case"):
+        inbox.post("c", b"second", ended=_live)
+
+    inbox.post("C", b"first", ended=_live)  # the same id stays idempotent
+    assert inbox.pending() == (InboxEntry("C", b"first"),)
+    assert inbox.status("c", ended=None) is None
 
 
 def test_a_file_inbox_ignores_files_that_are_not_requests(tmp_path: Path) -> None:
