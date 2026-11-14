@@ -100,5 +100,6 @@ a handoff is reminded once to send one, and its lead is told if it does not.
 
 ## Packaging
 
-VibeSys installs these skills for its agents; there is nothing to install. The operator starts
-and stops the run; to stop yourself, bring every plan up to date and end your turn.
+VibeSys installs the `vibesys` skills for its agents; there is nothing to install. No domain
+plugin is installed: a domain skill reaches you only by the path the operator's brief names
+([domain-plugins.md](../domain-plugins.md)). The operator starts and stops the run; to stop yourself, bring every plan up to date and end your turn.
