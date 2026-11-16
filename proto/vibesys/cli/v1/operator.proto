@@ -11,18 +11,20 @@ option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
 // decoded into this message by its field names, an enum value is written as its name without the
 // prefix in lower case, and a key this message has no field for is refused, naming the key.
 //
-// A file names its placements under [placements.<name>]. A file of the earlier shape, with
-// [docker], [remote] and [slurm] at the top, names one placement and is read as the placement
-// "default"; a file holds one shape or the other, never both. No file is the one placement
-// "default" of kind local, with no resource.
+// A file says version = "0.2" and names its placements under [placements.<name>]. A file with no
+// version, another version, or a key of the shape before 0.2 (top-level [docker], [remote] or
+// [slurm], scheduler.max_jobs, a GPU table's devices, Slurm's gres, shared_gres or exclusive) is
+// refused, naming the key. No file is the one placement "default" of kind local, with no resource.
 message OperatorConfig {
+  // The keys of the shape before version 0.2, which a file of 0.2 does not have.
+  reserved 2, 3, 4;
+  reserved "docker", "remote", "slurm";
+
+  // The version of the file's schema, always "0.2".
+  string version = 7 [(buf.validate.field).string.const = "0.2"];
+
   // The placements, by name: where a docker job's container can run.
   map<string, Placement> placements = 1 [(buf.validate.field).map.keys.string.pattern = "^[a-z0-9][a-z0-9_-]{0,62}$"];
-
-  // The earlier shape.
-  LegacyDocker docker = 2;
-  RemoteSettings remote = 3;
-  SlurmSettings slurm = 4;
 
   // How the daemon shares the placements between jobs.
   Scheduler scheduler = 5;
@@ -39,15 +41,13 @@ message OperatorConfig {
 
 // Scheduler is how the daemon shares the placements between the jobs that wait.
 message Scheduler {
+  // max_jobs of the shape before version 0.2: each placement sets its own.
+  reserved 2;
+  reserved "max_jobs";
+
   // The policy that orders the jobs that wait, by the name the daemon's wiring gives it. Unset means
   // fifo.
   optional string policy = 1 [(buf.validate.field).string.min_len = 1];
-  // How many jobs run at once on the one placement of the earlier shape. A file with placements sets
-  // max_jobs on each placement instead.
-  optional uint32 max_jobs = 2 [(buf.validate.field).uint32 = {
-    gte: 1
-    lte: 1024
-  }];
 }
 
 // PlacementKind is where a placement's Docker engine runs containers.
@@ -71,7 +71,9 @@ message Placement {
     defined_only: true
     not_in: [0]
   }];
-  // How many jobs may run on the placement at once. Zero means one.
+  // How many jobs may run on the placement at once. Zero or unset means the size of the
+  // placement's GPU pool (resources.gpu.count or resources.rocm.count) on the local and ssh kinds,
+  // and one otherwise.
   uint32 max_jobs = 2 [(buf.validate.field).uint32.lte = 1024];
   // The machine, for the ssh and slurm kinds.
   RemoteSettings remote = 3;
@@ -125,13 +127,12 @@ message RemoteSettings {
 // SlurmSettings is how an allocation is asked for: with srun for the slurm kind, and with the submit
 // command of [apptainer] for the apptainer kind, which takes no srun_arguments.
 message SlurmSettings {
+  // The GRES keys of the shape before version 0.2. What an allocation asks for is computed from
+  // the placement's GPU pool: its count, and its gres_type.
+  reserved 2, 3, 4;
+  reserved "gres", "shared_gres", "exclusive";
+
   string partition = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9=,:._/+-]*$"];
-  // What a measured container asks for; a build asks for no GRES.
-  string gres = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9=,:._/+-]*$"];
-  // When set, what an unmeasured container asks for instead of gres, such as a shard of a GPU.
-  string shared_gres = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9=,:._/+-]*$"];
-  // Gives a measured container, a benchmark sample, the whole node. Unset means true.
-  optional bool exclusive = 4;
   // How many CPUs a build or an unmeasured container asks for. Unset means 8.
   optional int32 cpus = 5 [(buf.validate.field).int32.gte = 1];
   // The memory a build or an unmeasured container asks for, a size both Slurm and Docker read the
@@ -186,7 +187,7 @@ message ApptainerSettings {
   // When set, allocations are reused: a container's allocation is kept when the container is
   // removed, for the next container of the scope (of this job or a later one) to claim, and it ends
   // once it has been idle, claimed by no container, for this long. Each allocation then asks for the
-  // whole node (gres and exclusive) whatever it runs. Zero means no reuse: each container has an
+  // whole node (every GPU of the pool, exclusive) whatever it runs. Zero means no reuse: each container has an
   // allocation of its own, cancelled with it.
   double idle_release_seconds = 7 [(buf.validate.field).double.gte = 0];
   // The time limit of a reused allocation, at most the partition's and at most [slurm]
@@ -199,7 +200,8 @@ message ApptainerSettings {
 // Resources are what a placement gives every container it runs, by kind (ResourceKind). Each kind
 // is a table of its own: [placements.<name>.resources.<kind>].
 message Resources {
-  GpuResource gpu = 1;
+  // The machine's NVIDIA GPUs.
+  GpuPool gpu = 1;
   KubernetesResource kubernetes = 2;
   // Read-only directories of the engine's machine, by name: a container sees each at
   // /vibesys/mounts/<name>. An empty table gives none.
@@ -207,23 +209,32 @@ message Resources {
     (buf.validate.field).map.keys.string.pattern = "^[a-z0-9][a-z0-9_-]{0,62}$",
     (buf.validate.field).map.values.string.pattern = "^/[^:,\"\\n\\r]*$"
   ];
-  RocmResource rocm = 4;
+  // The machine's AMD GPUs, for tasks of the rocm backend: the kernel driver's devices (/dev/kfd
+  // and /dev/dri) and the video group under docker, and --rocm under Apptainer. A variable Slurm
+  // sets to name the GPUs it assigned (ROCR_VISIBLE_DEVICES, HIP_VISIBLE_DEVICES,
+  // GPU_DEVICE_ORDINAL, CUDA_VISIBLE_DEVICES) is passed on when it is set.
+  GpuPool rocm = 4;
 }
 
-// RocmResource passes the machine's AMD GPUs into the container, for tasks of the rocm backend: the
-// kernel driver's devices (/dev/kfd and /dev/dri) and the video group under docker, and --rocm under
-// Apptainer. An empty table gives them. A variable Slurm sets to name the GPUs it assigned
-// (ROCR_VISIBLE_DEVICES, HIP_VISIBLE_DEVICES, GPU_DEVICE_ORDINAL, CUDA_VISIBLE_DEVICES) is passed on
-// when it is set.
-message RocmResource {}
-
-// GpuResource passes GPUs into the container.
-message GpuResource {
-  // A docker --gpus value, such as "all" or "device=0,1".
-  string devices = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9=,:._/+-]+$"];
-  // When set, the container runtime that passes the devices instead of --gpus, with the devices in
-  // the runtime's variable.
-  string runtime = 2 [(buf.validate.field).string.pattern = "^[a-z0-9._-]*$"];
+// GpuPool is the GPUs of one vendor a placement gives, the vendor being the table it is written
+// in: [resources.gpu] for NVIDIA, [resources.rocm] for AMD. An empty table gives every job all of the
+// machine's GPUs. A count makes them a pool: the GPUs 0 to count-1 of the
+// machine (of each node, for a cluster), which jobs share, each one given its own.
+message GpuPool {
+  // How many GPUs the machine, or each node of a cluster, has. Set, it is the pool; it must equal
+  // the number of GPUs the machine has where the CLI can read it. A Slurm or Apptainer placement
+  // that gives GPUs needs it, since its allocations ask for GPUs by count.
+  optional uint32 count = 1 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 64
+  }];
+  // The GPU type of a Slurm cluster's GRES, such as a100: an allocation then asks for
+  // gpu:<gres_type>:<n> instead of gpu:<n>. Only for the slurm and apptainer kinds, when a
+  // partition mixes types or names them.
+  string gres_type = 2 [(buf.validate.field).string.pattern = "^([A-Za-z0-9_.-]+)?$"];
+  // When set, the container runtime that passes NVIDIA GPUs instead of --gpus, with the devices in
+  // the runtime's variable. Only for [resources.gpu].
+  string runtime = 3 [(buf.validate.field).string.pattern = "^[a-z0-9._-]*$"];
 }
 
 // KubernetesResource gives the container a Kubernetes cluster: its kubeconfig, read-only, at the
@@ -241,18 +252,4 @@ message KubernetesResource {
   // The container's network mode (docker run --network), such as "host" for a cluster whose API
   // server listens on the machine's loopback address. Empty leaves the engine's default.
   string network = 4 [(buf.validate.field).string.pattern = "^([A-Za-z0-9][A-Za-z0-9_.-]*)?$"];
-}
-
-// LegacyDocker is the [docker] section of the earlier shape.
-message LegacyDocker {
-  // Unspecified means local.
-  PlacementKind placement = 1 [(buf.validate.field).enum.defined_only = true];
-  // A docker --gpus value; empty passes none.
-  string gpus = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9=,:._/+-]*$"];
-  // When set, passes the GPUs with this runtime instead of --gpus. It needs gpus.
-  string runtime = 3 [(buf.validate.field).string.pattern = "^[a-z0-9._-]*$"];
-  map<string, string> mounts = 4 [
-    (buf.validate.field).map.keys.string.pattern = "^[a-z0-9][a-z0-9_-]{0,62}$",
-    (buf.validate.field).map.values.string.pattern = "^/[^:,\"\\n\\r]*$"
-  ];
 }

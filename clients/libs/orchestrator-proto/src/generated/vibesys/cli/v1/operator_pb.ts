@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/operator.proto.
  */
 export const file_vibesys_cli_v1_operator: GenFile = /*@__PURE__*/
-  fileDesc("Ch12aWJlc3lzL2NsaS92MS9vcGVyYXRvci5wcm90bxIOdmliZXN5cy5jbGkudjEi1QMKDk9wZXJhdG9yQ29uZmlnEmoKCnBsYWNlbWVudHMYASADKAsyLi52aWJlc3lzLmNsaS52MS5PcGVyYXRvckNvbmZpZy5QbGFjZW1lbnRzRW50cnlCJrpII5oBICIechwyGl5bYS16MC05XVthLXowLTlfLV17MCw2Mn0kEiwKBmRvY2tlchgCIAEoCzIcLnZpYmVzeXMuY2xpLnYxLkxlZ2FjeURvY2tlchIuCgZyZW1vdGUYAyABKAsyHi52aWJlc3lzLmNsaS52MS5SZW1vdGVTZXR0aW5ncxIsCgVzbHVybRgEIAEoCzIdLnZpYmVzeXMuY2xpLnYxLlNsdXJtU2V0dGluZ3MSLAoJc2NoZWR1bGVyGAUgASgLMhkudmliZXN5cy5jbGkudjEuU2NoZWR1bGVyEjgKEnN0b3BfZ3JhY2Vfc2Vjb25kcxgGIAEoAUIXukgUEhIZAAAAAAAAbkAp/Knx0k1iUD9IAIgBARpMCg9QbGFjZW1lbnRzRW50cnkSCwoDa2V5GAEgASgJEigKBXZhbHVlGAIgASgLMhkudmliZXN5cy5jbGkudjEuUGxhY2VtZW50OgI4AUIVChNfc3RvcF9ncmFjZV9zZWNvbmRzImQKCVNjaGVkdWxlchIcCgZwb2xpY3kYASABKAlCB7pIBHICEAFIAIgBARIhCghtYXhfam9icxgCIAEoDUIKukgHKgUYgAgoAUgBiAEBQgkKB19wb2xpY3lCCwoJX21heF9qb2JzItsCCglQbGFjZW1lbnQSNwoEa2luZBgBIAEoDjIdLnZpYmVzeXMuY2xpLnYxLlBsYWNlbWVudEtpbmRCCrpIB4IBBBABIAASGgoIbWF4X2pvYnMYAiABKA1CCLpIBSoDGIAIEi4KBnJlbW90ZRgDIAEoCzIeLnZpYmVzeXMuY2xpLnYxLlJlbW90ZVNldHRpbmdzEiwKBXNsdXJtGAQgASgLMh0udmliZXN5cy5jbGkudjEuU2x1cm1TZXR0aW5ncxIsCglyZXNvdXJjZXMYBSABKAsyGS52aWJlc3lzLmNsaS52MS5SZXNvdXJjZXMSNAoJYXBwdGFpbmVyGAYgASgLMiEudmliZXN5cy5jbGkudjEuQXBwdGFpbmVyU2V0dGluZ3MSNwoLYWxsb2NhdGlvbnMYByABKAsyIi52aWJlc3lzLmNsaS52MS5BbGxvY2F0aW9uU2V0dGluZ3Mi4AEKEkFsbG9jYXRpb25TZXR0aW5ncxIbCghtYXhfaGVsZBgBIAEoDUIJukgGKgQYQCgBEjcKB21heF9mb3IYAiABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb25CC7pICMgBAaoBAioAEjcKCmZpdF9tYXJnaW4YAyABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb25CCLpIBaoBAjIAEjsKDHJ1bl9pZGxlX2VuZBgEIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbkIKukgHqgEEMgIIPCK/AQoOUmVtb3RlU2V0dGluZ3MSMgoEaG9zdBgBIAEoCUIkukghch8yHV5bQS1aYS16MC05XVtBLVphLXowLTlfLkAtXSokEiEKC3NzaF9jb21tYW5kGAIgAygJQgy6SAmSAQYiBHICEAESIwoNcnN5bmNfY29tbWFuZBgDIAMoCUIMukgJkgEGIgRyAhABEjEKFXJlbW90ZV93b3Jrc3BhY2Vfcm9vdBgEIAEoCUISukgPcg0yC14vLipbXi9dLiokIswDCg1TbHVybVNldHRpbmdzEjAKCXBhcnRpdGlvbhgBIAEoCUIdukgachgyFl5bQS1aYS16MC05PSw6Ll8vKy1dKiQSKwoEZ3JlcxgCIAEoCUIdukgachgyFl5bQS1aYS16MC05PSw6Ll8vKy1dKiQSMgoLc2hhcmVkX2dyZXMYAyABKAlCHbpIGnIYMhZeW0EtWmEtejAtOT0sOi5fLystXSokEhYKCWV4Y2x1c2l2ZRgEIAEoCEgAiAEBEhoKBGNwdXMYBSABKAVCB7pIBBoCKAFIAYgBARItCgZtZW1vcnkYBiABKAlCHbpIGnIYMhZeKFsxLTldWzAtOV0qW0tNR1RdKT8kEiYKDnNydW5fYXJndW1lbnRzGAcgAygJQg66SAuSAQgiBnIEMgJeLRItChVwb2xsX2ludGVydmFsX3NlY29uZHMYCCABKAFCDrpICxIJKQAAAAAAAAAAEi0KFXF1ZXVlX3RpbWVvdXRfc2Vjb25kcxgJIAEoAUIOukgLEgkpAAAAAAAAAAASKAoQbWF4X3RpbWVfc2Vjb25kcxgKIAEoAUIOukgLEgkpAAAAAAAAAABCDAoKX2V4Y2x1c2l2ZUIHCgVfY3B1cyKOAwoRQXBwdGFpbmVyU2V0dGluZ3MSJAoOc3VibWl0X2NvbW1hbmQYASADKAlCDLpICZIBBiIEcgIQARIoChBzdWJtaXRfYXJndW1lbnRzGAIgAygJQg66SAuSAQgiBnIEMgJeLRIrCgdwcm9ncmFtGAMgASgJQhq6SBdyFTITXltBLVphLXowLTlfLi8rLV0qJBIuChFsb2NhbF9zY3JhdGNoX2RpchgEIAEoCUITukgQcg4yDF4oLy4qW14vXSk/JBIvChdjb252ZXJ0X3RpbWVvdXRfc2Vjb25kcxgFIAEoAUIOukgLEgkpAAAAAAAAAAASOwoHcnVudGltZRgGIAEoDjIgLnZpYmVzeXMuY2xpLnYxLkNvbnRhaW5lclJ1bnRpbWVCCLpIBYIBAhABEiwKFGlkbGVfcmVsZWFzZV9zZWNvbmRzGAcgASgBQg66SAsSCSkAAAAAAAAAABIwChhhbGxvY2F0aW9uX2xpbWl0X3NlY29uZHMYCCABKAFCDrpICxIJKQAAAAAAAAAAIrsCCglSZXNvdXJjZXMSKAoDZ3B1GAEgASgLMhsudmliZXN5cy5jbGkudjEuR3B1UmVzb3VyY2USNgoKa3ViZXJuZXRlcxgCIAEoCzIiLnZpYmVzeXMuY2xpLnYxLkt1YmVybmV0ZXNSZXNvdXJjZRJxCgZtb3VudHMYAyADKAsyJS52aWJlc3lzLmNsaS52MS5SZXNvdXJjZXMuTW91bnRzRW50cnlCOrpIN5oBNCIechwyGl5bYS16MC05XVthLXowLTlfLV17MCw2Mn0kKhJyEDIOXi9bXjosIlxuXHJdKiQSKgoEcm9jbRgEIAEoCzIcLnZpYmVzeXMuY2xpLnYxLlJvY21SZXNvdXJjZRotCgtNb3VudHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIg4KDFJvY21SZXNvdXJjZSJlCgtHcHVSZXNvdXJjZRIuCgdkZXZpY2VzGAEgASgJQh26SBpyGDIWXltBLVphLXowLTk9LDouXy8rLV0rJBImCgdydW50aW1lGAIgASgJQhW6SBJyEDIOXlthLXowLTkuXy1dKiQi1wEKEkt1YmVybmV0ZXNSZXNvdXJjZRIpCgprdWJlY29uZmlnGAEgASgJQhW6SBJyEDIOXi9bXjosIlxuXHJdKiQSLgoIcmVnaXN0cnkYAiABKAlCHLpIGXIXMhVeW0EtWmEtejAtOS5fOi9AKy1dKiQSLQoHYnVpbGRlchgDIAEoCUIcukgZchcyFV5bQS1aYS16MC05Ll86L0ArLV0qJBI3CgduZXR3b3JrGAQgASgJQia6SCNyITIfXihbQS1aYS16MC05XVtBLVphLXowLTlfLi1dKik/JCLEAgoMTGVnYWN5RG9ja2VyEjoKCXBsYWNlbWVudBgBIAEoDjIdLnZpYmVzeXMuY2xpLnYxLlBsYWNlbWVudEtpbmRCCLpIBYIBAhABEisKBGdwdXMYAiABKAlCHbpIGnIYMhZeW0EtWmEtejAtOT0sOi5fLystXSokEiYKB3J1bnRpbWUYAyABKAlCFbpIEnIQMg5eW2EtejAtOS5fLV0qJBJ0CgZtb3VudHMYBCADKAsyKC52aWJlc3lzLmNsaS52MS5MZWdhY3lEb2NrZXIuTW91bnRzRW50cnlCOrpIN5oBNCIechwyGl5bYS16MC05XVthLXowLTlfLV17MCw2Mn0kKhJyEDIOXi9bXjosIlxuXHJdKiQaLQoLTW91bnRzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASqZAQoNUGxhY2VtZW50S2luZBIeChpQTEFDRU1FTlRfS0lORF9VTlNQRUNJRklFRBAAEhgKFFBMQUNFTUVOVF9LSU5EX0xPQ0FMEAESFgoSUExBQ0VNRU5UX0tJTkRfU1NIEAISGAoUUExBQ0VNRU5UX0tJTkRfU0xVUk0QAxIcChhQTEFDRU1FTlRfS0lORF9BUFBUQUlORVIQBCpzChBDb250YWluZXJSdW50aW1lEiEKHUNPTlRBSU5FUl9SVU5USU1FX1VOU1BFQ0lGSUVEEAASHwobQ09OVEFJTkVSX1JVTlRJTUVfQVBQVEFJTkVSEAESGwoXQ09OVEFJTkVSX1JVTlRJTUVfUFlYSVMQAkI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_duration]);
+  fileDesc("Ch12aWJlc3lzL2NsaS92MS9vcGVyYXRvci5wcm90bxIOdmliZXN5cy5jbGkudjEijwMKDk9wZXJhdG9yQ29uZmlnEhsKB3ZlcnNpb24YByABKAlCCrpIB3IFCgMwLjISagoKcGxhY2VtZW50cxgBIAMoCzIuLnZpYmVzeXMuY2xpLnYxLk9wZXJhdG9yQ29uZmlnLlBsYWNlbWVudHNFbnRyeUImukgjmgEgIh5yHDIaXlthLXowLTldW2EtejAtOV8tXXswLDYyfSQSLAoJc2NoZWR1bGVyGAUgASgLMhkudmliZXN5cy5jbGkudjEuU2NoZWR1bGVyEjgKEnN0b3BfZ3JhY2Vfc2Vjb25kcxgGIAEoAUIXukgUEhIZAAAAAAAAbkAp/Knx0k1iUD9IAIgBARpMCg9QbGFjZW1lbnRzRW50cnkSCwoDa2V5GAEgASgJEigKBXZhbHVlGAIgASgLMhkudmliZXN5cy5jbGkudjEuUGxhY2VtZW50OgI4AUIVChNfc3RvcF9ncmFjZV9zZWNvbmRzSgQIAhADSgQIAxAESgQIBBAFUgZkb2NrZXJSBnJlbW90ZVIFc2x1cm0iRAoJU2NoZWR1bGVyEhwKBnBvbGljeRgBIAEoCUIHukgEcgIQAUgAiAEBQgkKB19wb2xpY3lKBAgCEANSCG1heF9qb2JzItsCCglQbGFjZW1lbnQSNwoEa2luZBgBIAEoDjIdLnZpYmVzeXMuY2xpLnYxLlBsYWNlbWVudEtpbmRCCrpIB4IBBBABIAASGgoIbWF4X2pvYnMYAiABKA1CCLpIBSoDGIAIEi4KBnJlbW90ZRgDIAEoCzIeLnZpYmVzeXMuY2xpLnYxLlJlbW90ZVNldHRpbmdzEiwKBXNsdXJtGAQgASgLMh0udmliZXN5cy5jbGkudjEuU2x1cm1TZXR0aW5ncxIsCglyZXNvdXJjZXMYBSABKAsyGS52aWJlc3lzLmNsaS52MS5SZXNvdXJjZXMSNAoJYXBwdGFpbmVyGAYgASgLMiEudmliZXN5cy5jbGkudjEuQXBwdGFpbmVyU2V0dGluZ3MSNwoLYWxsb2NhdGlvbnMYByABKAsyIi52aWJlc3lzLmNsaS52MS5BbGxvY2F0aW9uU2V0dGluZ3Mi4AEKEkFsbG9jYXRpb25TZXR0aW5ncxIbCghtYXhfaGVsZBgBIAEoDUIJukgGKgQYQCgBEjcKB21heF9mb3IYAiABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb25CC7pICMgBAaoBAioAEjcKCmZpdF9tYXJnaW4YAyABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb25CCLpIBaoBAjIAEjsKDHJ1bl9pZGxlX2VuZBgEIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbkIKukgHqgEEMgIIPCK/AQoOUmVtb3RlU2V0dGluZ3MSMgoEaG9zdBgBIAEoCUIkukghch8yHV5bQS1aYS16MC05XVtBLVphLXowLTlfLkAtXSokEiEKC3NzaF9jb21tYW5kGAIgAygJQgy6SAmSAQYiBHICEAESIwoNcnN5bmNfY29tbWFuZBgDIAMoCUIMukgJkgEGIgRyAhABEjEKFXJlbW90ZV93b3Jrc3BhY2Vfcm9vdBgEIAEoCUISukgPcg0yC14vLipbXi9dLiokIvUCCg1TbHVybVNldHRpbmdzEjAKCXBhcnRpdGlvbhgBIAEoCUIdukgachgyFl5bQS1aYS16MC05PSw6Ll8vKy1dKiQSGgoEY3B1cxgFIAEoBUIHukgEGgIoAUgAiAEBEi0KBm1lbW9yeRgGIAEoCUIdukgachgyFl4oWzEtOV1bMC05XSpbS01HVF0pPyQSJgoOc3J1bl9hcmd1bWVudHMYByADKAlCDrpIC5IBCCIGcgQyAl4tEi0KFXBvbGxfaW50ZXJ2YWxfc2Vjb25kcxgIIAEoAUIOukgLEgkpAAAAAAAAAAASLQoVcXVldWVfdGltZW91dF9zZWNvbmRzGAkgASgBQg66SAsSCSkAAAAAAAAAABIoChBtYXhfdGltZV9zZWNvbmRzGAogASgBQg66SAsSCSkAAAAAAAAAAEIHCgVfY3B1c0oECAIQA0oECAMQBEoECAQQBVIEZ3Jlc1ILc2hhcmVkX2dyZXNSCWV4Y2x1c2l2ZSKOAwoRQXBwdGFpbmVyU2V0dGluZ3MSJAoOc3VibWl0X2NvbW1hbmQYASADKAlCDLpICZIBBiIEcgIQARIoChBzdWJtaXRfYXJndW1lbnRzGAIgAygJQg66SAuSAQgiBnIEMgJeLRIrCgdwcm9ncmFtGAMgASgJQhq6SBdyFTITXltBLVphLXowLTlfLi8rLV0qJBIuChFsb2NhbF9zY3JhdGNoX2RpchgEIAEoCUITukgQcg4yDF4oLy4qW14vXSk/JBIvChdjb252ZXJ0X3RpbWVvdXRfc2Vjb25kcxgFIAEoAUIOukgLEgkpAAAAAAAAAAASOwoHcnVudGltZRgGIAEoDjIgLnZpYmVzeXMuY2xpLnYxLkNvbnRhaW5lclJ1bnRpbWVCCLpIBYIBAhABEiwKFGlkbGVfcmVsZWFzZV9zZWNvbmRzGAcgASgBQg66SAsSCSkAAAAAAAAAABIwChhhbGxvY2F0aW9uX2xpbWl0X3NlY29uZHMYCCABKAFCDrpICxIJKQAAAAAAAAAAIrICCglSZXNvdXJjZXMSJAoDZ3B1GAEgASgLMhcudmliZXN5cy5jbGkudjEuR3B1UG9vbBI2CgprdWJlcm5ldGVzGAIgASgLMiIudmliZXN5cy5jbGkudjEuS3ViZXJuZXRlc1Jlc291cmNlEnEKBm1vdW50cxgDIAMoCzIlLnZpYmVzeXMuY2xpLnYxLlJlc291cmNlcy5Nb3VudHNFbnRyeUI6ukg3mgE0Ih5yHDIaXlthLXowLTldW2EtejAtOV8tXXswLDYyfSQqEnIQMg5eL1teOiwiXG5ccl0qJBIlCgRyb2NtGAQgASgLMhcudmliZXN5cy5jbGkudjEuR3B1UG9vbBotCgtNb3VudHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIooBCgdHcHVQb29sEh0KBWNvdW50GAEgASgNQgm6SAYqBBhAKAFIAIgBARIuCglncmVzX3R5cGUYAiABKAlCG7pIGHIWMhReKFtBLVphLXowLTlfLi1dKyk/JBImCgdydW50aW1lGAMgASgJQhW6SBJyEDIOXlthLXowLTkuXy1dKiRCCAoGX2NvdW50ItcBChJLdWJlcm5ldGVzUmVzb3VyY2USKQoKa3ViZWNvbmZpZxgBIAEoCUIVukgSchAyDl4vW146LCJcblxyXSokEi4KCHJlZ2lzdHJ5GAIgASgJQhy6SBlyFzIVXltBLVphLXowLTkuXzovQCstXSokEi0KB2J1aWxkZXIYAyABKAlCHLpIGXIXMhVeW0EtWmEtejAtOS5fOi9AKy1dKiQSNwoHbmV0d29yaxgEIAEoCUImukgjciEyH14oW0EtWmEtejAtOV1bQS1aYS16MC05Xy4tXSopPyQqmQEKDVBsYWNlbWVudEtpbmQSHgoaUExBQ0VNRU5UX0tJTkRfVU5TUEVDSUZJRUQQABIYChRQTEFDRU1FTlRfS0lORF9MT0NBTBABEhYKElBMQUNFTUVOVF9LSU5EX1NTSBACEhgKFFBMQUNFTUVOVF9LSU5EX1NMVVJNEAMSHAoYUExBQ0VNRU5UX0tJTkRfQVBQVEFJTkVSEAQqcwoQQ29udGFpbmVyUnVudGltZRIhCh1DT05UQUlORVJfUlVOVElNRV9VTlNQRUNJRklFRBAAEh8KG0NPTlRBSU5FUl9SVU5USU1FX0FQUFRBSU5FUhABEhsKF0NPTlRBSU5FUl9SVU5USU1FX1BZWElTEAJCOVo3Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvY2xpL2dlbi92aWJlc3lzL2NsaS92MTtjbGl2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_duration]);
 
 /**
  * OperatorConfig is the operator config, cli.toml: the settings of the machines that run
@@ -21,37 +21,27 @@ export const file_vibesys_cli_v1_operator: GenFile = /*@__PURE__*/
  * decoded into this message by its field names, an enum value is written as its name without the
  * prefix in lower case, and a key this message has no field for is refused, naming the key.
  *
- * A file names its placements under [placements.<name>]. A file of the earlier shape, with
- * [docker], [remote] and [slurm] at the top, names one placement and is read as the placement
- * "default"; a file holds one shape or the other, never both. No file is the one placement
- * "default" of kind local, with no resource.
+ * A file says version = "0.2" and names its placements under [placements.<name>]. A file with no
+ * version, another version, or a key of the shape before 0.2 (top-level [docker], [remote] or
+ * [slurm], scheduler.max_jobs, a GPU table's devices, Slurm's gres, shared_gres or exclusive) is
+ * refused, naming the key. No file is the one placement "default" of kind local, with no resource.
  *
  * @generated from message vibesys.cli.v1.OperatorConfig
  */
 export type OperatorConfig = Message<"vibesys.cli.v1.OperatorConfig"> & {
+  /**
+   * The version of the file's schema, always "0.2".
+   *
+   * @generated from field: string version = 7;
+   */
+  version: string;
+
   /**
    * The placements, by name: where a docker job's container can run.
    *
    * @generated from field: map<string, vibesys.cli.v1.Placement> placements = 1;
    */
   placements: { [key: string]: Placement };
-
-  /**
-   * The earlier shape.
-   *
-   * @generated from field: vibesys.cli.v1.LegacyDocker docker = 2;
-   */
-  docker?: LegacyDocker | undefined;
-
-  /**
-   * @generated from field: vibesys.cli.v1.RemoteSettings remote = 3;
-   */
-  remote?: RemoteSettings | undefined;
-
-  /**
-   * @generated from field: vibesys.cli.v1.SlurmSettings slurm = 4;
-   */
-  slurm?: SlurmSettings | undefined;
 
   /**
    * How the daemon shares the placements between jobs.
@@ -91,14 +81,6 @@ export type Scheduler = Message<"vibesys.cli.v1.Scheduler"> & {
    * @generated from field: optional string policy = 1;
    */
   policy?: string | undefined;
-
-  /**
-   * How many jobs run at once on the one placement of the earlier shape. A file with placements sets
-   * max_jobs on each placement instead.
-   *
-   * @generated from field: optional uint32 max_jobs = 2;
-   */
-  maxJobs?: number | undefined;
 };
 
 /**
@@ -120,7 +102,9 @@ export type Placement = Message<"vibesys.cli.v1.Placement"> & {
   kind: PlacementKind;
 
   /**
-   * How many jobs may run on the placement at once. Zero means one.
+   * How many jobs may run on the placement at once. Zero or unset means the size of the
+   * placement's GPU pool (resources.gpu.count or resources.rocm.count) on the local and ssh kinds,
+   * and one otherwise.
    *
    * @generated from field: uint32 max_jobs = 2;
    */
@@ -272,27 +256,6 @@ export type SlurmSettings = Message<"vibesys.cli.v1.SlurmSettings"> & {
   partition: string;
 
   /**
-   * What a measured container asks for; a build asks for no GRES.
-   *
-   * @generated from field: string gres = 2;
-   */
-  gres: string;
-
-  /**
-   * When set, what an unmeasured container asks for instead of gres, such as a shard of a GPU.
-   *
-   * @generated from field: string shared_gres = 3;
-   */
-  sharedGres: string;
-
-  /**
-   * Gives a measured container, a benchmark sample, the whole node. Unset means true.
-   *
-   * @generated from field: optional bool exclusive = 4;
-   */
-  exclusive?: boolean | undefined;
-
-  /**
    * How many CPUs a build or an unmeasured container asks for. Unset means 8.
    *
    * @generated from field: optional int32 cpus = 5;
@@ -404,7 +367,7 @@ export type ApptainerSettings = Message<"vibesys.cli.v1.ApptainerSettings"> & {
    * When set, allocations are reused: a container's allocation is kept when the container is
    * removed, for the next container of the scope (of this job or a later one) to claim, and it ends
    * once it has been idle, claimed by no container, for this long. Each allocation then asks for the
-   * whole node (gres and exclusive) whatever it runs. Zero means no reuse: each container has an
+   * whole node (every GPU of the pool, exclusive) whatever it runs. Zero means no reuse: each container has an
    * allocation of its own, cancelled with it.
    *
    * @generated from field: double idle_release_seconds = 7;
@@ -437,9 +400,11 @@ export const ApptainerSettingsSchema: GenMessage<ApptainerSettings> = /*@__PURE_
  */
 export type Resources = Message<"vibesys.cli.v1.Resources"> & {
   /**
-   * @generated from field: vibesys.cli.v1.GpuResource gpu = 1;
+   * The machine's NVIDIA GPUs.
+   *
+   * @generated from field: vibesys.cli.v1.GpuPool gpu = 1;
    */
-  gpu?: GpuResource | undefined;
+  gpu?: GpuPool | undefined;
 
   /**
    * @generated from field: vibesys.cli.v1.KubernetesResource kubernetes = 2;
@@ -455,9 +420,14 @@ export type Resources = Message<"vibesys.cli.v1.Resources"> & {
   mounts: { [key: string]: string };
 
   /**
-   * @generated from field: vibesys.cli.v1.RocmResource rocm = 4;
+   * The machine's AMD GPUs, for tasks of the rocm backend: the kernel driver's devices (/dev/kfd
+   * and /dev/dri) and the video group under docker, and --rocm under Apptainer. A variable Slurm
+   * sets to name the GPUs it assigned (ROCR_VISIBLE_DEVICES, HIP_VISIBLE_DEVICES,
+   * GPU_DEVICE_ORDINAL, CUDA_VISIBLE_DEVICES) is passed on when it is set.
+   *
+   * @generated from field: vibesys.cli.v1.GpuPool rocm = 4;
    */
-  rocm?: RocmResource | undefined;
+  rocm?: GpuPool | undefined;
 };
 
 /**
@@ -468,52 +438,47 @@ export const ResourcesSchema: GenMessage<Resources> = /*@__PURE__*/
   messageDesc(file_vibesys_cli_v1_operator, 7);
 
 /**
- * RocmResource passes the machine's AMD GPUs into the container, for tasks of the rocm backend: the
- * kernel driver's devices (/dev/kfd and /dev/dri) and the video group under docker, and --rocm under
- * Apptainer. An empty table gives them. A variable Slurm sets to name the GPUs it assigned
- * (ROCR_VISIBLE_DEVICES, HIP_VISIBLE_DEVICES, GPU_DEVICE_ORDINAL, CUDA_VISIBLE_DEVICES) is passed on
- * when it is set.
+ * GpuPool is the GPUs of one vendor a placement gives, the vendor being the table it is written
+ * in: [resources.gpu] for NVIDIA, [resources.rocm] for AMD. An empty table gives every job all of the
+ * machine's GPUs. A count makes them a pool: the GPUs 0 to count-1 of the
+ * machine (of each node, for a cluster), which jobs share, each one given its own.
  *
- * @generated from message vibesys.cli.v1.RocmResource
+ * @generated from message vibesys.cli.v1.GpuPool
  */
-export type RocmResource = Message<"vibesys.cli.v1.RocmResource"> & {
-};
-
-/**
- * Describes the message vibesys.cli.v1.RocmResource.
- * Use `create(RocmResourceSchema)` to create a new message.
- */
-export const RocmResourceSchema: GenMessage<RocmResource> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_operator, 8);
-
-/**
- * GpuResource passes GPUs into the container.
- *
- * @generated from message vibesys.cli.v1.GpuResource
- */
-export type GpuResource = Message<"vibesys.cli.v1.GpuResource"> & {
+export type GpuPool = Message<"vibesys.cli.v1.GpuPool"> & {
   /**
-   * A docker --gpus value, such as "all" or "device=0,1".
+   * How many GPUs the machine, or each node of a cluster, has. Set, it is the pool; it must equal
+   * the number of GPUs the machine has where the CLI can read it. A Slurm or Apptainer placement
+   * that gives GPUs needs it, since its allocations ask for GPUs by count.
    *
-   * @generated from field: string devices = 1;
+   * @generated from field: optional uint32 count = 1;
    */
-  devices: string;
+  count?: number | undefined;
 
   /**
-   * When set, the container runtime that passes the devices instead of --gpus, with the devices in
-   * the runtime's variable.
+   * The GPU type of a Slurm cluster's GRES, such as a100: an allocation then asks for
+   * gpu:<gres_type>:<n> instead of gpu:<n>. Only for the slurm and apptainer kinds, when a
+   * partition mixes types or names them.
    *
-   * @generated from field: string runtime = 2;
+   * @generated from field: string gres_type = 2;
+   */
+  gresType: string;
+
+  /**
+   * When set, the container runtime that passes NVIDIA GPUs instead of --gpus, with the devices in
+   * the runtime's variable. Only for [resources.gpu].
+   *
+   * @generated from field: string runtime = 3;
    */
   runtime: string;
 };
 
 /**
- * Describes the message vibesys.cli.v1.GpuResource.
- * Use `create(GpuResourceSchema)` to create a new message.
+ * Describes the message vibesys.cli.v1.GpuPool.
+ * Use `create(GpuPoolSchema)` to create a new message.
  */
-export const GpuResourceSchema: GenMessage<GpuResource> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_operator, 9);
+export const GpuPoolSchema: GenMessage<GpuPool> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_operator, 8);
 
 /**
  * KubernetesResource gives the container a Kubernetes cluster: its kubeconfig, read-only, at the
@@ -560,47 +525,7 @@ export type KubernetesResource = Message<"vibesys.cli.v1.KubernetesResource"> & 
  * Use `create(KubernetesResourceSchema)` to create a new message.
  */
 export const KubernetesResourceSchema: GenMessage<KubernetesResource> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_operator, 10);
-
-/**
- * LegacyDocker is the [docker] section of the earlier shape.
- *
- * @generated from message vibesys.cli.v1.LegacyDocker
- */
-export type LegacyDocker = Message<"vibesys.cli.v1.LegacyDocker"> & {
-  /**
-   * Unspecified means local.
-   *
-   * @generated from field: vibesys.cli.v1.PlacementKind placement = 1;
-   */
-  placement: PlacementKind;
-
-  /**
-   * A docker --gpus value; empty passes none.
-   *
-   * @generated from field: string gpus = 2;
-   */
-  gpus: string;
-
-  /**
-   * When set, passes the GPUs with this runtime instead of --gpus. It needs gpus.
-   *
-   * @generated from field: string runtime = 3;
-   */
-  runtime: string;
-
-  /**
-   * @generated from field: map<string, string> mounts = 4;
-   */
-  mounts: { [key: string]: string };
-};
-
-/**
- * Describes the message vibesys.cli.v1.LegacyDocker.
- * Use `create(LegacyDockerSchema)` to create a new message.
- */
-export const LegacyDockerSchema: GenMessage<LegacyDocker> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_operator, 11);
+  messageDesc(file_vibesys_cli_v1_operator, 9);
 
 /**
  * PlacementKind is where a placement's Docker engine runs containers.

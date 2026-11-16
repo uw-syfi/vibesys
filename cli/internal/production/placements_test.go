@@ -60,9 +60,9 @@ func withApptainer(t *testing.T) Process {
 	return Process{UID: 1000, GID: 1000, Home: "/home/u", Executable: "/usr/bin/vibesys-cli", Getenv: getenv}
 }
 
-// twoSlices is an operator config of two apptainer placements on one cluster, each of whose
-// allocations is a slice of a node with its own GPUs.
-const twoSlices = `
+// twoPlacements is an operator config of two apptainer placements on one cluster, each of whose
+// allocations has GPUs of its own.
+const twoPlacements = `
 [placements.mi210-a]
 kind = "apptainer"
 [placements.mi210-a.remote]
@@ -70,8 +70,8 @@ host = "host-a"
 remote_workspace_root = "/w"
 [placements.mi210-a.slurm]
 partition = "gpu"
-exclusive = false
 [placements.mi210-a.resources.rocm]
+count = 4
 [placements.mi210-b]
 kind = "apptainer"
 [placements.mi210-b.remote]
@@ -79,16 +79,16 @@ host = "host-a"
 remote_workspace_root = "/w"
 [placements.mi210-b.slurm]
 partition = "gpu"
-exclusive = false
 [placements.mi210-b.resources.rocm]
+count = 4
 `
 
 // A job of an apptainer placement gets the GPUs of its own allocation, so the scheduler of the
 // operator config holds them per placement: a measure on one placement of a cluster does not wait
-// for a job on another placement of it, nor a job there for the measure, and a measure still
-// excludes every other job of its own placement, and waits for one that runs there.
+// for a job on another placement of it, nor a job there for the measure, and a job of its own
+// placement waits for the placement's one slot.
 func TestAMeasureHoldsTheGPUsOfItsOwnApptainerPlacementOnly(t *testing.T) {
-	op := parse(t, twoSlices)
+	op := parse(t, twoPlacements)
 	m, err := withApptainer(t).machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key")
 	if err != nil {
 		t.Fatal(err)
@@ -168,11 +168,11 @@ host = "host-a"
 remote_workspace_root = "/scratch/user/vibesys"
 [placements.mi300.slurm]
 partition = "part-a"
-gres = "gpu:4"
 [placements.mi300.apptainer]
 runtime = "pyxis"
 submit_arguments = ["--account=acct-a"]
 [placements.mi300.resources.rocm]
+count = 4
 `)
 	if _, err := p.machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key"); err != nil {
 		t.Errorf("a pyxis placement without apptainer here: %v", err)
@@ -189,9 +189,8 @@ func sameClaims(a, b map[string][]core.Claim) bool {
 }
 
 // threeAtOnce is an operator config of one apptainer placement that runs three jobs at once, each
-// in allocations of its own, a measured one of which holds a whole node with [slurm] exclusive.
-func threeAtOnce(exclusive string) string {
-	return `
+// in allocations of its own, a measured one of which holds a whole node.
+const threeAtOnce = `
 [placements.gpus]
 kind = "apptainer"
 max_jobs = 3
@@ -200,18 +199,14 @@ host = "host-a"
 remote_workspace_root = "/w"
 [placements.gpus.slurm]
 partition = "gpu"
-` + exclusive + `
 [placements.gpus.resources.rocm]
+count = 8
 `
-}
 
 // An apptainer placement of max_jobs jobs runs that many at once, since each has allocations of its
-// own: the scheduler starts a job beside up to max_jobs - 1 others. With [slurm] exclusive (the
-// default), a measured container's allocation is a whole node no other job shares, so a measure is
-// already alone where it runs and takes a slot as any job does: measures of any task, and other
-// jobs, run beside it, up to max_jobs. With exclusive = false, its allocation is a slice of a node,
-// so a measure still runs alone on its placement: it waits for every other job there, and every
-// other job waits for it.
+// own: the scheduler starts a job beside up to max_jobs - 1 others. A measured container's
+// allocation is a whole node no other job shares, so a measure is already alone where it runs and
+// takes a slot as any job does: measures of any task, and other jobs, run beside it, up to max_jobs.
 func TestAnApptainerPlacementRunsMaxJobsAtOnceAndAMeasureAloneOnItsNode(t *testing.T) {
 	cmd, measure := core.JobCommand, core.JobMeasure
 	type step struct {
@@ -226,24 +221,18 @@ func TestAnApptainerPlacementRunsMaxJobsAtOnceAndAMeasureAloneOnItsNode(t *testi
 		{nil, measure, true},
 	}
 	for _, c := range []struct {
-		exclusive string
-		cases     []step
+		cases []step
 	}{
-		{"", append(slots,
+		{append(slots,
 			step{[]core.JobKind{cmd}, measure, true},
 			step{[]core.JobKind{measure}, cmd, true},
 			step{[]core.JobKind{measure}, measure, true},
 			step{[]core.JobKind{measure, measure}, measure, true},
 			step{[]core.JobKind{measure, cmd, measure}, measure, false},
-		)},
-		{"exclusive = true", append(slots, step{[]core.JobKind{measure, cmd}, measure, true})},
-		{"exclusive = false", append(slots,
-			step{[]core.JobKind{cmd}, measure, false},
-			step{[]core.JobKind{measure}, cmd, false},
-			step{[]core.JobKind{measure}, measure, false},
+			step{[]core.JobKind{measure, cmd}, measure, true},
 		)},
 	} {
-		op := parse(t, threeAtOnce(c.exclusive))
+		op := parse(t, threeAtOnce)
 		m, err := withApptainer(t).machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key")
 		if err != nil {
 			t.Fatal(err)
@@ -274,7 +263,7 @@ func TestAnApptainerPlacementRunsMaxJobsAtOnceAndAMeasureAloneOnItsNode(t *testi
 			decisions := schedule.Step(state, schedule.Rules{Policy: s.Policy})
 			_, started := decisions[0].(schedule.Start)
 			if started != k.starts {
-				t.Errorf("[slurm] %q: a %s job waits beside %v: %+v, want started %v", c.exclusive, k.waits, k.running, decisions[0], k.starts)
+				t.Errorf("a %s job waits beside %v: %+v, want started %v", k.waits, k.running, decisions[0], k.starts)
 			}
 		}
 	}

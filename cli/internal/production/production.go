@@ -280,7 +280,7 @@ func (p Process) Wire(op *cliv1.OperatorConfig, clk Clocks, dir runtimedir.Dir, 
 // resources claim, with room for every job of the placements that claim it, so that it bounds only
 // the claims that take it whole: a measure's, but on a placement that keeps it apart by itself
 // (isolated), and those a resource makes exclusive, such as a cluster's. A host job runs on this
-// machine beside the jobs of the local placement "default" of the earlier shape, so it claims a
+// machine beside the jobs of a local placement named "default" (that of no file), so it claims a
 // slot of that placement; without one, host jobs have a resource of one slot of their own.
 func schedulerOf(op *cliv1.OperatorConfig, offers []core.PlacementOffer, claims map[string][]core.Claim) (app.Scheduler, error) {
 	policy := op.GetScheduler().GetPolicy()

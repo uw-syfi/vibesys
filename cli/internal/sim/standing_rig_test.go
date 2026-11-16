@@ -260,7 +260,7 @@ func (r *standingRig) jobIn(a *app.App, into string, argv ...string) core.Job {
 
 func parseConfig(t *testing.T, text string) *cliv1.OperatorConfig {
 	t.Helper()
-	c, err := operator.Parse([]byte(text))
+	c, err := operator.Parse([]byte("version = \"0.2\"\n" + text))
 	if err != nil {
 		t.Fatal(err)
 	}

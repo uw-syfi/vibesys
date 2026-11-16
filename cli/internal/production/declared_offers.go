@@ -3,12 +3,13 @@ package production
 import (
 	"errors"
 	"fmt"
-	"strings"
+	"strconv"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
+	"github.com/uw-syfi/vibesys/cli/internal/operator"
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
@@ -20,7 +21,7 @@ var errNoDeclaredAccelerators = errors.New("no declared accelerators")
 // declared in the operator config: its resources read the login node, not the compute nodes the
 // jobs get, and a probe would have to hold an allocation. Any other placement is probed through its
 // own resources.
-func placementProbe(pl *cliv1.Placement, provider *docker.Provider) (app.Placement, error) {
+func placementProbe(name string, pl *cliv1.Placement, provider *docker.Provider) (app.Placement, error) {
 	kind, err := wire.ToPlacementKind("kind", pl.GetKind())
 	if err != nil {
 		return app.Placement{}, err
@@ -29,7 +30,11 @@ func placementProbe(pl *cliv1.Placement, provider *docker.Provider) (app.Placeme
 	if kind != core.PlacementSlurm && kind != core.PlacementApptainer {
 		return out, nil
 	}
-	offers, err := declaredOffers(pl.GetSlurm(), pl.GetResources())
+	pool, err := operator.PoolOf(name, pl)
+	if err != nil {
+		return app.Placement{}, err
+	}
+	offers, err := declaredOffers(pool)
 	if errors.Is(err, errNoDeclaredAccelerators) {
 		err = fmt.Errorf("%w: %w", app.ErrNotProbeable, err)
 	}
@@ -37,45 +42,25 @@ func placementProbe(pl *cliv1.Placement, provider *docker.Provider) (app.Placeme
 	return out, nil
 }
 
-// declaredOffers reads what an operator config declares a placement gives: the vendor comes from
-// the accelerator resource ([resources.gpu] is NVIDIA, [resources.rocm] is AMD) and the models and
-// counts from the placement's gres, such as "gpu:h100:8" or "gpu:4" (a gres with no model names the
-// model OTHER). Without an accelerator resource it fails with errNoDeclaredAccelerators.
-// A gres token names its model through the accelerator registry (core.ParseAccelerator).
-func declaredOffers(slurm *cliv1.SlurmSettings, res *cliv1.Resources) ([]core.Accelerator, error) {
-	var vendor core.AcceleratorVendor
-	switch {
-	case res.GetGpu() != nil && res.GetRocm() != nil:
-		return nil, errors.New("both a gpu and a rocm resource are declared: the accelerators cannot be told apart")
-	case res.GetGpu() != nil:
-		vendor = core.VendorNVIDIA
-	case res.GetRocm() != nil:
-		vendor = core.VendorAMD
-	default:
+// declaredOffers reads what an operator config declares a cluster placement gives: the vendor is
+// the GPU table's ([resources.gpu] is NVIDIA, [resources.rocm] is AMD), the count its count, and the
+// model its gres_type, such as h100 (no gres_type names the model OTHER). A gres_type names its
+// model through the accelerator registry (core.ParseAccelerator). Without a pool it fails with
+// errNoDeclaredAccelerators.
+func declaredOffers(pool operator.Pool) ([]core.Accelerator, error) {
+	if !pool.Size.IsSet() {
 		return nil, errNoDeclaredAccelerators
 	}
-	var offers []core.Accelerator
-	for item := range strings.SplitSeq(slurm.GetGres(), ",") {
-		item, _, _ = strings.Cut(item, "(")
-		parts := strings.Split(item, ":")
-		if parts[0] != "gpu" || len(parts) < 2 || len(parts) > 3 {
-			continue
-		}
-		name := "gpu"
-		if len(parts) == 3 {
-			name = parts[1]
-		}
-		offer, err := core.ParseAccelerator(vendor, name, parts[len(parts)-1])
-		if err != nil {
-			return nil, fmt.Errorf("gres %q: %w", item, err)
-		}
-		if len(parts) == 2 {
-			offer.DeviceName = ""
-		}
-		offers = append(offers, offer)
+	name := "gpu"
+	if pool.GresType != "" {
+		name = pool.GresType
 	}
-	if len(offers) == 0 {
-		return nil, fmt.Errorf("the declared accelerator resource has no gpu count in gres %q", slurm.GetGres())
+	offer, err := core.ParseAccelerator(pool.Vendor, name, strconv.Itoa(pool.Size.Int()))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", pool.Key, err)
 	}
-	return offers, nil
+	if pool.GresType == "" {
+		offer.DeviceName = ""
+	}
+	return []core.Accelerator{offer}, nil
 }

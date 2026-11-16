@@ -34,7 +34,7 @@ func TestTheSchedulerOfNoConfigIsOneSlot(t *testing.T) {
 	if d, ok := s.Demand.(schedule.PlacementDemand); !ok || d.Host != schedule.DefaultPlacement {
 		t.Fatalf("the default demand is %+v", s.Demand)
 	}
-	s, err = schedulerOf(parse(t, "[scheduler]\npolicy = \"fair-share\"\nmax_jobs = 4\n"), nil, nil)
+	s, err = schedulerOf(parse(t, "[scheduler]\npolicy = \"fair-share\"\n[placements.default]\nkind = \"local\"\nmax_jobs = 4\n"), nil, nil)
 	if _, ok := s.Policy.(fairshare.Policy); err != nil || !ok || s.Resources[0].Capacity != 4 {
 		t.Fatalf("fair-share with 4 jobs is %+v, %v", s, err)
 	}
@@ -73,7 +73,7 @@ func TestAnUnknownPolicyIsRefusedNamingThePolicies(t *testing.T) {
 
 func parse(t *testing.T, text string) *cliv1.OperatorConfig {
 	t.Helper()
-	c, err := operator.Parse([]byte(text))
+	c, err := operator.Parse([]byte("version = \"0.2\"\n" + text))
 	if err != nil {
 		t.Fatal(err)
 	}

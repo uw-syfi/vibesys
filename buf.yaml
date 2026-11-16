@@ -12,3 +12,15 @@ breaking:
   ignore:
     - proto/vibesys/api
     - proto/buf
+  # The operator config (cli.toml) is a file the operator writes and only vibesys-cli reads: no
+  # process sends it and no store keeps it. Its compatibility is its version key, which the CLI
+  # checks, refusing a file of any other version by name (cli/internal/operator), so a removed or
+  # retyped key is a new file version and not a silent break. Its enums (PlacementKind) cross a
+  # process in placement.proto and stay held by every other rule.
+  ignore_only:
+    FIELD_NO_DELETE:
+      - proto/vibesys/cli/v1/operator.proto
+    FIELD_SAME_TYPE:
+      - proto/vibesys/cli/v1/operator.proto
+    MESSAGE_NO_DELETE:
+      - proto/vibesys/cli/v1/operator.proto

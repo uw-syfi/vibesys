@@ -35,10 +35,10 @@ var configs = []string{
 	"[placements.gpu]\nkind = \"ssh\"\n[placements.gpu.remote]\nhost = \"host-b\"\nremote_workspace_root = \"/w\"\n",
 	"[placements.a100]\nkind = \"slurm\"\n[placements.a100.remote]\nhost = \"login\"\nremote_workspace_root = \"/w\"\n[placements.a100.slurm]\npartition = \"gpu\"\n",
 	"[placements.a]\nkind = \"local\"\n[placements.b]\nkind = \"local\"\n",
-	"[placements.a]\nkind = \"local\"\n[placements.a.resources.gpu]\ndevices = \"all\"\n[placements.a.resources.kubernetes]\nkubeconfig = \"/k\"\n" +
+	"[placements.a]\nkind = \"local\"\n[placements.a.resources.gpu]\n[placements.a.resources.kubernetes]\nkubeconfig = \"/k\"\n" +
 		"[placements.b]\nkind = \"ssh\"\n[placements.b.remote]\nhost = \"host-b\"\nremote_workspace_root = \"/w\"\n[placements.b.resources.kubernetes]\nkubeconfig = \"/k\"\n",
 	"[placements.mi210]\nkind = \"apptainer\"\n[placements.mi210.remote]\nhost = \"login\"\nremote_workspace_root = \"/w\"\n[placements.mi210.slurm]\npartition = \"gpu\"\n" +
-		"[placements.mi210.resources.rocm]\n",
+		"[placements.mi210.resources.rocm]\ncount = 8\n",
 	"[placements.mi300]\nkind = \"apptainer\"\n[placements.mi300.remote]\nhost = \"login\"\nremote_workspace_root = \"/w\"\n[placements.mi300.slurm]\npartition = \"gpu\"\n" +
 		"[placements.mi300.apptainer]\nlocal_scratch_dir = \"/scratch/me\"\nconvert_timeout_seconds = 5400\n",
 }

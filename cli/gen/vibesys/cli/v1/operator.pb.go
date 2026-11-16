@@ -145,18 +145,16 @@ func (ContainerRuntime) EnumDescriptor() ([]byte, []int) {
 // decoded into this message by its field names, an enum value is written as its name without the
 // prefix in lower case, and a key this message has no field for is refused, naming the key.
 //
-// A file names its placements under [placements.<name>]. A file of the earlier shape, with
-// [docker], [remote] and [slurm] at the top, names one placement and is read as the placement
-// "default"; a file holds one shape or the other, never both. No file is the one placement
-// "default" of kind local, with no resource.
+// A file says version = "0.2" and names its placements under [placements.<name>]. A file with no
+// version, another version, or a key of the shape before 0.2 (top-level [docker], [remote] or
+// [slurm], scheduler.max_jobs, a GPU table's devices, Slurm's gres, shared_gres or exclusive) is
+// refused, naming the key. No file is the one placement "default" of kind local, with no resource.
 type OperatorConfig struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// The version of the file's schema, always "0.2".
+	Version string `protobuf:"bytes,7,opt,name=version,proto3" json:"version,omitempty"`
 	// The placements, by name: where a docker job's container can run.
 	Placements map[string]*Placement `protobuf:"bytes,1,rep,name=placements,proto3" json:"placements,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	// The earlier shape.
-	Docker *LegacyDocker   `protobuf:"bytes,2,opt,name=docker,proto3" json:"docker,omitempty"`
-	Remote *RemoteSettings `protobuf:"bytes,3,opt,name=remote,proto3" json:"remote,omitempty"`
-	Slurm  *SlurmSettings  `protobuf:"bytes,4,opt,name=slurm,proto3" json:"slurm,omitempty"`
 	// How the daemon shares the placements between jobs.
 	Scheduler *Scheduler `protobuf:"bytes,5,opt,name=scheduler,proto3" json:"scheduler,omitempty"`
 	// How long a job's commands get to clean up after a cancel or the time limit asks them to
@@ -198,30 +196,16 @@ func (*OperatorConfig) Descriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{0}
 }
 
+func (x *OperatorConfig) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
 func (x *OperatorConfig) GetPlacements() map[string]*Placement {
 	if x != nil {
 		return x.Placements
-	}
-	return nil
-}
-
-func (x *OperatorConfig) GetDocker() *LegacyDocker {
-	if x != nil {
-		return x.Docker
-	}
-	return nil
-}
-
-func (x *OperatorConfig) GetRemote() *RemoteSettings {
-	if x != nil {
-		return x.Remote
-	}
-	return nil
-}
-
-func (x *OperatorConfig) GetSlurm() *SlurmSettings {
-	if x != nil {
-		return x.Slurm
 	}
 	return nil
 }
@@ -245,10 +229,7 @@ type Scheduler struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The policy that orders the jobs that wait, by the name the daemon's wiring gives it. Unset means
 	// fifo.
-	Policy *string `protobuf:"bytes,1,opt,name=policy,proto3,oneof" json:"policy,omitempty"`
-	// How many jobs run at once on the one placement of the earlier shape. A file with placements sets
-	// max_jobs on each placement instead.
-	MaxJobs       *uint32 `protobuf:"varint,2,opt,name=max_jobs,json=maxJobs,proto3,oneof" json:"max_jobs,omitempty"`
+	Policy        *string `protobuf:"bytes,1,opt,name=policy,proto3,oneof" json:"policy,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -290,18 +271,13 @@ func (x *Scheduler) GetPolicy() string {
 	return ""
 }
 
-func (x *Scheduler) GetMaxJobs() uint32 {
-	if x != nil && x.MaxJobs != nil {
-		return *x.MaxJobs
-	}
-	return 0
-}
-
 // Placement is one place a docker job's container can run, and what it gives the container.
 type Placement struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Kind  PlacementKind          `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.cli.v1.PlacementKind" json:"kind,omitempty"`
-	// How many jobs may run on the placement at once. Zero means one.
+	// How many jobs may run on the placement at once. Zero or unset means the size of the
+	// placement's GPU pool (resources.gpu.count or resources.rocm.count) on the local and ssh kinds,
+	// and one otherwise.
 	MaxJobs uint32 `protobuf:"varint,2,opt,name=max_jobs,json=maxJobs,proto3" json:"max_jobs,omitempty"`
 	// The machine, for the ssh and slurm kinds.
 	Remote *RemoteSettings `protobuf:"bytes,3,opt,name=remote,proto3" json:"remote,omitempty"`
@@ -554,12 +530,6 @@ func (x *RemoteSettings) GetRemoteWorkspaceRoot() string {
 type SlurmSettings struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Partition string                 `protobuf:"bytes,1,opt,name=partition,proto3" json:"partition,omitempty"`
-	// What a measured container asks for; a build asks for no GRES.
-	Gres string `protobuf:"bytes,2,opt,name=gres,proto3" json:"gres,omitempty"`
-	// When set, what an unmeasured container asks for instead of gres, such as a shard of a GPU.
-	SharedGres string `protobuf:"bytes,3,opt,name=shared_gres,json=sharedGres,proto3" json:"shared_gres,omitempty"`
-	// Gives a measured container, a benchmark sample, the whole node. Unset means true.
-	Exclusive *bool `protobuf:"varint,4,opt,name=exclusive,proto3,oneof" json:"exclusive,omitempty"`
 	// How many CPUs a build or an unmeasured container asks for. Unset means 8.
 	Cpus *int32 `protobuf:"varint,5,opt,name=cpus,proto3,oneof" json:"cpus,omitempty"`
 	// The memory a build or an unmeasured container asks for, a size both Slurm and Docker read the
@@ -616,27 +586,6 @@ func (x *SlurmSettings) GetPartition() string {
 		return x.Partition
 	}
 	return ""
-}
-
-func (x *SlurmSettings) GetGres() string {
-	if x != nil {
-		return x.Gres
-	}
-	return ""
-}
-
-func (x *SlurmSettings) GetSharedGres() string {
-	if x != nil {
-		return x.SharedGres
-	}
-	return ""
-}
-
-func (x *SlurmSettings) GetExclusive() bool {
-	if x != nil && x.Exclusive != nil {
-		return *x.Exclusive
-	}
-	return false
 }
 
 func (x *SlurmSettings) GetCpus() int32 {
@@ -705,7 +654,7 @@ type ApptainerSettings struct {
 	// When set, allocations are reused: a container's allocation is kept when the container is
 	// removed, for the next container of the scope (of this job or a later one) to claim, and it ends
 	// once it has been idle, claimed by no container, for this long. Each allocation then asks for the
-	// whole node (gres and exclusive) whatever it runs. Zero means no reuse: each container has an
+	// whole node (every GPU of the pool, exclusive) whatever it runs. Zero means no reuse: each container has an
 	// allocation of its own, cancelled with it.
 	IdleReleaseSeconds float64 `protobuf:"fixed64,7,opt,name=idle_release_seconds,json=idleReleaseSeconds,proto3" json:"idle_release_seconds,omitempty"`
 	// The time limit of a reused allocation, at most the partition's and at most [slurm]
@@ -806,13 +755,18 @@ func (x *ApptainerSettings) GetAllocationLimitSeconds() float64 {
 // Resources are what a placement gives every container it runs, by kind (ResourceKind). Each kind
 // is a table of its own: [placements.<name>.resources.<kind>].
 type Resources struct {
-	state      protoimpl.MessageState `protogen:"open.v1"`
-	Gpu        *GpuResource           `protobuf:"bytes,1,opt,name=gpu,proto3" json:"gpu,omitempty"`
-	Kubernetes *KubernetesResource    `protobuf:"bytes,2,opt,name=kubernetes,proto3" json:"kubernetes,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The machine's NVIDIA GPUs.
+	Gpu        *GpuPool            `protobuf:"bytes,1,opt,name=gpu,proto3" json:"gpu,omitempty"`
+	Kubernetes *KubernetesResource `protobuf:"bytes,2,opt,name=kubernetes,proto3" json:"kubernetes,omitempty"`
 	// Read-only directories of the engine's machine, by name: a container sees each at
 	// /vibesys/mounts/<name>. An empty table gives none.
-	Mounts        map[string]string `protobuf:"bytes,3,rep,name=mounts,proto3" json:"mounts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Rocm          *RocmResource     `protobuf:"bytes,4,opt,name=rocm,proto3" json:"rocm,omitempty"`
+	Mounts map[string]string `protobuf:"bytes,3,rep,name=mounts,proto3" json:"mounts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// The machine's AMD GPUs, for tasks of the rocm backend: the kernel driver's devices (/dev/kfd
+	// and /dev/dri) and the video group under docker, and --rocm under Apptainer. A variable Slurm
+	// sets to name the GPUs it assigned (ROCR_VISIBLE_DEVICES, HIP_VISIBLE_DEVICES,
+	// GPU_DEVICE_ORDINAL, CUDA_VISIBLE_DEVICES) is passed on when it is set.
+	Rocm          *GpuPool `protobuf:"bytes,4,opt,name=rocm,proto3" json:"rocm,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -847,7 +801,7 @@ func (*Resources) Descriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *Resources) GetGpu() *GpuResource {
+func (x *Resources) GetGpu() *GpuPool {
 	if x != nil {
 		return x.Gpu
 	}
@@ -868,38 +822,48 @@ func (x *Resources) GetMounts() map[string]string {
 	return nil
 }
 
-func (x *Resources) GetRocm() *RocmResource {
+func (x *Resources) GetRocm() *GpuPool {
 	if x != nil {
 		return x.Rocm
 	}
 	return nil
 }
 
-// RocmResource passes the machine's AMD GPUs into the container, for tasks of the rocm backend: the
-// kernel driver's devices (/dev/kfd and /dev/dri) and the video group under docker, and --rocm under
-// Apptainer. An empty table gives them. A variable Slurm sets to name the GPUs it assigned
-// (ROCR_VISIBLE_DEVICES, HIP_VISIBLE_DEVICES, GPU_DEVICE_ORDINAL, CUDA_VISIBLE_DEVICES) is passed on
-// when it is set.
-type RocmResource struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+// GpuPool is the GPUs of one vendor a placement gives, the vendor being the table it is written
+// in: [resources.gpu] for NVIDIA, [resources.rocm] for AMD. An empty table gives every job all of the
+// machine's GPUs. A count makes them a pool: the GPUs 0 to count-1 of the
+// machine (of each node, for a cluster), which jobs share, each one given its own.
+type GpuPool struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many GPUs the machine, or each node of a cluster, has. Set, it is the pool; it must equal
+	// the number of GPUs the machine has where the CLI can read it. A Slurm or Apptainer placement
+	// that gives GPUs needs it, since its allocations ask for GPUs by count.
+	Count *uint32 `protobuf:"varint,1,opt,name=count,proto3,oneof" json:"count,omitempty"`
+	// The GPU type of a Slurm cluster's GRES, such as a100: an allocation then asks for
+	// gpu:<gres_type>:<n> instead of gpu:<n>. Only for the slurm and apptainer kinds, when a
+	// partition mixes types or names them.
+	GresType string `protobuf:"bytes,2,opt,name=gres_type,json=gresType,proto3" json:"gres_type,omitempty"`
+	// When set, the container runtime that passes NVIDIA GPUs instead of --gpus, with the devices in
+	// the runtime's variable. Only for [resources.gpu].
+	Runtime       string `protobuf:"bytes,3,opt,name=runtime,proto3" json:"runtime,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *RocmResource) Reset() {
-	*x = RocmResource{}
+func (x *GpuPool) Reset() {
+	*x = GpuPool{}
 	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RocmResource) String() string {
+func (x *GpuPool) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RocmResource) ProtoMessage() {}
+func (*GpuPool) ProtoMessage() {}
 
-func (x *RocmResource) ProtoReflect() protoreflect.Message {
+func (x *GpuPool) ProtoReflect() protoreflect.Message {
 	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -911,61 +875,26 @@ func (x *RocmResource) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RocmResource.ProtoReflect.Descriptor instead.
-func (*RocmResource) Descriptor() ([]byte, []int) {
+// Deprecated: Use GpuPool.ProtoReflect.Descriptor instead.
+func (*GpuPool) Descriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{8}
 }
 
-// GpuResource passes GPUs into the container.
-type GpuResource struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// A docker --gpus value, such as "all" or "device=0,1".
-	Devices string `protobuf:"bytes,1,opt,name=devices,proto3" json:"devices,omitempty"`
-	// When set, the container runtime that passes the devices instead of --gpus, with the devices in
-	// the runtime's variable.
-	Runtime       string `protobuf:"bytes,2,opt,name=runtime,proto3" json:"runtime,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GpuResource) Reset() {
-	*x = GpuResource{}
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GpuResource) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GpuResource) ProtoMessage() {}
-
-func (x *GpuResource) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
+func (x *GpuPool) GetCount() uint32 {
+	if x != nil && x.Count != nil {
+		return *x.Count
 	}
-	return mi.MessageOf(x)
+	return 0
 }
 
-// Deprecated: Use GpuResource.ProtoReflect.Descriptor instead.
-func (*GpuResource) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *GpuResource) GetDevices() string {
+func (x *GpuPool) GetGresType() string {
 	if x != nil {
-		return x.Devices
+		return x.GresType
 	}
 	return ""
 }
 
-func (x *GpuResource) GetRuntime() string {
+func (x *GpuPool) GetRuntime() string {
 	if x != nil {
 		return x.Runtime
 	}
@@ -994,7 +923,7 @@ type KubernetesResource struct {
 
 func (x *KubernetesResource) Reset() {
 	*x = KubernetesResource{}
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[10]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1006,7 +935,7 @@ func (x *KubernetesResource) String() string {
 func (*KubernetesResource) ProtoMessage() {}
 
 func (x *KubernetesResource) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[10]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1019,7 +948,7 @@ func (x *KubernetesResource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KubernetesResource.ProtoReflect.Descriptor instead.
 func (*KubernetesResource) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{10}
+	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *KubernetesResource) GetKubeconfig() string {
@@ -1050,102 +979,27 @@ func (x *KubernetesResource) GetNetwork() string {
 	return ""
 }
 
-// LegacyDocker is the [docker] section of the earlier shape.
-type LegacyDocker struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Unspecified means local.
-	Placement PlacementKind `protobuf:"varint,1,opt,name=placement,proto3,enum=vibesys.cli.v1.PlacementKind" json:"placement,omitempty"`
-	// A docker --gpus value; empty passes none.
-	Gpus string `protobuf:"bytes,2,opt,name=gpus,proto3" json:"gpus,omitempty"`
-	// When set, passes the GPUs with this runtime instead of --gpus. It needs gpus.
-	Runtime       string            `protobuf:"bytes,3,opt,name=runtime,proto3" json:"runtime,omitempty"`
-	Mounts        map[string]string `protobuf:"bytes,4,rep,name=mounts,proto3" json:"mounts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *LegacyDocker) Reset() {
-	*x = LegacyDocker{}
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[11]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *LegacyDocker) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*LegacyDocker) ProtoMessage() {}
-
-func (x *LegacyDocker) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[11]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use LegacyDocker.ProtoReflect.Descriptor instead.
-func (*LegacyDocker) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{11}
-}
-
-func (x *LegacyDocker) GetPlacement() PlacementKind {
-	if x != nil {
-		return x.Placement
-	}
-	return PlacementKind_PLACEMENT_KIND_UNSPECIFIED
-}
-
-func (x *LegacyDocker) GetGpus() string {
-	if x != nil {
-		return x.Gpus
-	}
-	return ""
-}
-
-func (x *LegacyDocker) GetRuntime() string {
-	if x != nil {
-		return x.Runtime
-	}
-	return ""
-}
-
-func (x *LegacyDocker) GetMounts() map[string]string {
-	if x != nil {
-		return x.Mounts
-	}
-	return nil
-}
-
 var File_vibesys_cli_v1_operator_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\n" +
-	"\x1dvibesys/cli/v1/operator.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\"\xa1\x04\n" +
-	"\x0eOperatorConfig\x12v\n" +
+	"\x1dvibesys/cli/v1/operator.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\"\xcd\x03\n" +
+	"\x0eOperatorConfig\x12$\n" +
+	"\aversion\x18\a \x01(\tB\n" +
+	"\xbaH\ar\x05\n" +
+	"\x030.2R\aversion\x12v\n" +
 	"\n" +
 	"placements\x18\x01 \x03(\v2..vibesys.cli.v1.OperatorConfig.PlacementsEntryB&\xbaH#\x9a\x01 \"\x1er\x1c2\x1a^[a-z0-9][a-z0-9_-]{0,62}$R\n" +
-	"placements\x124\n" +
-	"\x06docker\x18\x02 \x01(\v2\x1c.vibesys.cli.v1.LegacyDockerR\x06docker\x126\n" +
-	"\x06remote\x18\x03 \x01(\v2\x1e.vibesys.cli.v1.RemoteSettingsR\x06remote\x123\n" +
-	"\x05slurm\x18\x04 \x01(\v2\x1d.vibesys.cli.v1.SlurmSettingsR\x05slurm\x127\n" +
+	"placements\x127\n" +
 	"\tscheduler\x18\x05 \x01(\v2\x19.vibesys.cli.v1.SchedulerR\tscheduler\x12J\n" +
 	"\x12stop_grace_seconds\x18\x06 \x01(\x01B\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x00\x00\x00n@)\xfc\xa9\xf1\xd2MbP?H\x00R\x10stopGraceSeconds\x88\x01\x01\x1aX\n" +
 	"\x0fPlacementsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12/\n" +
 	"\x05value\x18\x02 \x01(\v2\x19.vibesys.cli.v1.PlacementR\x05value:\x028\x01B\x15\n" +
-	"\x13_stop_grace_seconds\"u\n" +
+	"\x13_stop_grace_secondsJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05R\x06dockerR\x06remoteR\x05slurm\"L\n" +
 	"\tScheduler\x12$\n" +
-	"\x06policy\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01H\x00R\x06policy\x88\x01\x01\x12*\n" +
-	"\bmax_jobs\x18\x02 \x01(\rB\n" +
-	"\xbaH\a*\x05\x18\x80\b(\x01H\x01R\amaxJobs\x88\x01\x01B\t\n" +
-	"\a_policyB\v\n" +
-	"\t_max_jobs\"\x9c\x03\n" +
+	"\x06policy\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01H\x00R\x06policy\x88\x01\x01B\t\n" +
+	"\a_policyJ\x04\b\x02\x10\x03R\bmax_jobs\"\x9c\x03\n" +
 	"\tPlacement\x12=\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1d.vibesys.cli.v1.PlacementKindB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12#\n" +
@@ -1168,23 +1022,17 @@ const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\vssh_command\x18\x02 \x03(\tB\f\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01R\n" +
 	"sshCommand\x121\n" +
 	"\rrsync_command\x18\x03 \x03(\tB\f\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01R\frsyncCommand\x12F\n" +
-	"\x15remote_workspace_root\x18\x04 \x01(\tB\x12\xbaH\x0fr\r2\v^/.*[^/].*$R\x13remoteWorkspaceRoot\"\xcb\x04\n" +
+	"\x15remote_workspace_root\x18\x04 \x01(\tB\x12\xbaH\x0fr\r2\v^/.*[^/].*$R\x13remoteWorkspaceRoot\"\xd7\x03\n" +
 	"\rSlurmSettings\x12;\n" +
-	"\tpartition\x18\x01 \x01(\tB\x1d\xbaH\x1ar\x182\x16^[A-Za-z0-9=,:._/+-]*$R\tpartition\x121\n" +
-	"\x04gres\x18\x02 \x01(\tB\x1d\xbaH\x1ar\x182\x16^[A-Za-z0-9=,:._/+-]*$R\x04gres\x12>\n" +
-	"\vshared_gres\x18\x03 \x01(\tB\x1d\xbaH\x1ar\x182\x16^[A-Za-z0-9=,:._/+-]*$R\n" +
-	"sharedGres\x12!\n" +
-	"\texclusive\x18\x04 \x01(\bH\x00R\texclusive\x88\x01\x01\x12 \n" +
-	"\x04cpus\x18\x05 \x01(\x05B\a\xbaH\x04\x1a\x02(\x01H\x01R\x04cpus\x88\x01\x01\x125\n" +
+	"\tpartition\x18\x01 \x01(\tB\x1d\xbaH\x1ar\x182\x16^[A-Za-z0-9=,:._/+-]*$R\tpartition\x12 \n" +
+	"\x04cpus\x18\x05 \x01(\x05B\a\xbaH\x04\x1a\x02(\x01H\x00R\x04cpus\x88\x01\x01\x125\n" +
 	"\x06memory\x18\x06 \x01(\tB\x1d\xbaH\x1ar\x182\x16^([1-9][0-9]*[KMGT])?$R\x06memory\x125\n" +
 	"\x0esrun_arguments\x18\a \x03(\tB\x0e\xbaH\v\x92\x01\b\"\x06r\x042\x02^-R\rsrunArguments\x12B\n" +
 	"\x15poll_interval_seconds\x18\b \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x13pollIntervalSeconds\x12B\n" +
 	"\x15queue_timeout_seconds\x18\t \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x13queueTimeoutSeconds\x128\n" +
 	"\x10max_time_seconds\x18\n" +
-	" \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x0emaxTimeSecondsB\f\n" +
-	"\n" +
-	"_exclusiveB\a\n" +
-	"\x05_cpus\"\x94\x04\n" +
+	" \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x0emaxTimeSecondsB\a\n" +
+	"\x05_cpusJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05R\x04gresR\vshared_gresR\texclusive\"\x94\x04\n" +
 	"\x11ApptainerSettings\x123\n" +
 	"\x0esubmit_command\x18\x01 \x03(\tB\f\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01R\rsubmitCommand\x129\n" +
 	"\x10submit_arguments\x18\x02 \x03(\tB\x0e\xbaH\v\x92\x01\b\"\x06r\x042\x02^-R\x0fsubmitArguments\x124\n" +
@@ -1193,36 +1041,29 @@ const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\x17convert_timeout_seconds\x18\x05 \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x15convertTimeoutSeconds\x12D\n" +
 	"\aruntime\x18\x06 \x01(\x0e2 .vibesys.cli.v1.ContainerRuntimeB\b\xbaH\x05\x82\x01\x02\x10\x01R\aruntime\x12@\n" +
 	"\x14idle_release_seconds\x18\a \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x12idleReleaseSeconds\x12H\n" +
-	"\x18allocation_limit_seconds\x18\b \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x16allocationLimitSeconds\"\xe6\x02\n" +
-	"\tResources\x12-\n" +
-	"\x03gpu\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.GpuResourceR\x03gpu\x12B\n" +
+	"\x18allocation_limit_seconds\x18\b \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x16allocationLimitSeconds\"\xdd\x02\n" +
+	"\tResources\x12)\n" +
+	"\x03gpu\x18\x01 \x01(\v2\x17.vibesys.cli.v1.GpuPoolR\x03gpu\x12B\n" +
 	"\n" +
 	"kubernetes\x18\x02 \x01(\v2\".vibesys.cli.v1.KubernetesResourceR\n" +
 	"kubernetes\x12y\n" +
-	"\x06mounts\x18\x03 \x03(\v2%.vibesys.cli.v1.Resources.MountsEntryB:\xbaH7\x9a\x014\"\x1er\x1c2\x1a^[a-z0-9][a-z0-9_-]{0,62}$*\x12r\x102\x0e^/[^:,\"\\n\\r]*$R\x06mounts\x120\n" +
-	"\x04rocm\x18\x04 \x01(\v2\x1c.vibesys.cli.v1.RocmResourceR\x04rocm\x1a9\n" +
+	"\x06mounts\x18\x03 \x03(\v2%.vibesys.cli.v1.Resources.MountsEntryB:\xbaH7\x9a\x014\"\x1er\x1c2\x1a^[a-z0-9][a-z0-9_-]{0,62}$*\x12r\x102\x0e^/[^:,\"\\n\\r]*$R\x06mounts\x12+\n" +
+	"\x04rocm\x18\x04 \x01(\v2\x17.vibesys.cli.v1.GpuPoolR\x04rocm\x1a9\n" +
 	"\vMountsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x0e\n" +
-	"\fRocmResource\"w\n" +
-	"\vGpuResource\x127\n" +
-	"\adevices\x18\x01 \x01(\tB\x1d\xbaH\x1ar\x182\x16^[A-Za-z0-9=,:._/+-]+$R\adevices\x12/\n" +
-	"\aruntime\x18\x02 \x01(\tB\x15\xbaH\x12r\x102\x0e^[a-z0-9._-]*$R\aruntime\"\xff\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa4\x01\n" +
+	"\aGpuPool\x12$\n" +
+	"\x05count\x18\x01 \x01(\rB\t\xbaH\x06*\x04\x18@(\x01H\x00R\x05count\x88\x01\x01\x128\n" +
+	"\tgres_type\x18\x02 \x01(\tB\x1b\xbaH\x18r\x162\x14^([A-Za-z0-9_.-]+)?$R\bgresType\x12/\n" +
+	"\aruntime\x18\x03 \x01(\tB\x15\xbaH\x12r\x102\x0e^[a-z0-9._-]*$R\aruntimeB\b\n" +
+	"\x06_count\"\xff\x01\n" +
 	"\x12KubernetesResource\x125\n" +
 	"\n" +
 	"kubeconfig\x18\x01 \x01(\tB\x15\xbaH\x12r\x102\x0e^/[^:,\"\\n\\r]*$R\n" +
 	"kubeconfig\x128\n" +
 	"\bregistry\x18\x02 \x01(\tB\x1c\xbaH\x19r\x172\x15^[A-Za-z0-9._:/@+-]*$R\bregistry\x126\n" +
 	"\abuilder\x18\x03 \x01(\tB\x1c\xbaH\x19r\x172\x15^[A-Za-z0-9._:/@+-]*$R\abuilder\x12@\n" +
-	"\anetwork\x18\x04 \x01(\tB&\xbaH#r!2\x1f^([A-Za-z0-9][A-Za-z0-9_.-]*)?$R\anetwork\"\xf2\x02\n" +
-	"\fLegacyDocker\x12E\n" +
-	"\tplacement\x18\x01 \x01(\x0e2\x1d.vibesys.cli.v1.PlacementKindB\b\xbaH\x05\x82\x01\x02\x10\x01R\tplacement\x121\n" +
-	"\x04gpus\x18\x02 \x01(\tB\x1d\xbaH\x1ar\x182\x16^[A-Za-z0-9=,:._/+-]*$R\x04gpus\x12/\n" +
-	"\aruntime\x18\x03 \x01(\tB\x15\xbaH\x12r\x102\x0e^[a-z0-9._-]*$R\aruntime\x12|\n" +
-	"\x06mounts\x18\x04 \x03(\v2(.vibesys.cli.v1.LegacyDocker.MountsEntryB:\xbaH7\x9a\x014\"\x1er\x1c2\x1a^[a-z0-9][a-z0-9_-]{0,62}$*\x12r\x102\x0e^/[^:,\"\\n\\r]*$R\x06mounts\x1a9\n" +
-	"\vMountsEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01*\x99\x01\n" +
+	"\anetwork\x18\x04 \x01(\tB&\xbaH#r!2\x1f^([A-Za-z0-9][A-Za-z0-9_.-]*)?$R\anetwork*\x99\x01\n" +
 	"\rPlacementKind\x12\x1e\n" +
 	"\x1aPLACEMENT_KIND_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14PLACEMENT_KIND_LOCAL\x10\x01\x12\x16\n" +
@@ -1247,7 +1088,7 @@ func file_vibesys_cli_v1_operator_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_cli_v1_operator_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vibesys_cli_v1_operator_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_vibesys_cli_v1_operator_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_vibesys_cli_v1_operator_proto_goTypes = []any{
 	(PlacementKind)(0),          // 0: vibesys.cli.v1.PlacementKind
 	(ContainerRuntime)(0),       // 1: vibesys.cli.v1.ContainerRuntime
@@ -1259,43 +1100,35 @@ var file_vibesys_cli_v1_operator_proto_goTypes = []any{
 	(*SlurmSettings)(nil),       // 7: vibesys.cli.v1.SlurmSettings
 	(*ApptainerSettings)(nil),   // 8: vibesys.cli.v1.ApptainerSettings
 	(*Resources)(nil),           // 9: vibesys.cli.v1.Resources
-	(*RocmResource)(nil),        // 10: vibesys.cli.v1.RocmResource
-	(*GpuResource)(nil),         // 11: vibesys.cli.v1.GpuResource
-	(*KubernetesResource)(nil),  // 12: vibesys.cli.v1.KubernetesResource
-	(*LegacyDocker)(nil),        // 13: vibesys.cli.v1.LegacyDocker
-	nil,                         // 14: vibesys.cli.v1.OperatorConfig.PlacementsEntry
-	nil,                         // 15: vibesys.cli.v1.Resources.MountsEntry
-	nil,                         // 16: vibesys.cli.v1.LegacyDocker.MountsEntry
-	(*durationpb.Duration)(nil), // 17: google.protobuf.Duration
+	(*GpuPool)(nil),             // 10: vibesys.cli.v1.GpuPool
+	(*KubernetesResource)(nil),  // 11: vibesys.cli.v1.KubernetesResource
+	nil,                         // 12: vibesys.cli.v1.OperatorConfig.PlacementsEntry
+	nil,                         // 13: vibesys.cli.v1.Resources.MountsEntry
+	(*durationpb.Duration)(nil), // 14: google.protobuf.Duration
 }
 var file_vibesys_cli_v1_operator_proto_depIdxs = []int32{
-	14, // 0: vibesys.cli.v1.OperatorConfig.placements:type_name -> vibesys.cli.v1.OperatorConfig.PlacementsEntry
-	13, // 1: vibesys.cli.v1.OperatorConfig.docker:type_name -> vibesys.cli.v1.LegacyDocker
-	6,  // 2: vibesys.cli.v1.OperatorConfig.remote:type_name -> vibesys.cli.v1.RemoteSettings
-	7,  // 3: vibesys.cli.v1.OperatorConfig.slurm:type_name -> vibesys.cli.v1.SlurmSettings
-	3,  // 4: vibesys.cli.v1.OperatorConfig.scheduler:type_name -> vibesys.cli.v1.Scheduler
-	0,  // 5: vibesys.cli.v1.Placement.kind:type_name -> vibesys.cli.v1.PlacementKind
-	6,  // 6: vibesys.cli.v1.Placement.remote:type_name -> vibesys.cli.v1.RemoteSettings
-	7,  // 7: vibesys.cli.v1.Placement.slurm:type_name -> vibesys.cli.v1.SlurmSettings
-	9,  // 8: vibesys.cli.v1.Placement.resources:type_name -> vibesys.cli.v1.Resources
-	8,  // 9: vibesys.cli.v1.Placement.apptainer:type_name -> vibesys.cli.v1.ApptainerSettings
-	5,  // 10: vibesys.cli.v1.Placement.allocations:type_name -> vibesys.cli.v1.AllocationSettings
-	17, // 11: vibesys.cli.v1.AllocationSettings.max_for:type_name -> google.protobuf.Duration
-	17, // 12: vibesys.cli.v1.AllocationSettings.fit_margin:type_name -> google.protobuf.Duration
-	17, // 13: vibesys.cli.v1.AllocationSettings.run_idle_end:type_name -> google.protobuf.Duration
-	1,  // 14: vibesys.cli.v1.ApptainerSettings.runtime:type_name -> vibesys.cli.v1.ContainerRuntime
-	11, // 15: vibesys.cli.v1.Resources.gpu:type_name -> vibesys.cli.v1.GpuResource
-	12, // 16: vibesys.cli.v1.Resources.kubernetes:type_name -> vibesys.cli.v1.KubernetesResource
-	15, // 17: vibesys.cli.v1.Resources.mounts:type_name -> vibesys.cli.v1.Resources.MountsEntry
-	10, // 18: vibesys.cli.v1.Resources.rocm:type_name -> vibesys.cli.v1.RocmResource
-	0,  // 19: vibesys.cli.v1.LegacyDocker.placement:type_name -> vibesys.cli.v1.PlacementKind
-	16, // 20: vibesys.cli.v1.LegacyDocker.mounts:type_name -> vibesys.cli.v1.LegacyDocker.MountsEntry
-	4,  // 21: vibesys.cli.v1.OperatorConfig.PlacementsEntry.value:type_name -> vibesys.cli.v1.Placement
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	12, // 0: vibesys.cli.v1.OperatorConfig.placements:type_name -> vibesys.cli.v1.OperatorConfig.PlacementsEntry
+	3,  // 1: vibesys.cli.v1.OperatorConfig.scheduler:type_name -> vibesys.cli.v1.Scheduler
+	0,  // 2: vibesys.cli.v1.Placement.kind:type_name -> vibesys.cli.v1.PlacementKind
+	6,  // 3: vibesys.cli.v1.Placement.remote:type_name -> vibesys.cli.v1.RemoteSettings
+	7,  // 4: vibesys.cli.v1.Placement.slurm:type_name -> vibesys.cli.v1.SlurmSettings
+	9,  // 5: vibesys.cli.v1.Placement.resources:type_name -> vibesys.cli.v1.Resources
+	8,  // 6: vibesys.cli.v1.Placement.apptainer:type_name -> vibesys.cli.v1.ApptainerSettings
+	5,  // 7: vibesys.cli.v1.Placement.allocations:type_name -> vibesys.cli.v1.AllocationSettings
+	14, // 8: vibesys.cli.v1.AllocationSettings.max_for:type_name -> google.protobuf.Duration
+	14, // 9: vibesys.cli.v1.AllocationSettings.fit_margin:type_name -> google.protobuf.Duration
+	14, // 10: vibesys.cli.v1.AllocationSettings.run_idle_end:type_name -> google.protobuf.Duration
+	1,  // 11: vibesys.cli.v1.ApptainerSettings.runtime:type_name -> vibesys.cli.v1.ContainerRuntime
+	10, // 12: vibesys.cli.v1.Resources.gpu:type_name -> vibesys.cli.v1.GpuPool
+	11, // 13: vibesys.cli.v1.Resources.kubernetes:type_name -> vibesys.cli.v1.KubernetesResource
+	13, // 14: vibesys.cli.v1.Resources.mounts:type_name -> vibesys.cli.v1.Resources.MountsEntry
+	10, // 15: vibesys.cli.v1.Resources.rocm:type_name -> vibesys.cli.v1.GpuPool
+	4,  // 16: vibesys.cli.v1.OperatorConfig.PlacementsEntry.value:type_name -> vibesys.cli.v1.Placement
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_operator_proto_init() }
@@ -1306,13 +1139,14 @@ func file_vibesys_cli_v1_operator_proto_init() {
 	file_vibesys_cli_v1_operator_proto_msgTypes[0].OneofWrappers = []any{}
 	file_vibesys_cli_v1_operator_proto_msgTypes[1].OneofWrappers = []any{}
 	file_vibesys_cli_v1_operator_proto_msgTypes[5].OneofWrappers = []any{}
+	file_vibesys_cli_v1_operator_proto_msgTypes[8].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_operator_proto_rawDesc), len(file_vibesys_cli_v1_operator_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   15,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

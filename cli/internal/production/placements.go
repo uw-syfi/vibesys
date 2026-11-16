@@ -123,7 +123,7 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk Clocks, dir r
 		if side != nil {
 			out.clusters[name] = *side
 		}
-		probe, err := placementProbe(op.GetPlacements()[name], provider)
+		probe, err := placementProbe(name, op.GetPlacements()[name], provider)
 		if err != nil {
 			return machines{}, fmt.Errorf("the operator config %s, placements.%s: %w", operator.Path(p.Getenv, p.Home), name, err)
 		}
@@ -183,8 +183,8 @@ func TaskSchemas() string { return task.SchemasText() }
 func CurrentVersions() core.Versions { return core.CurrentVersions() }
 
 // scopeOf is the scope of a placement's work, keyed by a directory: the daemon's runtime directory,
-// or a run's. The placement of a file of the earlier shape keeps the scope the daemon's one
-// placement had, so a daemon of this build sweeps what one before it left; another placement has one
+// or a run's. The placement "default" keeps the scope the daemon's one placement of an earlier build
+// had, so a daemon of this build sweeps what one before it left; another placement has one
 // of its own, so that two placements on one engine never sweep each other's containers.
 func scopeOf(key, name string) string {
 	if name == operator.DefaultPlacement {
@@ -257,8 +257,12 @@ func (p Process) placement(clk Clocks, dir runtimedir.Dir, containerKey string, 
 	}
 	s := pl.GetSlurm()
 	if s != nil {
+		gres, err := gresOf(name, pl)
+		if err != nil {
+			return nil, nil, err
+		}
 		engineCfg.Allocator = slurm.Allocator{
-			Partition: s.GetPartition(), Gres: s.GetGres(), SharedGres: s.GetSharedGres(), Exclusive: exclusiveOf(s), CPUs: int(s.GetCpus()),
+			Partition: s.GetPartition(), Gres: gres, Exclusive: true, CPUs: int(s.GetCpus()),
 			Memory: s.GetMemory(), Arguments: s.GetSrunArguments(), Builder: slurm.BuilderName(scope),
 		}
 		engineCfg.StartTimeout = seconds(s.GetQueueTimeoutSeconds(), slurm.DefaultQueueTimeout)
@@ -284,20 +288,29 @@ func (p Process) placement(clk Clocks, dir runtimedir.Dir, containerKey string, 
 	return provider, nil, err
 }
 
-// exclusiveOf says whether a measured container's allocation holds its whole node: [slurm]
-// exclusive, true by default.
-func exclusiveOf(s *cliv1.SlurmSettings) bool {
-	return s == nil || s.Exclusive == nil || s.GetExclusive()
+// gresOf is what an allocation of the placement asks of a node's GPUs: every GPU of its pool,
+// gpu:<count> or gpu:<gres_type>:<count>, or nothing for a placement whose GPUs are no pool. Every
+// allocation that asks for GPUs asks for the whole pool, and a measured container's holds its whole
+// node.
+func gresOf(name string, pl *cliv1.Placement) (string, error) {
+	pool, err := operator.PoolOf(name, pl)
+	if err != nil || !pool.Size.IsSet() {
+		return "", err
+	}
+	if pool.GresType != "" {
+		return fmt.Sprintf("gpu:%s:%d", pool.GresType, pool.Size.Int()), nil
+	}
+	return fmt.Sprintf("gpu:%d", pool.Size.Int()), nil
 }
 
 // isolated says whether the placement keeps a measure apart from its other jobs by itself
-// (schedule.Offered.Isolated): an apptainer placement of [slurm] exclusive runs each job in
-// allocations of its own, and a measured container's holds its whole node, a reused one included
-// (apptainer.Engine sizes every reusable allocation for a measured container, and a claim of one
-// is its alone). An ssh or slurm placement runs its jobs' containers in one Docker daemon outside
-// Slurm's cgroups, and a local one on this machine, so a measure holds those whole.
+// (schedule.Offered.Isolated): an apptainer placement runs each job in allocations of its own, and
+// a measured container's holds its whole node, a reused one included (apptainer.Engine sizes every
+// reusable allocation for a measured container, and a claim of one is its alone). An ssh or slurm
+// placement runs its jobs' containers in one Docker daemon outside Slurm's cgroups, and a local one
+// on this machine, so a measure holds those whole.
 func isolated(pl *cliv1.Placement) bool {
-	return pl.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER && exclusiveOf(pl.GetSlurm())
+	return pl.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER
 }
 
 // gpuScript names the node script whose output the rocm resource of an apptainer placement reads.
@@ -352,8 +365,12 @@ func (p Process) apptainerPlacement(clk Clocks, cfg docker.Config, scope string,
 	if pl.GetResources().GetRocm() != nil {
 		scripts = map[string]string{gpuScript: amd.Script}
 	}
+	gres, err := gresOf(cfg.Placement, pl)
+	if err != nil {
+		return nil, nil, err
+	}
 	sizing := apptainer.Sizing{
-		Partition: s.GetPartition(), Gres: s.GetGres(), SharedGres: s.GetSharedGres(), Exclusive: exclusiveOf(s),
+		Partition: s.GetPartition(), Gres: gres, Exclusive: true,
 		CPUs: int(s.GetCpus()), Memory: s.GetMemory(), Arguments: a.GetSubmitArguments(),
 	}
 	eng, err := apptainer.New(apptainer.Config{
@@ -417,7 +434,8 @@ func resources(r *cliv1.Resources, shell remote.Shell, where, gpus string, clk C
 		out = append(out, res)
 	}
 	if g := r.GetGpu(); g != nil {
-		res, err := gpu.New(gpu.Config{Devices: g.GetDevices(), Runtime: g.GetRuntime(), Machine: gpus, Facts: &nvidia.GPUs{Shell: shell, Timers: clk}})
+		// Every job is given all of the machine's GPUs until jobs are given GPUs of a pool.
+		res, err := gpu.New(gpu.Config{Devices: "all", Runtime: g.GetRuntime(), Machine: gpus, Facts: &nvidia.GPUs{Shell: shell, Timers: clk}})
 		if err != nil {
 			return nil, err
 		}
