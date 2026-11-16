@@ -65,6 +65,8 @@ function SentMessage(props: {
 /** The messages sent so far, each with where it stands now, and the last answer until the host reports it. */
 function SentMessages(props: {
   readonly pendingAtMs: number | null;
+  /** The words of the message the pending receipt answers; the box itself has emptied by then. */
+  readonly pendingText: string | null;
   readonly sent: readonly Message[];
   readonly progress: CommandProgress | undefined;
 }): JSX.Element {
@@ -85,7 +87,11 @@ function SentMessages(props: {
         />
       ))}
       {pending === null ? null : (
-        <SentMessage atMs={props.pendingAtMs} text="Last message" line={receiptLine(pending)} />
+        <SentMessage
+          atMs={props.pendingAtMs}
+          text={props.pendingText ?? ''}
+          line={receiptLine(pending)}
+        />
       )}
     </>
   );
@@ -150,7 +156,12 @@ export function MessageBox(props: {
           </>
         ) : null}
         <CommandLine progress={progress} done="Send message" retry={props.retry} />
-        <SentMessages pendingAtMs={sentAtMs} sent={props.sent} progress={progress} />
+        <SentMessages
+          pendingAtMs={sentAtMs}
+          pendingText={sentText}
+          sent={props.sent}
+          progress={progress}
+        />
       </Stack>
     </Card>
   );
