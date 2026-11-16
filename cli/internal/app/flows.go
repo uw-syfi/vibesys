@@ -58,7 +58,7 @@ func (a *App) keyFlow(ctx context.Context, sub core.Submission) (core.Submission
 	spec.Environment = kind
 	key, err := core.NewJobKey(core.KeyInputs{
 		Kind: spec.Settings.Kind(), Commit: spec.Commit, TaskVersion: t.Version,
-		Environment: fingerprint, Settings: spec.Settings, SchemaVersion: core.SchemaVersion,
+		Environment: fingerprint, Settings: spec.Settings, SchemaVersion: core.SchemaVersion, GPUs: spec.GPUs,
 	})
 	sub.Spec, sub.Key, sub.Needs, sub.TaskVersion = spec, key, needsOf(kind, t.Needs), t.Version
 	return sub, err

@@ -101,6 +101,11 @@ func fill(m protoreflect.Message, variant int) {
 		v := core.Headline(ob.Values)
 		ob.Value = &v
 	}
+	// A grant names devices of its pool.
+	if md.FullName() == "vibesys.cli.v1.GpuGrant" {
+		grant := m.Interface().(*cliv1.GpuGrant)
+		grant.PoolSize = 8
+	}
 	// A job's allocation is an allocation's name or any.
 	if md.FullName() == "vibesys.cli.v1.JobSpec" {
 		m.Interface().(*cliv1.JobSpec).Allocation = "a7"
@@ -145,7 +150,7 @@ func TestNoFieldOfAStoredMessageIsDropped(t *testing.T) {
 			event := &cliv1.Event{}
 			fill(event.ProtoReflect(), variant)
 			event.Sequence, event.RunId = 1, "run-a"
-			want := &cliv1.EventFile{Format: 7, Event: event}
+			want := &cliv1.EventFile{Format: 8, Event: event}
 			data, err := protojson.Marshal(want)
 			if err != nil {
 				t.Fatal(err)

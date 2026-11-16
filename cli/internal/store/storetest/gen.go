@@ -151,7 +151,7 @@ func (g *gen) settings() core.Settings {
 func (g *gen) note() core.Note { return core.Note{Text: g.text(), At: g.instant(), Agent: g.text()} }
 
 func (g *gen) spec() core.JobSpec {
-	return core.JobSpec{Commit: core.Commit(g.text()), Environment: g.fingerprint().Kind, Placement: g.name(), Allocation: g.allocation(), Settings: g.settings()}
+	return core.JobSpec{Commit: core.Commit(g.text()), Environment: g.fingerprint().Kind, Placement: g.name(), Allocation: g.allocation(), GPUs: g.gpus(), Settings: g.settings()}
 }
 
 func (g *gen) machine() core.MachineFacts {
@@ -287,8 +287,34 @@ func (g *gen) job() core.Job {
 		Notes: []core.Note{g.note(), g.note()}, Plans: []core.PlanNumber{core.PlanNumber(1 + g.r.Uint32()), 2},
 		SubmittedAt: g.instant(), StartedAt: &started, FinishedAt: &finished, CancelReason: g.text(), ExitCode: &code,
 		ResultJob: core.JobID(g.name()), CheckJob: core.JobID(g.name()), Attempts: g.attempts(), Submitters: g.submitters(),
-		Needs: g.needs(), TaskVersion: g.name(), FailedStage: core.StageCheck,
+		Needs: g.needs(), TaskVersion: g.name(), FailedStage: core.StageCheck, GPUs: g.grant(),
 	}
+}
+
+// gpus is a count of GPUs, 1 to the largest pool.
+func (g *gen) gpus() core.GPUCount {
+	// The number is in range, so it is always a count.
+	c, _ := core.ParseGPUCount(uint32(1+g.pick(core.MaxPoolSize)), "gpus")
+	return c
+}
+
+// grant is GPUs of a pool, some of whose devices other jobs hold.
+func (g *gen) grant() *core.Grant {
+	size := g.gpus()
+	held, _ := core.TakeDevices(size, nil, g.gpusUpTo(size))
+	devices, ok := core.TakeDevices(size, []core.DeviceGroup{held}, g.gpusUpTo(size))
+	if !ok {
+		devices = held
+	}
+	sources := []core.GrantSource{core.GrantByCLI, core.GrantByCluster}
+	return &core.Grant{Pool: core.PoolID("gpu:" + g.name()), Size: size, Devices: devices, Whole: true, Source: sources[g.pick(len(sources))]}
+}
+
+// gpusUpTo is a count of GPUs, 1 to the pool's size.
+func (g *gen) gpusUpTo(size core.GPUCount) core.GPUCount {
+	// The number is in range, so it is always a count.
+	c, _ := core.ParseGPUCount(uint32(1+g.pick(size.Int())), "gpus")
+	return c
 }
 
 // needs is one or more resource kinds, each once, in an order drawn at random.

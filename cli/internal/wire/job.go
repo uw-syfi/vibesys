@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -105,6 +106,9 @@ func toServiceSpec(s *cliv1.ServiceSpec) *core.ServiceSpec {
 // JobSpec returns the contract's message for a job spec.
 func JobSpec(s core.JobSpec) *cliv1.JobSpec {
 	out := &cliv1.JobSpec{Commit: string(s.Commit), Environment: EnvironmentKind(s.Environment), Placement: s.Placement, Allocation: s.Allocation}
+	if s.GPUs.IsSet() {
+		out.Gpus = proto.Uint32(uint32(s.GPUs.Int()))
+	}
 	switch settings := s.Settings.(type) {
 	case core.CheckSettings:
 		out.Settings = &cliv1.JobSpec_Check{Check: &cliv1.CheckSettings{}}
@@ -149,6 +153,11 @@ func ToJobSpec(field string, s *cliv1.JobSpec) (core.JobSpec, error) {
 		}
 	}
 	out := core.JobSpec{Commit: commit, Environment: env, Placement: s.GetPlacement(), Allocation: s.GetAllocation()}
+	if s.Gpus != nil {
+		if out.GPUs, err = core.ParseGPUCount(s.GetGpus(), field+".gpus"); err != nil {
+			return core.JobSpec{}, err
+		}
+	}
 	switch settings := s.GetSettings().(type) {
 	case *cliv1.JobSpec_Check:
 		out.Settings = core.CheckSettings{}
@@ -245,7 +254,40 @@ func Job(j core.Job) *cliv1.Job {
 	}
 	out.TaskVersion = j.TaskVersion
 	out.FailedStage = JobStage(j.FailedStage)
+	if j.GPUs != nil {
+		out.Gpus = GpuGrant(*j.GPUs)
+	}
 	return out
+}
+
+// GpuGrant returns the contract's message for the GPUs a job was given.
+func GpuGrant(g core.Grant) *cliv1.GpuGrant {
+	out := &cliv1.GpuGrant{Pool: string(g.Pool), PoolSize: uint32(g.Size.Int()), Whole: g.Whole, Source: GrantSource(g.Source)}
+	for _, d := range g.Devices.Devices() {
+		out.Devices = append(out.Devices, uint32(d))
+	}
+	return out
+}
+
+// ToGpuGrant returns the domain grant for the contract's message: a pool, its size, a source, and
+// devices of the pool in ascending order, each once.
+func ToGpuGrant(field string, g *cliv1.GpuGrant) (core.Grant, error) {
+	if err := protovalidate.Validate(g); err != nil {
+		return core.Grant{}, invalid("%s: %v", field, err)
+	}
+	size, err := core.ParseGPUCount(g.GetPoolSize(), field+".pool_size")
+	if err != nil {
+		return core.Grant{}, err
+	}
+	devices, err := core.ParseDeviceGroup(g.GetDevices(), size, field+".devices")
+	if err != nil {
+		return core.Grant{}, err
+	}
+	source, err := ToGrantSource(field+".source", g.GetSource())
+	if err != nil {
+		return core.Grant{}, err
+	}
+	return core.Grant{Pool: core.PoolID(g.GetPool()), Size: size, Devices: devices, Whole: g.GetWhole(), Source: source}, nil
 }
 
 // Attempt returns the contract's message for an attempt that was cut off.
@@ -355,6 +397,13 @@ func ToJob(j *cliv1.Job) (core.Job, error) {
 		return core.Job{}, err
 	}
 	out.FailedStage = stage
+	if j.GetGpus() != nil {
+		grant, err := ToGpuGrant("job.gpus", j.GetGpus())
+		if err != nil {
+			return core.Job{}, err
+		}
+		out.GPUs = &grant
+	}
 	return out, nil
 }
 

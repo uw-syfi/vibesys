@@ -40,6 +40,28 @@ func words(r *rand.Rand, n int) []string {
 	return out
 }
 
+// anyGPUCount is a count of GPUs from 1 to most.
+func anyGPUCount(r *rand.Rand, most int) core.GPUCount {
+	// The number is in range, so it is always a count.
+	c, _ := core.ParseGPUCount(uint32(1+r.IntN(most)), "gpus")
+	return c
+}
+
+// anyGrant is GPUs of a pool, some of whose devices other jobs hold, chosen by the CLI or a cluster.
+func anyGrant(r *rand.Rand) core.Grant {
+	size := anyGPUCount(r, core.MaxPoolSize)
+	held, _ := core.TakeDevices(size, nil, anyGPUCount(r, size.Int()))
+	devices, ok := core.TakeDevices(size, []core.DeviceGroup{held}, anyGPUCount(r, size.Int()))
+	source := pick(r, core.GrantByCLI, core.GrantByCluster)
+	switch {
+	case !ok:
+		devices = held
+	case source == core.GrantByCluster && r.IntN(2) == 0:
+		devices = core.DeviceGroup{} // not read back yet
+	}
+	return core.Grant{Pool: core.PoolID(pick(r, "gpu:local", "rocm:mi300@login-a")), Size: size, Devices: devices, Whole: r.IntN(2) == 0, Source: source}
+}
+
 func anyJob(r *rand.Rand) core.Job {
 	j := core.Job{
 		ID:          core.JobID(fmt.Sprintf("j%d", r.IntN(100))),
@@ -61,6 +83,13 @@ func anyJob(r *rand.Rand) core.Job {
 	default:
 		j.Spec = core.JobSpec{Commit: commit, Settings: core.MeasureSettings{Samples: uint32(r.IntN(9)), Recheck: r.IntN(2) == 0}}
 		j.Key = "k2"
+	}
+	if r.IntN(2) == 0 {
+		j.Spec.GPUs = anyGPUCount(r, core.MaxPoolSize)
+	}
+	if r.IntN(2) == 0 {
+		g := anyGrant(r)
+		j.GPUs = &g
 	}
 	if r.IntN(2) == 0 {
 		fp := core.Fingerprint{Kind: core.EnvironmentHost, Backend: pick(r, core.BackendCPU, core.BackendCUDA)}

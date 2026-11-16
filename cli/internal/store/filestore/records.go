@@ -63,7 +63,13 @@ import (
 // it. It only adds, so this program reads versions 2 to 7, and Open migrates a store of 2 to 6 the
 // same way, writing the format file at version 7 last, so that a program of version 6 refuses the
 // store instead of failing on the first job of an allocation it reads.
-const formatVersion = 7
+//
+// Version 8 adds the count of GPUs a job's spec asks for (JobSpec.gpus) and the GPUs a job was given
+// (Job.gpus), which a version 7 program would refuse as unknown. It only adds, so this program reads
+// versions 2 to 8, and Open migrates a store of 2 to 7 the same way, writing the format file at
+// version 8 last. A job saved before has neither: it asked for no count, and its GPUs are unknown,
+// never guessed.
+const formatVersion = 8
 
 // rekeyedBefore is the first version whose results carry keys of the current rule: a result of a
 // record older than it is rekeyed when it is read.
@@ -335,6 +341,19 @@ func jobFromMessage(m *cliv1.Job) (core.Job, error) {
 	j.TaskVersion = m.GetTaskVersion()
 	if j.FailedStage, err = wire.ToJobStage("failed_stage", m.GetFailedStage()); err != nil {
 		return fail(err)
+	}
+	// A job saved before format 8 asked for no count and has no grant: its GPUs are unknown.
+	if m.GetSpec().Gpus != nil {
+		if j.Spec.GPUs, err = core.ParseGPUCount(m.GetSpec().GetGpus(), "spec.gpus"); err != nil {
+			return fail(err)
+		}
+	}
+	if m.GetGpus() != nil {
+		grant, err := wire.ToGpuGrant("gpus", m.GetGpus())
+		if err != nil {
+			return fail(err)
+		}
+		j.GPUs = &grant
 	}
 	return j, nil
 }

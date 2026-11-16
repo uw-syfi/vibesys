@@ -59,7 +59,7 @@ func Prepare(in Starting) (Plan, error) {
 	keyOf := func(kind core.JobKind, settings core.Settings) (core.JobKey, error) {
 		return core.NewJobKey(core.KeyInputs{
 			Kind: kind, Commit: job.Spec.Commit, TaskVersion: in.Task.Version,
-			Environment: in.Environment, Settings: settings, SchemaVersion: core.SchemaVersion,
+			Environment: in.Environment, Settings: settings, SchemaVersion: core.SchemaVersion, GPUs: job.Spec.GPUs,
 		})
 	}
 	key, err := keyOf(kind, job.Spec.Settings)
