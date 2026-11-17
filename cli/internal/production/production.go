@@ -162,6 +162,10 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	if err != nil {
 		return err
 	}
+	// A pool that is not the machine's GPUs would hand out devices that do not exist.
+	if err := p.checkPools(ctx, op, clk); err != nil {
+		return err
+	}
 	logf := func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, "%s %s: %s\n", clk.Now().UTC().Format("2006-01-02T15:04:05Z"), daemonName, fmt.Sprintf(format, args...))
 	}

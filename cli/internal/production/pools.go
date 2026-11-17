@@ -143,3 +143,29 @@ func checkPool(ctx context.Context, p *pooled, count countOf) error {
 	}
 	return core.CheckPoolCount(p.pool.Key, p.pool.Size, p.machine, n)
 }
+
+// checkPools refuses a config whose pool is not the number of GPUs its machine has, before the
+// daemon takes a job: for each pool it reads the machine's count through the vendor's own facts.
+// A machine that cannot be read (no nvidia-smi here, an ssh host that does not answer) gives no
+// verdict, and its pool is believed. The refusal names the key of the file.
+func (p Process) checkPools(ctx context.Context, op *cliv1.OperatorConfig, clk Clocks) error {
+	pools, err := poolsOf(op)
+	if err != nil {
+		return err
+	}
+	for _, name := range slices.Sorted(maps.Keys(pools)) {
+		pool := pools[name]
+		var shell remote.Shell = remote.Local{}
+		if r := op.GetPlacements()[name].GetRemote(); pool.machine != "local" {
+			shell = remote.SSH{Host: r.GetHost(), Program: orDefault(r.GetSshCommand(), "ssh")}
+		}
+		count, ok := machineCounts(pool.pool.Vendor, shell, clk)
+		if !ok {
+			continue
+		}
+		if err := checkPool(ctx, pool, count); err != nil {
+			return fmt.Errorf("the operator config %s: %w", operator.Path(p.Getenv, p.Home), err)
+		}
+	}
+	return nil
+}

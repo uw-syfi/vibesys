@@ -204,6 +204,8 @@ Go one, each small). One corpus
 | `service_url` | `VIBESYS_SERVICE_URL` | the candidate's server, for a task of two images, or the job's server, for a task with `[service]` |
 | `timeout_seconds` | `VIBESYS_JOB_TIMEOUT_SECONDS` | the longest the job may run, in whole seconds, rounded up |
 | `mounts` | `VIBESYS_MOUNTS` | the names of the read-only data sets, separated by commas |
+| `gpus` | `VIBESYS_GPUS` | how many GPUs of the machine's pool the job was given, whatever their vendor |
+| `gpu_devices` | `VIBESYS_GPU_DEVICES` | their numbers in the pool, ascending and separated by commas, such as `2,3` |
 
 A job that needs a cluster also gets `KubernetesEnvironment`: `KUBECONFIG`,
 `VIBESYS_K8S_REGISTRY` and `VIBESYS_K8S_BUILDER`. A variable that does not apply
@@ -230,7 +232,7 @@ refuses it naming the variable, where the release took it as it was.
 | Identity of the environment | The image digest, plus the machine: architecture, CPU model and count, and, when GPUs are passed, GPU model, count, driver and the driver's CUDA version. Two results are comparable only when all of these are equal. |
 | Containment | One container per command run (a check, or one benchmark sample). The CLI removes it on every path: exit, timeout, cancel, and the death of the process that started it. A timeout or a cancel first sends SIGTERM to the command's processes and waits for them to end, up to `stop_grace_seconds` (30 by default), so a trusted wrapper can delete what it created outside the container; then the container is removed. |
 | Placement | Where the Docker engine runs: this machine, another machine over ssh, or another machine inside a Slurm allocation. Chosen in the operator config. |
-| GPU access | `docker run --gpus <value>`, or `--runtime nvidia` with `NVIDIA_VISIBLE_DEVICES`. Never CDI. A placement's GPUs are a pool of `count` devices declared in the operator config. |
+| GPU access | `docker run --gpus all`, or `--runtime nvidia` with `NVIDIA_VISIBLE_DEVICES`; for a pool, the job's own devices by number, `--gpus '"device=2,3"'` (the quotes are part of the value: docker reads a list as CSV) or the runtime's variable. Never CDI. A placement's GPUs are a pool of `count` devices declared in the operator config, and a job is given a group of them by the vendor's role (`resource.Devices`); AMD GPUs are confined by `ROCR_VISIBLE_DEVICES` alone, and a host process by its variables alone, since neither the ROCm driver's devices nor a host process can be hidden by number. |
 | Build cache | A directory per task image on the engine's machine, mounted at `/vibesys/cache` and kept across commits and jobs. |
 | Artifacts | A directory per command run, mounted at `/vibesys/artifacts`, kept with the job afterwards. |
 | Machine-local inputs | Read-only directories the operator names, mounted at `/vibesys/mounts/<name>`. |
@@ -270,8 +272,7 @@ A placement's GPUs are a table by vendor, `[placements.<name>.resources.gpu]`
 for NVIDIA and `[placements.<name>.resources.rocm]` for AMD, whose one fact is
 `count`, the GPUs of the machine (of each node, for a cluster). A count makes
 the GPUs `0` to `count - 1` a pool, from which jobs are given GPUs of their own,
-and on a placement of this machine or of another one over ssh it is also the
-default `max_jobs`. An empty table gives every job all of the machine's GPUs, as
+and on a placement of this machine it is also the default `max_jobs`. An empty table gives every job all of the machine's GPUs, as
 before. A Slurm placement needs the count, since its allocations ask for GPUs
 by count; `gres_type` names the cluster's GPU type when a partition names
 types. What an allocation asks for is computed from the count and the job, so

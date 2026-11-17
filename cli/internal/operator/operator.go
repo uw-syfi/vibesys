@@ -233,11 +233,11 @@ func PoolOf(name string, p *cliv1.Placement) (Pool, error) {
 }
 
 // defaultMaxJobs is how many jobs a placement runs at once when the file does not say: one per GPU
-// of its pool on this machine or another one over ssh, where the CLI hands each job its own GPUs,
-// and one otherwise, since each job of a cluster is an allocation of its own.
+// of its pool on this machine, where the CLI hands each job its own GPUs, and one otherwise: each
+// job of a cluster is an allocation of its own, and the jobs of an ssh placement share one staging
+// scope on its host, so it runs one at a time whatever its pool.
 func defaultMaxJobs(kind cliv1.PlacementKind, pool Pool) uint32 {
-	onMachine := kind == cliv1.PlacementKind_PLACEMENT_KIND_LOCAL || kind == cliv1.PlacementKind_PLACEMENT_KIND_SSH
-	if pool.Size.IsSet() && onMachine {
+	if pool.Size.IsSet() && kind == cliv1.PlacementKind_PLACEMENT_KIND_LOCAL {
 		return uint32(pool.Size.Int())
 	}
 	return 1
@@ -373,11 +373,12 @@ func sections(p *cliv1.Placement, n sectionNames, pool Pool) error {
 		// A slurm placement's jobs share one Docker daemon and one image builder on the remote
 		// machine, and it stages each job's directories and sweeps its containers and allocations
 		// as the one job of its scope.
-		return invalid("%s: %s %q runs one job at a time; more than 1 needs %s \"local\", \"ssh\" with a GPU pool, or \"apptainer\"", n.maxJobs, n.kind, kind, n.kind)
-	case p.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_SSH && p.GetMaxJobs() > 1 && !pool.Size.IsSet():
-		// An ssh placement without a pool stages each job's directories and sweeps its containers as
-		// the one job of its scope, and would give every job all of the machine's GPUs at once.
-		return invalid("%s: %s %q without a GPU pool runs one job at a time; give its GPUs a count, or use %s \"local\" or \"apptainer\"", n.maxJobs, n.kind, kind, n.kind)
+		return invalid("%s: %s %q runs one job at a time; more than 1 needs %s \"local\" or \"apptainer\"", n.maxJobs, n.kind, kind, n.kind)
+	case p.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_SSH && p.GetMaxJobs() > 1:
+		// An ssh placement stages each job's directories and sweeps its containers as the one job of
+		// its scope, so a second job would sweep the first's. Its GPU pool still confines the one job
+		// to the GPUs it asks for.
+		return invalid("%s: %s %q runs one job at a time; more than 1 needs %s \"local\" or \"apptainer\"", n.maxJobs, n.kind, kind, n.kind)
 	}
 	return nil
 }

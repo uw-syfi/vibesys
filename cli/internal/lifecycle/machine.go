@@ -1422,8 +1422,11 @@ func (s *State) schedule() []Request {
 		case schedule.Start:
 			placed := d.Option
 			if cur.parked {
-				// Its devices were held all along; it holds the rest of its claims now.
-				placed.Claims = append(slices.Clone(placed.Claims), s.deviceClaims([]schedule.Option{{Claims: s.heldClaimsOfParked(*cur)}})...)
+				if cur.grant != nil && len(s.optionsOf(*cur)) == 1 {
+					// Its devices were held all along, apart from the rest of its claims, and it
+					// holds them all now.
+					placed.Claims = append(slices.Clone(placed.Claims), s.deviceClaims(s.optionsOf(*cur))...)
+				}
 			} else if grant, why := s.choose(placed, held); why != "" {
 				// Step counted the devices free, so none of this happens while the grants and the
 				// claims agree; a job that cannot be given its devices waits instead of sharing one.
@@ -1482,14 +1485,6 @@ func (s *State) deviceClaims(options []schedule.Option) []schedule.Claim {
 func (s *State) withoutDevices(claims []schedule.Claim) []schedule.Claim {
 	pools := s.deviceResources()
 	return slices.DeleteFunc(slices.Clone(claims), func(c schedule.Claim) bool { _, ok := pools[c.Resource]; return ok })
-}
-
-// heldClaimsOfParked is the claims of the one option a parked job's work has.
-func (s *State) heldClaimsOfParked(e entry) []schedule.Claim {
-	if options := s.optionsOf(e); len(options) == 1 {
-		return options[0].Claims
-	}
-	return nil
 }
 
 // heldDevices are the devices of each pool that the jobs that hold the machine, and the parked

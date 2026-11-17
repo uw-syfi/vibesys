@@ -640,6 +640,7 @@ func TestConcreteNamesAreSpelledOnlyWhereTheyAreImplemented(t *testing.T) {
 		"cli/internal/operator/a.go":                `"slurm and kubernetes"`,
 		"cli/internal/environment/slurm/a.go":       `"slurm"`,
 		"cli/internal/resource/gpu/a.go":            `"NVIDIA_VISIBLE_DEVICES"`,
+		"cli/internal/resource/rocm/a.go":           `"ROCR_VISIBLE_DEVICES"`,
 		"cli/internal/backend/nvidia/a.go":          `"nvidia-smi"`,
 		"cli/internal/core/placement.go":            `"kubernetes"`,
 		"cli/internal/environment/docker/a_test.go": `"nvidia"`,

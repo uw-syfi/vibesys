@@ -390,10 +390,11 @@ func TestTheSchedulerDefaultsToFifo(t *testing.T) {
 	}
 }
 
-// A placement runs as many jobs at once as its max_jobs says. Unset, a placement of this machine or
-// of another one over ssh with a pool of GPUs runs one per GPU, and every other placement one: a
-// cluster's jobs are allocations of their own, and a placement whose GPUs are no pool gives every
-// job all of them.
+// A placement runs as many jobs at once as its max_jobs says. Unset, a placement of this machine
+// with a pool of GPUs runs one per GPU, and every other placement one: a cluster's jobs are
+// allocations of their own, an ssh placement's jobs share one staging scope on its host, and a
+// placement whose GPUs are no pool gives every job all of them. An explicit value is refused where
+// the placement runs one job at a time (ssh, slurm), with its key named, pool or not.
 func TestMaxJobsDefaultsToThePoolsSizeOnAMachine(t *testing.T) {
 	r := rand.New(rand.NewPCG(21, 22))
 	for range 300 {
@@ -410,7 +411,7 @@ func TestMaxJobsDefaultsToThePoolsSizeOnAMachine(t *testing.T) {
 			}
 			pooled := fmt.Sprintf("[placements.x]\nkind = %q\n%s[placements.x.resources.%s]\ncount = %d\n", kind, section, table, size)
 			want := uint32(1)
-			if kind == "local" || kind == "ssh" {
+			if kind == "local" {
 				want = uint32(size)
 			}
 			c, err := parse(pooled)
@@ -421,7 +422,14 @@ func TestMaxJobsDefaultsToThePoolsSizeOnAMachine(t *testing.T) {
 			if err != nil || pool.Size.Int() != size || pool.Key != "placements.x.resources."+table+".count" {
 				t.Fatalf("%s: pool %+v, %v", pooled, pool, err)
 			}
-			if kind == "slurm" || kind == "apptainer" {
+			if kind == "ssh" || kind == "slurm" {
+				// These run one job at a time, with a pool or without: more is refused, naming the key.
+				set := 2 + r.IntN(1000)
+				if _, err := parse(strings.Replace(pooled, "kind = ", fmt.Sprintf("max_jobs = %d\nkind = ", set), 1)); err == nil || !strings.Contains(err.Error(), "placements.x.max_jobs") {
+					t.Fatalf("%s with max_jobs %d: %v, want it refused naming placements.x.max_jobs", pooled, set, err)
+				}
+			}
+			if kind == "slurm" || kind == "apptainer" || kind == "ssh" {
 				continue
 			}
 			// The operator's own max_jobs wins, above the pool's size too, for jobs that need no GPU.
