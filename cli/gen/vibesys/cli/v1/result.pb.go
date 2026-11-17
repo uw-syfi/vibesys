@@ -801,11 +801,79 @@ func (*Result_Check) isResult_Outcome() {}
 
 func (*Result_Measure) isResult_Outcome() {}
 
+// JobGpus is what a job's record says of its GPUs, said beside the results of the job when they are
+// read. A result's file does not keep it: the job's record is where it is written, so it is read
+// from there.
+type JobGpus struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The job, which is also the id of its result.
+	JobId string `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	// How many GPUs the job asked for (--gpus). Unset for a measure, which takes the whole node, for
+	// a job that asked none, and for a job saved before the count was recorded: its GPUs are unknown.
+	Asked *uint32 `protobuf:"varint,2,opt,name=asked,proto3,oneof" json:"asked,omitempty"`
+	// The GPUs of a pool the job was given, with their devices, for diagnosis. Unset for a job that
+	// was given none from a pool and for one started before grants were recorded.
+	Grant         *GpuGrant `protobuf:"bytes,3,opt,name=grant,proto3" json:"grant,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JobGpus) Reset() {
+	*x = JobGpus{}
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JobGpus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JobGpus) ProtoMessage() {}
+
+func (x *JobGpus) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JobGpus.ProtoReflect.Descriptor instead.
+func (*JobGpus) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *JobGpus) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *JobGpus) GetAsked() uint32 {
+	if x != nil && x.Asked != nil {
+		return *x.Asked
+	}
+	return 0
+}
+
+func (x *JobGpus) GetGrant() *GpuGrant {
+	if x != nil {
+		return x.Grant
+	}
+	return nil
+}
+
 var File_vibesys_cli_v1_result_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_result_proto_rawDesc = "" +
 	"\n" +
-	"\x1bvibesys/cli/v1/result.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a vibesys/cli/v1/environment.proto\"r\n" +
+	"\x1bvibesys/cli/v1/result.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a vibesys/cli/v1/environment.proto\x1a\x18vibesys/cli/v1/job.proto\"r\n" +
 	"\x06Metric\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x127\n" +
 	"\tdirection\x18\x02 \x01(\x0e2\x19.vibesys.cli.v1.DirectionR\tdirection\x12\x1b\n" +
@@ -861,7 +929,12 @@ const file_vibesys_cli_v1_result_proto_rawDesc = "" +
 	"\x05check\x18\v \x01(\v2\x1b.vibesys.cli.v1.CheckResultH\x00R\x05check\x129\n" +
 	"\ameasure\x18\f \x01(\v2\x1d.vibesys.cli.v1.MeasureResultH\x00R\ameasure\x12'\n" +
 	"\x0fcandidate_image\x18\r \x01(\tR\x0ecandidateImageB\t\n" +
-	"\aoutcome*V\n" +
+	"\aoutcome\"\x89\x01\n" +
+	"\aJobGpus\x12\x1e\n" +
+	"\x06job_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12$\n" +
+	"\x05asked\x18\x02 \x01(\rB\t\xbaH\x06*\x04\x18@(\x01H\x00R\x05asked\x88\x01\x01\x12.\n" +
+	"\x05grant\x18\x03 \x01(\v2\x18.vibesys.cli.v1.GpuGrantR\x05grantB\b\n" +
+	"\x06_asked*V\n" +
 	"\tDirection\x12\x19\n" +
 	"\x15DIRECTION_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12DIRECTION_MAXIMIZE\x10\x01\x12\x16\n" +
@@ -885,7 +958,7 @@ func file_vibesys_cli_v1_result_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_cli_v1_result_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vibesys_cli_v1_result_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_vibesys_cli_v1_result_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_vibesys_cli_v1_result_proto_goTypes = []any{
 	(Direction)(0),                 // 0: vibesys.cli.v1.Direction
 	(SampleService)(0),             // 1: vibesys.cli.v1.SampleService
@@ -897,34 +970,37 @@ var file_vibesys_cli_v1_result_proto_goTypes = []any{
 	(*MeasureResult)(nil),          // 7: vibesys.cli.v1.MeasureResult
 	(*Measurement)(nil),            // 8: vibesys.cli.v1.Measurement
 	(*Result)(nil),                 // 9: vibesys.cli.v1.Result
-	(*durationpb.Duration)(nil),    // 10: google.protobuf.Duration
-	(*EnvironmentFingerprint)(nil), // 11: vibesys.cli.v1.EnvironmentFingerprint
-	(*MachineFacts)(nil),           // 12: vibesys.cli.v1.MachineFacts
-	(*MachineLoad)(nil),            // 13: vibesys.cli.v1.MachineLoad
-	(*timestamppb.Timestamp)(nil),  // 14: google.protobuf.Timestamp
+	(*JobGpus)(nil),                // 10: vibesys.cli.v1.JobGpus
+	(*durationpb.Duration)(nil),    // 11: google.protobuf.Duration
+	(*EnvironmentFingerprint)(nil), // 12: vibesys.cli.v1.EnvironmentFingerprint
+	(*MachineFacts)(nil),           // 13: vibesys.cli.v1.MachineFacts
+	(*MachineLoad)(nil),            // 14: vibesys.cli.v1.MachineLoad
+	(*timestamppb.Timestamp)(nil),  // 15: google.protobuf.Timestamp
+	(*GpuGrant)(nil),               // 16: vibesys.cli.v1.GpuGrant
 }
 var file_vibesys_cli_v1_result_proto_depIdxs = []int32{
 	0,  // 0: vibesys.cli.v1.Metric.direction:type_name -> vibesys.cli.v1.Direction
 	2,  // 1: vibesys.cli.v1.Objectives.metrics:type_name -> vibesys.cli.v1.Metric
 	5,  // 2: vibesys.cli.v1.Objectives.noise:type_name -> vibesys.cli.v1.ObjectiveNoise
-	10, // 3: vibesys.cli.v1.CheckResult.duration:type_name -> google.protobuf.Duration
+	11, // 3: vibesys.cli.v1.CheckResult.duration:type_name -> google.protobuf.Duration
 	2,  // 4: vibesys.cli.v1.MeasureResult.metric:type_name -> vibesys.cli.v1.Metric
 	3,  // 5: vibesys.cli.v1.MeasureResult.observations:type_name -> vibesys.cli.v1.Observation
 	4,  // 6: vibesys.cli.v1.MeasureResult.objectives:type_name -> vibesys.cli.v1.Objectives
 	1,  // 7: vibesys.cli.v1.MeasureResult.sample_services:type_name -> vibesys.cli.v1.SampleService
-	11, // 8: vibesys.cli.v1.Measurement.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
+	12, // 8: vibesys.cli.v1.Measurement.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
 	7,  // 9: vibesys.cli.v1.Measurement.measure:type_name -> vibesys.cli.v1.MeasureResult
-	11, // 10: vibesys.cli.v1.Result.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
-	12, // 11: vibesys.cli.v1.Result.machine:type_name -> vibesys.cli.v1.MachineFacts
-	13, // 12: vibesys.cli.v1.Result.load:type_name -> vibesys.cli.v1.MachineLoad
-	14, // 13: vibesys.cli.v1.Result.recorded_at:type_name -> google.protobuf.Timestamp
+	12, // 10: vibesys.cli.v1.Result.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
+	13, // 11: vibesys.cli.v1.Result.machine:type_name -> vibesys.cli.v1.MachineFacts
+	14, // 12: vibesys.cli.v1.Result.load:type_name -> vibesys.cli.v1.MachineLoad
+	15, // 13: vibesys.cli.v1.Result.recorded_at:type_name -> google.protobuf.Timestamp
 	6,  // 14: vibesys.cli.v1.Result.check:type_name -> vibesys.cli.v1.CheckResult
 	7,  // 15: vibesys.cli.v1.Result.measure:type_name -> vibesys.cli.v1.MeasureResult
-	16, // [16:16] is the sub-list for method output_type
-	16, // [16:16] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	16, // 16: vibesys.cli.v1.JobGpus.grant:type_name -> vibesys.cli.v1.GpuGrant
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_result_proto_init() }
@@ -933,18 +1009,20 @@ func file_vibesys_cli_v1_result_proto_init() {
 		return
 	}
 	file_vibesys_cli_v1_environment_proto_init()
+	file_vibesys_cli_v1_job_proto_init()
 	file_vibesys_cli_v1_result_proto_msgTypes[1].OneofWrappers = []any{}
 	file_vibesys_cli_v1_result_proto_msgTypes[7].OneofWrappers = []any{
 		(*Result_Check)(nil),
 		(*Result_Measure)(nil),
 	}
+	file_vibesys_cli_v1_result_proto_msgTypes[8].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_result_proto_rawDesc), len(file_vibesys_cli_v1_result_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

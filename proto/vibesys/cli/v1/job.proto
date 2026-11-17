@@ -356,6 +356,9 @@ message WaitHolder {
   JobKind kind = 3;
   // The run that submitted the job first. Empty when it named none.
   string run_id = 4;
+  // The GPUs of a pool the job holds, with the devices, when it holds some. Unset for a job that
+  // holds none, and for one that holds no devices of the resource the waiting job needs.
+  GpuGrant gpus = 5;
 }
 
 // WaitReason says why a queued job has not started, as the daemon's scheduler decided at its last
@@ -378,6 +381,10 @@ message WaitReason {
   string detail = 4;
   // Who holds the lease, for LEASED.
   LeaseHolder elsewhere = 5;
+  // For a wait on a pool of GPUs (FULL or BEHIND, on its resource): how many GPUs the job
+  // claims, and how many the pool has free now. Both are zero for any other wait.
+  uint32 gpus_wanted = 6 [(buf.validate.field).uint32.lte = 64];
+  uint32 gpus_free = 7 [(buf.validate.field).uint32.lte = 64];
 }
 
 // JobWait is why one queued job waits.

@@ -1836,12 +1836,16 @@ func (s State) waitsOn(e entry, troubles map[schedule.ID]string) (string, bool) 
 type Blocker struct {
 	Ref  Ref
 	Work Work
+	// Grant is the GPUs of a pool the job holds, nil when it holds none.
+	Grant *core.Grant
 }
 
 // Queued is why a queued or parked job did not start at the last step, as the scheduler said.
 type Queued struct {
 	Ref    Ref
 	Reason schedule.WaitReason
+	// Work is what the queued job is, as the machine was told: the options it may start on.
+	Work Work
 	// Blockers are the jobs of Reason.Blockers that the machine holds.
 	Blockers []Blocker
 }
@@ -1854,10 +1858,10 @@ func (s State) Queue() []Queued {
 		if !e.waits {
 			continue
 		}
-		q := Queued{Ref: e.ref, Reason: e.wait}
+		q := Queued{Ref: e.ref, Reason: e.wait, Work: e.work}
 		for _, b := range e.wait.Blockers {
 			if j := slices.IndexFunc(s.entries, func(o entry) bool { return idOf(o.ref) == b }); j >= 0 {
-				q.Blockers = append(q.Blockers, Blocker{Ref: s.entries[j].ref, Work: s.entries[j].work})
+				q.Blockers = append(q.Blockers, Blocker{Ref: s.entries[j].ref, Work: s.entries[j].work, Grant: s.entries[j].grant})
 			}
 		}
 		out = append(out, q)

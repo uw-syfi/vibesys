@@ -5,6 +5,7 @@ import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/cli/v1/environment.proto";
+import "vibesys/cli/v1/job.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
 
@@ -142,4 +143,21 @@ message Result {
   // It is recorded and never part of the key: a dependency the candidate changes is part of the
   // candidate, as its code is.
   string candidate_image = 13;
+}
+
+// JobGpus is what a job's record says of its GPUs, said beside the results of the job when they are
+// read. A result's file does not keep it: the job's record is where it is written, so it is read
+// from there.
+message JobGpus {
+  // The job, which is also the id of its result.
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  // How many GPUs the job asked for (--gpus). Unset for a measure, which takes the whole node, for
+  // a job that asked none, and for a job saved before the count was recorded: its GPUs are unknown.
+  optional uint32 asked = 2 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 64
+  }];
+  // The GPUs of a pool the job was given, with their devices, for diagnosis. Unset for a job that
+  // was given none from a pool and for one started before grants were recorded.
+  GpuGrant grant = 3;
 }

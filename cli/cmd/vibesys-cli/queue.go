@@ -22,6 +22,16 @@ func describeWait(w *cliv1.WaitReason, task string) string {
 		names = append(names, describeHolder(h, task))
 	}
 	holders := strings.Join(names, ", ")
+	if w.GetGpusWanted() > 0 {
+		// A wait on a pool of GPUs says how many the job claims, and how many are free.
+		wanting := fmt.Sprintf("waiting for %s of %s, %d free", gpusWord(w.GetGpusWanted()), w.GetResource(), w.GetGpusFree())
+		switch w.GetKind() {
+		case cliv1.WaitKind_WAIT_KIND_FULL:
+			return fmt.Sprintf("%s, held by %s", wanting, holders)
+		case cliv1.WaitKind_WAIT_KIND_BEHIND:
+			return fmt.Sprintf("%s, behind %s, which waits for it", wanting, holders)
+		}
+	}
 	switch w.GetKind() {
 	case cliv1.WaitKind_WAIT_KIND_FULL:
 		return fmt.Sprintf("%s is full, held by %s", w.GetResource(), holders)
@@ -66,6 +76,9 @@ func describeHolder(h *cliv1.WaitHolder, task string) string {
 	}
 	if len(facts) > 0 {
 		name += " (" + strings.Join(facts, ", ") + ")"
+	}
+	if devices := h.GetGpus().GetDevices(); len(devices) > 0 {
+		name += " on devices " + deviceList(devices)
 	}
 	return name
 }

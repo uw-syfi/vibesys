@@ -1701,7 +1701,10 @@ type WaitHolder struct {
 	Task string  `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
 	Kind JobKind `protobuf:"varint,3,opt,name=kind,proto3,enum=vibesys.cli.v1.JobKind" json:"kind,omitempty"`
 	// The run that submitted the job first. Empty when it named none.
-	RunId         string `protobuf:"bytes,4,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	RunId string `protobuf:"bytes,4,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	// The GPUs of a pool the job holds, with the devices, when it holds some. Unset for a job that
+	// holds none, and for one that holds no devices of the resource the waiting job needs.
+	Gpus          *GpuGrant `protobuf:"bytes,5,opt,name=gpus,proto3" json:"gpus,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1764,6 +1767,13 @@ func (x *WaitHolder) GetRunId() string {
 	return ""
 }
 
+func (x *WaitHolder) GetGpus() *GpuGrant {
+	if x != nil {
+		return x.Gpus
+	}
+	return nil
+}
+
 // WaitReason says why a queued job has not started, as the daemon's scheduler decided at its last
 // change. The daemon derives it from what it holds; no store keeps it.
 type WaitReason struct {
@@ -1776,7 +1786,11 @@ type WaitReason struct {
 	Holders []*WaitHolder `protobuf:"bytes,3,rep,name=holders,proto3" json:"holders,omitempty"`
 	Detail  string        `protobuf:"bytes,4,opt,name=detail,proto3" json:"detail,omitempty"`
 	// Who holds the lease, for LEASED.
-	Elsewhere     *LeaseHolder `protobuf:"bytes,5,opt,name=elsewhere,proto3" json:"elsewhere,omitempty"`
+	Elsewhere *LeaseHolder `protobuf:"bytes,5,opt,name=elsewhere,proto3" json:"elsewhere,omitempty"`
+	// For a wait on a pool of GPUs (FULL or BEHIND, on its resource): how many GPUs the job
+	// claims, and how many the pool has free now. Both are zero for any other wait.
+	GpusWanted    uint32 `protobuf:"varint,6,opt,name=gpus_wanted,json=gpusWanted,proto3" json:"gpus_wanted,omitempty"`
+	GpusFree      uint32 `protobuf:"varint,7,opt,name=gpus_free,json=gpusFree,proto3" json:"gpus_free,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1844,6 +1858,20 @@ func (x *WaitReason) GetElsewhere() *LeaseHolder {
 		return x.Elsewhere
 	}
 	return nil
+}
+
+func (x *WaitReason) GetGpusWanted() uint32 {
+	if x != nil {
+		return x.GpusWanted
+	}
+	return 0
+}
+
+func (x *WaitReason) GetGpusFree() uint32 {
+	if x != nil {
+		return x.GpusFree
+	}
+	return 0
 }
 
 // JobWait is why one queued job waits.
@@ -2009,13 +2037,14 @@ const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"\x04host\x18\x02 \x01(\tR\x04host\x12\x10\n" +
 	"\x03pid\x18\x03 \x01(\rR\x03pid\x12\x15\n" +
 	"\x06job_id\x18\x04 \x01(\tR\x05jobId\x120\n" +
-	"\x05since\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\"\x84\x01\n" +
+	"\x05since\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\"\xb2\x01\n" +
 	"\n" +
 	"WaitHolder\x12\x1e\n" +
 	"\x06job_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12\x12\n" +
 	"\x04task\x18\x02 \x01(\tR\x04task\x12+\n" +
 	"\x04kind\x18\x03 \x01(\x0e2\x17.vibesys.cli.v1.JobKindR\x04kind\x12\x15\n" +
-	"\x06run_id\x18\x04 \x01(\tR\x05runId\"\xe1\x04\n" +
+	"\x06run_id\x18\x04 \x01(\tR\x05runId\x12,\n" +
+	"\x04gpus\x18\x05 \x01(\v2\x18.vibesys.cli.v1.GpuGrantR\x04gpus\"\xb1\x05\n" +
 	"\n" +
 	"WaitReason\x128\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x18.vibesys.cli.v1.WaitKindB\n" +
@@ -2023,7 +2052,10 @@ const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"\bresource\x18\x02 \x01(\tR\bresource\x124\n" +
 	"\aholders\x18\x03 \x03(\v2\x1a.vibesys.cli.v1.WaitHolderR\aholders\x12\x16\n" +
 	"\x06detail\x18\x04 \x01(\tR\x06detail\x129\n" +
-	"\telsewhere\x18\x05 \x01(\v2\x1b.vibesys.cli.v1.LeaseHolderR\telsewhere:\xf3\x02\xbaH\xef\x02\x1a\xec\x02\n" +
+	"\telsewhere\x18\x05 \x01(\v2\x1b.vibesys.cli.v1.LeaseHolderR\telsewhere\x12(\n" +
+	"\vgpus_wanted\x18\x06 \x01(\rB\a\xbaH\x04*\x02\x18@R\n" +
+	"gpusWanted\x12$\n" +
+	"\tgpus_free\x18\a \x01(\rB\a\xbaH\x04*\x02\x18@R\bgpusFree:\xf3\x02\xbaH\xef\x02\x1a\xec\x02\n" +
 	"\x11wait_reason.shape\x12\x94\x01a wait on a resource names the resource and its holders, a held or trouble wait says why, and a leased wait names the resource and its holder or why\x1a\xbf\x01this.kind == 5 || this.kind == 6 ? this.detail != '' : (this.kind == 7 ? (this.resource != '' && (has(this.elsewhere) || this.detail != '')) : (this.resource != '' && size(this.holders) > 0))\"e\n" +
 	"\aJobWait\x12\x1e\n" +
 	"\x06job_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12:\n" +
@@ -2148,15 +2180,16 @@ var file_vibesys_cli_v1_job_proto_depIdxs = []int32{
 	4,  // 30: vibesys.cli.v1.GpuGrant.source:type_name -> vibesys.cli.v1.GrantSource
 	27, // 31: vibesys.cli.v1.LeaseHolder.since:type_name -> google.protobuf.Timestamp
 	0,  // 32: vibesys.cli.v1.WaitHolder.kind:type_name -> vibesys.cli.v1.JobKind
-	6,  // 33: vibesys.cli.v1.WaitReason.kind:type_name -> vibesys.cli.v1.WaitKind
-	22, // 34: vibesys.cli.v1.WaitReason.holders:type_name -> vibesys.cli.v1.WaitHolder
-	21, // 35: vibesys.cli.v1.WaitReason.elsewhere:type_name -> vibesys.cli.v1.LeaseHolder
-	23, // 36: vibesys.cli.v1.JobWait.reason:type_name -> vibesys.cli.v1.WaitReason
-	37, // [37:37] is the sub-list for method output_type
-	37, // [37:37] is the sub-list for method input_type
-	37, // [37:37] is the sub-list for extension type_name
-	37, // [37:37] is the sub-list for extension extendee
-	0,  // [0:37] is the sub-list for field type_name
+	20, // 33: vibesys.cli.v1.WaitHolder.gpus:type_name -> vibesys.cli.v1.GpuGrant
+	6,  // 34: vibesys.cli.v1.WaitReason.kind:type_name -> vibesys.cli.v1.WaitKind
+	22, // 35: vibesys.cli.v1.WaitReason.holders:type_name -> vibesys.cli.v1.WaitHolder
+	21, // 36: vibesys.cli.v1.WaitReason.elsewhere:type_name -> vibesys.cli.v1.LeaseHolder
+	23, // 37: vibesys.cli.v1.JobWait.reason:type_name -> vibesys.cli.v1.WaitReason
+	38, // [38:38] is the sub-list for method output_type
+	38, // [38:38] is the sub-list for method input_type
+	38, // [38:38] is the sub-list for extension type_name
+	38, // [38:38] is the sub-list for extension extendee
+	0,  // [0:38] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_job_proto_init() }

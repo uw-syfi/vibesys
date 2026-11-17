@@ -469,3 +469,45 @@ func TestAReceivedFailureKeepsAKindThisBuildDoesNotKnow(t *testing.T) {
 		}
 	}
 }
+
+// The GPUs said of results are what their jobs' records have, for every job: the count it asked
+// for and the grant it was given, and nothing for a job the record says nothing of or one that is
+// not among the jobs.
+func TestTheGPUsSaidOfResultsAreWhatTheirJobsRecordsHave(t *testing.T) {
+	r := newRand(21)
+	for range 300 {
+		var jobs []core.Job
+		var results []core.Result
+		for i := range 1 + r.IntN(5) {
+			j := anyJob(r)
+			j.ID = core.JobID(fmt.Sprintf("j%d", i))
+			results = append(results, core.Result{Job: j.ID})
+			jobs = append(jobs, j)
+		}
+		results = append(results, core.Result{Job: "stranger"})
+		got := wire.JobGPUs(results, jobs)
+		byJob := map[string]*cliv1.JobGpus{}
+		for _, u := range got {
+			byJob[u.GetJobId()] = u
+		}
+		for _, j := range jobs {
+			u := byJob[string(j.ID)]
+			says := j.Spec.GPUs.IsSet() || j.GPUs != nil
+			if says != (u != nil) {
+				t.Fatalf("job %s: record says something = %v, got %v", j.ID, says, u)
+			}
+			if u == nil {
+				continue
+			}
+			if j.Spec.GPUs.IsSet() != (u.Asked != nil) || (u.Asked != nil && int(u.GetAsked()) != j.Spec.GPUs.Int()) {
+				t.Fatalf("job %s asked %d, got %v", j.ID, j.Spec.GPUs.Int(), u.Asked)
+			}
+			if (j.GPUs != nil) != (u.Grant != nil) || (j.GPUs != nil && !proto.Equal(u.Grant, wire.GpuGrant(*j.GPUs))) {
+				t.Fatalf("job %s holds %+v, got %v", j.ID, j.GPUs, u.Grant)
+			}
+		}
+		if byJob["stranger"] != nil {
+			t.Fatal("a result of no known job has GPUs said of it")
+		}
+	}
+}

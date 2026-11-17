@@ -85,6 +85,8 @@ enum NoCurrentResultReason {
 message CurrentResult {
   string head = 1;
   Result result = 2;
+  // What the record of the result's job says of its GPUs. Unset when it says nothing.
+  JobGpus gpus = 3;
 }
 
 message NoCurrentResult {

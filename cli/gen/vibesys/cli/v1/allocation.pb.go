@@ -652,6 +652,9 @@ type PlacementCapacity struct {
 	Held []*Allocation `protobuf:"bytes,4,rep,name=held,proto3" json:"held,omitempty"`
 	// How long recent allocations of the placement waited to start, newest first.
 	RecentWaits []*WaitSample `protobuf:"bytes,5,rep,name=recent_waits,json=recentWaits,proto3" json:"recent_waits,omitempty"`
+	// The placement's GPU pool, when its file declares a count and the CLI hands the devices out
+	// (a local or ssh placement). Unset otherwise.
+	GpuPool *GpuPoolCapacity `protobuf:"bytes,6,opt,name=gpu_pool,json=gpuPool,proto3" json:"gpu_pool,omitempty"`
 	// Types that are valid to be assigned to Detail:
 	//
 	//	*PlacementCapacity_Slurm
@@ -725,6 +728,13 @@ func (x *PlacementCapacity) GetRecentWaits() []*WaitSample {
 	return nil
 }
 
+func (x *PlacementCapacity) GetGpuPool() *GpuPoolCapacity {
+	if x != nil {
+		return x.GpuPool
+	}
+	return nil
+}
+
 func (x *PlacementCapacity) GetDetail() isPlacementCapacity_Detail {
 	if x != nil {
 		return x.Detail
@@ -751,6 +761,211 @@ type PlacementCapacity_Slurm struct {
 
 func (*PlacementCapacity_Slurm) isPlacementCapacity_Detail() {}
 
+// GpuPoolCapacity is a pool of a machine's GPUs, how many of them are free now, and which jobs hold
+// the others and which wait for some.
+type GpuPoolCapacity struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The pool, which names the machine whose GPUs they are, such as gpu:local.
+	Pool string `protobuf:"bytes,1,opt,name=pool,proto3" json:"pool,omitempty"`
+	Size uint32 `protobuf:"varint,2,opt,name=size,proto3" json:"size,omitempty"`
+	Free uint32 `protobuf:"varint,3,opt,name=free,proto3" json:"free,omitempty"`
+	// The jobs that hold devices of the pool, oldest first.
+	Holders []*GpuHolder `protobuf:"bytes,4,rep,name=holders,proto3" json:"holders,omitempty"`
+	// The jobs that wait for devices of the pool, in the order they will be served.
+	Waiting       []*GpuWaiter `protobuf:"bytes,5,rep,name=waiting,proto3" json:"waiting,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GpuPoolCapacity) Reset() {
+	*x = GpuPoolCapacity{}
+	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GpuPoolCapacity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GpuPoolCapacity) ProtoMessage() {}
+
+func (x *GpuPoolCapacity) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GpuPoolCapacity.ProtoReflect.Descriptor instead.
+func (*GpuPoolCapacity) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_allocation_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *GpuPoolCapacity) GetPool() string {
+	if x != nil {
+		return x.Pool
+	}
+	return ""
+}
+
+func (x *GpuPoolCapacity) GetSize() uint32 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+func (x *GpuPoolCapacity) GetFree() uint32 {
+	if x != nil {
+		return x.Free
+	}
+	return 0
+}
+
+func (x *GpuPoolCapacity) GetHolders() []*GpuHolder {
+	if x != nil {
+		return x.Holders
+	}
+	return nil
+}
+
+func (x *GpuPoolCapacity) GetWaiting() []*GpuWaiter {
+	if x != nil {
+		return x.Waiting
+	}
+	return nil
+}
+
+// GpuHolder is a job that holds devices of a pool.
+type GpuHolder struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	JobId string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	Kind  JobKind                `protobuf:"varint,2,opt,name=kind,proto3,enum=vibesys.cli.v1.JobKind" json:"kind,omitempty"`
+	// The run that submitted the job first. Empty when it named none.
+	RunId string `protobuf:"bytes,3,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	// The devices the job holds.
+	Gpus          *GpuGrant `protobuf:"bytes,4,opt,name=gpus,proto3" json:"gpus,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GpuHolder) Reset() {
+	*x = GpuHolder{}
+	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GpuHolder) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GpuHolder) ProtoMessage() {}
+
+func (x *GpuHolder) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GpuHolder.ProtoReflect.Descriptor instead.
+func (*GpuHolder) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_allocation_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *GpuHolder) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *GpuHolder) GetKind() JobKind {
+	if x != nil {
+		return x.Kind
+	}
+	return JobKind_JOB_KIND_UNSPECIFIED
+}
+
+func (x *GpuHolder) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+func (x *GpuHolder) GetGpus() *GpuGrant {
+	if x != nil {
+		return x.Gpus
+	}
+	return nil
+}
+
+// GpuWaiter is a job that waits for devices of a pool, and how many it claims.
+type GpuWaiter struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	Wanted        uint32                 `protobuf:"varint,2,opt,name=wanted,proto3" json:"wanted,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GpuWaiter) Reset() {
+	*x = GpuWaiter{}
+	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GpuWaiter) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GpuWaiter) ProtoMessage() {}
+
+func (x *GpuWaiter) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GpuWaiter.ProtoReflect.Descriptor instead.
+func (*GpuWaiter) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_allocation_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *GpuWaiter) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *GpuWaiter) GetWanted() uint32 {
+	if x != nil {
+		return x.Wanted
+	}
+	return 0
+}
+
 // WaitSample is how long one allocation waited from its request to its start.
 type WaitSample struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -763,7 +978,7 @@ type WaitSample struct {
 
 func (x *WaitSample) Reset() {
 	*x = WaitSample{}
-	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -775,7 +990,7 @@ func (x *WaitSample) String() string {
 func (*WaitSample) ProtoMessage() {}
 
 func (x *WaitSample) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -788,7 +1003,7 @@ func (x *WaitSample) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WaitSample.ProtoReflect.Descriptor instead.
 func (*WaitSample) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_cli_v1_allocation_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *WaitSample) GetRequestedAt() *timestamppb.Timestamp {
@@ -825,7 +1040,7 @@ type SlurmCapacity struct {
 
 func (x *SlurmCapacity) Reset() {
 	*x = SlurmCapacity{}
-	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -837,7 +1052,7 @@ func (x *SlurmCapacity) String() string {
 func (*SlurmCapacity) ProtoMessage() {}
 
 func (x *SlurmCapacity) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -850,7 +1065,7 @@ func (x *SlurmCapacity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SlurmCapacity.ProtoReflect.Descriptor instead.
 func (*SlurmCapacity) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_cli_v1_allocation_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SlurmCapacity) GetNodesTotal() uint32 {
@@ -896,7 +1111,7 @@ type SlurmReservation struct {
 
 func (x *SlurmReservation) Reset() {
 	*x = SlurmReservation{}
-	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -908,7 +1123,7 @@ func (x *SlurmReservation) String() string {
 func (*SlurmReservation) ProtoMessage() {}
 
 func (x *SlurmReservation) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_allocation_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -921,7 +1136,7 @@ func (x *SlurmReservation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SlurmReservation.ProtoReflect.Descriptor instead.
 func (*SlurmReservation) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_allocation_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_cli_v1_allocation_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SlurmReservation) GetName() string {
@@ -963,7 +1178,7 @@ var File_vibesys_cli_v1_allocation_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_allocation_proto_rawDesc = "" +
 	"\n" +
-	"\x1fvibesys/cli/v1/allocation.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x90\x12\n" +
+	"\x1fvibesys/cli/v1/allocation.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18vibesys/cli/v1/job.proto\"\x90\x12\n" +
 	"\n" +
 	"Allocation\x12*\n" +
 	"\x02id\x18\x01 \x01(\tB\x1a\xbaH\x17r\x152\x13^a[1-9][0-9]{0,17}$R\x02id\x12?\n" +
@@ -1023,7 +1238,7 @@ const file_vibesys_cli_v1_allocation_proto_rawDesc = "" +
 	"\rAllocationEnd\x12*\n" +
 	"\x02id\x18\x01 \x01(\tB\x1a\xbaH\x17r\x152\x13^a[1-9][0-9]{0,17}$R\x02id\x12\x1d\n" +
 	"\n" +
-	"after_jobs\x18\x02 \x01(\bR\tafterJobs\"\xcf\x03\n" +
+	"after_jobs\x18\x02 \x01(\bR\tafterJobs\"\x8b\x04\n" +
 	"\x11PlacementCapacity\x12?\n" +
 	"\tplacement\x18\x01 \x01(\tB!\xbaH\x1er\x1c2\x1a^[a-z0-9][a-z0-9_-]{0,62}$R\tplacement\x12\x1f\n" +
 	"\vslots_total\x18\x02 \x01(\rR\n" +
@@ -1031,10 +1246,27 @@ const file_vibesys_cli_v1_allocation_proto_rawDesc = "" +
 	"\n" +
 	"slots_free\x18\x03 \x01(\rR\tslotsFree\x129\n" +
 	"\x04held\x18\x04 \x03(\v2\x1a.vibesys.cli.v1.AllocationB\t\xbaH\x06\x92\x01\x03\x10\x80\bR\x04held\x12H\n" +
-	"\frecent_waits\x18\x05 \x03(\v2\x1a.vibesys.cli.v1.WaitSampleB\t\xbaH\x06\x92\x01\x03\x10\x80\x02R\vrecentWaits\x125\n" +
+	"\frecent_waits\x18\x05 \x03(\v2\x1a.vibesys.cli.v1.WaitSampleB\t\xbaH\x06\x92\x01\x03\x10\x80\x02R\vrecentWaits\x12:\n" +
+	"\bgpu_pool\x18\x06 \x01(\v2\x1f.vibesys.cli.v1.GpuPoolCapacityR\agpuPool\x125\n" +
 	"\x05slurm\x18\x14 \x01(\v2\x1d.vibesys.cli.v1.SlurmCapacityH\x00R\x05slurm:s\xbaHp\x1an\n" +
 	"$placement_capacity.free_within_total\x12!slots_free is at most slots_total\x1a#this.slots_free <= this.slots_totalB\b\n" +
-	"\x06detail\"\xe0\x01\n" +
+	"\x06detail\"\xc5\x02\n" +
+	"\x0fGpuPoolCapacity\x12\x1e\n" +
+	"\x04pool\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\x18\x80\x02R\x04pool\x12\x1d\n" +
+	"\x04size\x18\x02 \x01(\rB\t\xbaH\x06*\x04\x18@(\x01R\x04size\x12\x1b\n" +
+	"\x04free\x18\x03 \x01(\rB\a\xbaH\x04*\x02\x18@R\x04free\x12=\n" +
+	"\aholders\x18\x04 \x03(\v2\x19.vibesys.cli.v1.GpuHolderB\b\xbaH\x05\x92\x01\x02\x10@R\aholders\x12>\n" +
+	"\awaiting\x18\x05 \x03(\v2\x19.vibesys.cli.v1.GpuWaiterB\t\xbaH\x06\x92\x01\x03\x10\x80\bR\awaiting:W\xbaHT\x1aR\n" +
+	"\"gpu_pool_capacity.free_within_size\x12\x14free is at most size\x1a\x16this.free <= this.size\"\xa5\x01\n" +
+	"\tGpuHolder\x12\x1e\n" +
+	"\x06job_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12+\n" +
+	"\x04kind\x18\x02 \x01(\x0e2\x17.vibesys.cli.v1.JobKindR\x04kind\x12\x15\n" +
+	"\x06run_id\x18\x03 \x01(\tR\x05runId\x124\n" +
+	"\x04gpus\x18\x04 \x01(\v2\x18.vibesys.cli.v1.GpuGrantB\x06\xbaH\x03\xc8\x01\x01R\x04gpus\"N\n" +
+	"\tGpuWaiter\x12\x1e\n" +
+	"\x06job_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12!\n" +
+	"\x06wanted\x18\x02 \x01(\rB\t\xbaH\x06*\x04\x18@(\x01R\x06wanted\"\xe0\x01\n" +
 	"\n" +
 	"WaitSample\x12E\n" +
 	"\frequested_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\vrequestedAt\x12>\n" +
@@ -1083,7 +1315,7 @@ func file_vibesys_cli_v1_allocation_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_cli_v1_allocation_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vibesys_cli_v1_allocation_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_vibesys_cli_v1_allocation_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_vibesys_cli_v1_allocation_proto_goTypes = []any{
 	(AllocationState)(0),          // 0: vibesys.cli.v1.AllocationState
 	(AllocationEndReason)(0),      // 1: vibesys.cli.v1.AllocationEndReason
@@ -1093,41 +1325,51 @@ var file_vibesys_cli_v1_allocation_proto_goTypes = []any{
 	(*AllocationRequest)(nil),     // 5: vibesys.cli.v1.AllocationRequest
 	(*AllocationEnd)(nil),         // 6: vibesys.cli.v1.AllocationEnd
 	(*PlacementCapacity)(nil),     // 7: vibesys.cli.v1.PlacementCapacity
-	(*WaitSample)(nil),            // 8: vibesys.cli.v1.WaitSample
-	(*SlurmCapacity)(nil),         // 9: vibesys.cli.v1.SlurmCapacity
-	(*SlurmReservation)(nil),      // 10: vibesys.cli.v1.SlurmReservation
-	(*durationpb.Duration)(nil),   // 11: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
+	(*GpuPoolCapacity)(nil),       // 8: vibesys.cli.v1.GpuPoolCapacity
+	(*GpuHolder)(nil),             // 9: vibesys.cli.v1.GpuHolder
+	(*GpuWaiter)(nil),             // 10: vibesys.cli.v1.GpuWaiter
+	(*WaitSample)(nil),            // 11: vibesys.cli.v1.WaitSample
+	(*SlurmCapacity)(nil),         // 12: vibesys.cli.v1.SlurmCapacity
+	(*SlurmReservation)(nil),      // 13: vibesys.cli.v1.SlurmReservation
+	(*durationpb.Duration)(nil),   // 14: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil), // 15: google.protobuf.Timestamp
+	(JobKind)(0),                  // 16: vibesys.cli.v1.JobKind
+	(*GpuGrant)(nil),              // 17: vibesys.cli.v1.GpuGrant
 }
 var file_vibesys_cli_v1_allocation_proto_depIdxs = []int32{
 	0,  // 0: vibesys.cli.v1.Allocation.state:type_name -> vibesys.cli.v1.AllocationState
-	11, // 1: vibesys.cli.v1.Allocation.requested_for:type_name -> google.protobuf.Duration
-	12, // 2: vibesys.cli.v1.Allocation.requested_at:type_name -> google.protobuf.Timestamp
-	12, // 3: vibesys.cli.v1.Allocation.started_at:type_name -> google.protobuf.Timestamp
-	12, // 4: vibesys.cli.v1.Allocation.ends_at:type_name -> google.protobuf.Timestamp
-	12, // 5: vibesys.cli.v1.Allocation.ended_at:type_name -> google.protobuf.Timestamp
+	14, // 1: vibesys.cli.v1.Allocation.requested_for:type_name -> google.protobuf.Duration
+	15, // 2: vibesys.cli.v1.Allocation.requested_at:type_name -> google.protobuf.Timestamp
+	15, // 3: vibesys.cli.v1.Allocation.started_at:type_name -> google.protobuf.Timestamp
+	15, // 4: vibesys.cli.v1.Allocation.ends_at:type_name -> google.protobuf.Timestamp
+	15, // 5: vibesys.cli.v1.Allocation.ended_at:type_name -> google.protobuf.Timestamp
 	1,  // 6: vibesys.cli.v1.Allocation.end_reason:type_name -> vibesys.cli.v1.AllocationEndReason
 	3,  // 7: vibesys.cli.v1.Allocation.renewal:type_name -> vibesys.cli.v1.RenewalOrder
 	4,  // 8: vibesys.cli.v1.Allocation.slurm:type_name -> vibesys.cli.v1.SlurmAllocation
-	11, // 9: vibesys.cli.v1.RenewalOrder.lead:type_name -> google.protobuf.Duration
-	11, // 10: vibesys.cli.v1.RenewalOrder.successor_for:type_name -> google.protobuf.Duration
-	12, // 11: vibesys.cli.v1.RenewalOrder.at:type_name -> google.protobuf.Timestamp
-	12, // 12: vibesys.cli.v1.SlurmAllocation.estimated_start:type_name -> google.protobuf.Timestamp
-	11, // 13: vibesys.cli.v1.AllocationRequest.requested_for:type_name -> google.protobuf.Duration
+	14, // 9: vibesys.cli.v1.RenewalOrder.lead:type_name -> google.protobuf.Duration
+	14, // 10: vibesys.cli.v1.RenewalOrder.successor_for:type_name -> google.protobuf.Duration
+	15, // 11: vibesys.cli.v1.RenewalOrder.at:type_name -> google.protobuf.Timestamp
+	15, // 12: vibesys.cli.v1.SlurmAllocation.estimated_start:type_name -> google.protobuf.Timestamp
+	14, // 13: vibesys.cli.v1.AllocationRequest.requested_for:type_name -> google.protobuf.Duration
 	2,  // 14: vibesys.cli.v1.PlacementCapacity.held:type_name -> vibesys.cli.v1.Allocation
-	8,  // 15: vibesys.cli.v1.PlacementCapacity.recent_waits:type_name -> vibesys.cli.v1.WaitSample
-	9,  // 16: vibesys.cli.v1.PlacementCapacity.slurm:type_name -> vibesys.cli.v1.SlurmCapacity
-	12, // 17: vibesys.cli.v1.WaitSample.requested_at:type_name -> google.protobuf.Timestamp
-	11, // 18: vibesys.cli.v1.WaitSample.waited:type_name -> google.protobuf.Duration
-	11, // 19: vibesys.cli.v1.WaitSample.requested_for:type_name -> google.protobuf.Duration
-	10, // 20: vibesys.cli.v1.SlurmCapacity.reservations:type_name -> vibesys.cli.v1.SlurmReservation
-	12, // 21: vibesys.cli.v1.SlurmReservation.start:type_name -> google.protobuf.Timestamp
-	12, // 22: vibesys.cli.v1.SlurmReservation.end:type_name -> google.protobuf.Timestamp
-	23, // [23:23] is the sub-list for method output_type
-	23, // [23:23] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	11, // 15: vibesys.cli.v1.PlacementCapacity.recent_waits:type_name -> vibesys.cli.v1.WaitSample
+	8,  // 16: vibesys.cli.v1.PlacementCapacity.gpu_pool:type_name -> vibesys.cli.v1.GpuPoolCapacity
+	12, // 17: vibesys.cli.v1.PlacementCapacity.slurm:type_name -> vibesys.cli.v1.SlurmCapacity
+	9,  // 18: vibesys.cli.v1.GpuPoolCapacity.holders:type_name -> vibesys.cli.v1.GpuHolder
+	10, // 19: vibesys.cli.v1.GpuPoolCapacity.waiting:type_name -> vibesys.cli.v1.GpuWaiter
+	16, // 20: vibesys.cli.v1.GpuHolder.kind:type_name -> vibesys.cli.v1.JobKind
+	17, // 21: vibesys.cli.v1.GpuHolder.gpus:type_name -> vibesys.cli.v1.GpuGrant
+	15, // 22: vibesys.cli.v1.WaitSample.requested_at:type_name -> google.protobuf.Timestamp
+	14, // 23: vibesys.cli.v1.WaitSample.waited:type_name -> google.protobuf.Duration
+	14, // 24: vibesys.cli.v1.WaitSample.requested_for:type_name -> google.protobuf.Duration
+	13, // 25: vibesys.cli.v1.SlurmCapacity.reservations:type_name -> vibesys.cli.v1.SlurmReservation
+	15, // 26: vibesys.cli.v1.SlurmReservation.start:type_name -> google.protobuf.Timestamp
+	15, // 27: vibesys.cli.v1.SlurmReservation.end:type_name -> google.protobuf.Timestamp
+	28, // [28:28] is the sub-list for method output_type
+	28, // [28:28] is the sub-list for method input_type
+	28, // [28:28] is the sub-list for extension type_name
+	28, // [28:28] is the sub-list for extension extendee
+	0,  // [0:28] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_allocation_proto_init() }
@@ -1135,6 +1377,7 @@ func file_vibesys_cli_v1_allocation_proto_init() {
 	if File_vibesys_cli_v1_allocation_proto != nil {
 		return
 	}
+	file_vibesys_cli_v1_job_proto_init()
 	file_vibesys_cli_v1_allocation_proto_msgTypes[0].OneofWrappers = []any{
 		(*Allocation_Slurm)(nil),
 	}
@@ -1151,7 +1394,7 @@ func file_vibesys_cli_v1_allocation_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_allocation_proto_rawDesc), len(file_vibesys_cli_v1_allocation_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   9,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

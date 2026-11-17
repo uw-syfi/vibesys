@@ -78,6 +78,10 @@ func TestJobsGetDisjointGPUsOfThePoolAndAFreshDaemonKeepsThemHeld(t *testing.T) 
 	big := gpuJob(t, a, 4, held(2)...)
 	if got := a.Waits(scope, []core.JobID{big.ID})[big.ID]; got.Kind != core.WaitFull || got.Resource != "gpu:local" {
 		t.Fatalf("the job that asks for 4 GPUs of the 2 free waits as %+v, want a wait on the full pool", got)
+	} else if got.GPUsWanted != 4 || got.GPUsFree != 2 {
+		t.Fatalf("the wait says it wants %d GPUs with %d free, want 4 and 2", got.GPUsWanted, got.GPUsFree)
+	} else if len(got.Holders) != 2 || got.Holders[0].GPUs == nil || len(heldBy(core.Job{GPUs: got.Holders[0].GPUs})) != 3 {
+		t.Fatalf("the wait names its holders %+v, want the two jobs of 3 devices each", got.Holders)
 	}
 	// The record has each job's devices, which are what its launch carried, and disjoint.
 	grants := map[core.JobID][]core.DeviceIndex{}

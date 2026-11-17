@@ -33,9 +33,13 @@ func WaitKind(k core.WaitKind) cliv1.WaitKind {
 
 // WaitReason returns the contract's message for why a job waits.
 func WaitReason(w core.JobWait) *cliv1.WaitReason {
-	out := &cliv1.WaitReason{Kind: WaitKind(w.Kind), Resource: w.Resource, Detail: w.Detail}
+	out := &cliv1.WaitReason{Kind: WaitKind(w.Kind), Resource: w.Resource, Detail: w.Detail, GpusWanted: uint32(w.GPUsWanted), GpusFree: uint32(w.GPUsFree)}
 	for _, h := range w.Holders {
-		out.Holders = append(out.Holders, &cliv1.WaitHolder{JobId: string(h.Job), Task: string(h.Task), Kind: JobKind(h.Kind), RunId: string(h.Run)})
+		holder := &cliv1.WaitHolder{JobId: string(h.Job), Task: string(h.Task), Kind: JobKind(h.Kind), RunId: string(h.Run)}
+		if h.GPUs != nil {
+			holder.Gpus = GpuGrant(*h.GPUs)
+		}
+		out.Holders = append(out.Holders, holder)
 	}
 	if w.Elsewhere != nil {
 		out.Elsewhere = LeaseHolder(*w.Elsewhere)

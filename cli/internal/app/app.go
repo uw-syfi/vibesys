@@ -438,11 +438,45 @@ func (a *App) Waits(scope core.Scope, ids []core.JobID) map[core.JobID]core.JobW
 		}
 		w := core.JobWait{Kind: q.Reason.Kind, Resource: string(q.Reason.Resource), Detail: q.Reason.Detail, Elsewhere: q.Reason.Elsewhere}
 		for _, b := range q.Blockers {
-			w.Holders = append(w.Holders, core.WaitHolder{Job: b.Ref.Job, Task: v.tasks[b.Ref.Store], Kind: b.Work.Kind, Run: b.Work.Run})
+			w.Holders = append(w.Holders, core.WaitHolder{Job: b.Ref.Job, Task: v.tasks[b.Ref.Store], Kind: b.Work.Kind, Run: b.Work.Run, GPUs: heldOf(b.Grant, q.Reason.Resource)})
+		}
+		if q.Reason.Kind == core.WaitFull || q.Reason.Kind == core.WaitBehind {
+			w.GPUsWanted, w.GPUsFree = a.poolShare(q.Reason.Resource, q.Work, v.used)
 		}
 		out[id] = w
 	}
 	return out
+}
+
+// heldOf is the grant when it is of the pool the resource names, and nil for any other.
+func heldOf(g *core.Grant, resource schedule.ResourceID) *core.Grant {
+	if g == nil || string(g.Pool) != string(resource) {
+		return nil
+	}
+	return g
+}
+
+// poolShare is, for a resource that is a pool of GPUs, how many of its units the work claims and
+// how many are free given what the jobs that hold the machine use; both are zero for any other
+// resource, whose units are not GPUs.
+func (a *App) poolShare(resource schedule.ResourceID, w lifecycle.Work, used map[schedule.ResourceID]int) (wanted, free int) {
+	i := slices.IndexFunc(a.cfg.Scheduler.Resources, func(r schedule.Resource) bool { return r.ID == resource && r.Devices })
+	if i < 0 {
+		return 0, 0
+	}
+	size := a.cfg.Scheduler.Resources[i].Capacity
+	for _, o := range w.Options {
+		for _, c := range o.Claims {
+			if c.Resource == resource {
+				wanted = c.Amount
+				if c.Exclusive {
+					wanted = size
+				}
+				return min(wanted, size), max(size-used[resource], 0)
+			}
+		}
+	}
+	return 0, 0
 }
 
 func (a *App) now() time.Time { return a.cfg.Clock.Now() }
