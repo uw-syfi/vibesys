@@ -1702,6 +1702,25 @@ func (s State) Held() []Held {
 	return out
 }
 
+// GrantHolder is a job that holds devices of a pool: what it is, and the devices it was given.
+type GrantHolder struct {
+	Ref   Ref
+	Work  Work
+	Grant core.Grant
+}
+
+// GrantHolders returns the jobs that hold devices of a pool: those that hold the machine and the
+// parked ones, in the order the machine heard of them.
+func (s State) GrantHolders() []GrantHolder {
+	var out []GrantHolder
+	for _, e := range s.entries {
+		if e.grant != nil && (e.holdsMachine() || e.parked) {
+			out = append(out, GrantHolder{Ref: e.ref, Work: e.work, Grant: *e.grant})
+		}
+	}
+	return out
+}
+
 // Holds says whether the machine holds a job's claims: from its launch until its end is recorded,
 // and for a job in doubt while its command can run. The shell keeps the job's leases exactly as
 // long.

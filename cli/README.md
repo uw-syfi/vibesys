@@ -964,6 +964,17 @@ nothing, and its `count` is believed.
   devices are not free, and waits behind an earlier job that waits for more, so a job of the whole
   pool is not starved by a stream of one-GPU jobs. A job that waits for devices says how many it
   wants and which resource is full (`jobs` and `wait`).
+- **What is shown.** `jobs`, `wait`, `submit`, `show` and `result` say each job's GPUs: `gpus 2,
+  devices 0-1 (chosen by the CLI)` (or `by the cluster`), `gpus 8 (whole node), ...` for a measure,
+  `gpus 2` for a job that asked and has not started, and `gpus unknown` for a job of a task that
+  needs GPUs whose record has neither, as one saved before they were recorded (never a guess). The
+  devices are for diagnosis. A job that waits for devices says `waiting for 4 GPUs of gpu:local, 2
+  free, held by j41 (check) on devices 0-2, ...` (`gpus_wanted`, `gpus_free` and the holders'
+  grants in `--json`). `show --json` has `job_gpus` (and `result --json` `current.gpus`), read from
+  the jobs' records, which are where the GPUs are written; a result's file does not keep them.
+  `placement capacity <placement>` of a pooled local or ssh placement adds `gpus: 2 of 8 free`, the
+  jobs that hold the others with their devices, and the jobs that wait with how many they want
+  (`gpu_pool` in `--json`).
 - **Devices.** When the scheduler starts a job, the daemon picks its devices (`core.TakeDevices`):
   the lowest wholly free aligned block of the next power of two that holds the job's count, so jobs
   of 2, 4 or 8 GPUs get neighbouring devices where they can, and otherwise the lowest free devices.

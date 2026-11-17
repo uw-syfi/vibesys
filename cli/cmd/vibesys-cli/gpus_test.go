@@ -130,3 +130,22 @@ func TestAWaitForGPUsSaysHowManyItWantsHowManyAreFreeAndWhoHoldsTheRest(t *testi
 		}
 	}
 }
+
+func TestAPoolSaysWhoHoldsItsGPUsAndWhoWaits(t *testing.T) {
+	grant := func(whole bool, devices ...uint32) *cliv1.GpuGrant {
+		return &cliv1.GpuGrant{Pool: "gpu:local", PoolSize: 8, Devices: devices, Whole: whole, Source: cliv1.GrantSource_GRANT_SOURCE_CLI}
+	}
+	held := describeGPUHolders([]*cliv1.GpuHolder{
+		{JobId: "j41", Kind: cliv1.JobKind_JOB_KIND_CHECK, RunId: "r7", Gpus: grant(false, 0, 1)},
+		{JobId: "j42", Kind: cliv1.JobKind_JOB_KIND_COMMAND, Gpus: grant(false, 4, 5, 6, 7)},
+	})
+	if want := "j41 (check, run r7) on devices 0-1, j42 (command) on devices 4-7"; held != want {
+		t.Errorf("held: %q, want %q", held, want)
+	}
+	if got := describeGPUHolders([]*cliv1.GpuHolder{{JobId: "j9", Kind: cliv1.JobKind_JOB_KIND_MEASURE, Gpus: grant(true, 0, 1, 2, 3, 4, 5, 6, 7)}}); got != "j9 (measure) on devices 0-7 (whole node)" {
+		t.Errorf("whole: %q", got)
+	}
+	if got := describeGPUWaiters([]*cliv1.GpuWaiter{{JobId: "j43", Wanted: 4}, {JobId: "j44", Wanted: 1}}); got != "j43 (4 GPUs), j44 (1 GPU)" {
+		t.Errorf("waiting: %q", got)
+	}
+}

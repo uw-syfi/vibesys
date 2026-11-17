@@ -26,7 +26,10 @@ func poolRig(t *testing.T) (*world, *sync.Mutex, *[]lifecycle.Launch) {
 	pool := &schedule.Pool{Resource: "gpu:local", Size: 8, Kind: core.ResourceGPU}
 	w.scheduler = app.Scheduler{
 		Resources: []schedule.Resource{{ID: schedule.PlacementOf("local"), Capacity: 8}, {ID: "gpu:local", Capacity: 8, Devices: true}},
-		Demand:    schedule.PlacementDemand{Host: schedule.PlacementOf("local"), HostPool: pool},
+		Demand: schedule.PlacementDemand{
+			Placements: map[string]schedule.Offered{"local": {Pool: pool}},
+			Host:       schedule.PlacementOf("local"), HostPool: pool,
+		},
 	}
 	var mu sync.Mutex
 	var seen []lifecycle.Launch
@@ -82,6 +85,20 @@ func TestJobsGetDisjointGPUsOfThePoolAndAFreshDaemonKeepsThemHeld(t *testing.T) 
 		t.Fatalf("the wait says it wants %d GPUs with %d free, want 4 and 2", got.GPUsWanted, got.GPUsFree)
 	} else if len(got.Holders) != 2 || got.Holders[0].GPUs == nil || len(heldBy(core.Job{GPUs: got.Holders[0].GPUs})) != 3 {
 		t.Fatalf("the wait names its holders %+v, want the two jobs of 3 devices each", got.Holders)
+	}
+	// The placement's pool view says 2 of 8 are free, which jobs hold the others and which waits.
+	view, ok := a.PoolOf("local")
+	if !ok || view.Size != 8 || view.Free != 2 || len(view.Holders) != 2 || len(view.Waiting) != 1 ||
+		view.Waiting[0].Job != big.ID || view.Waiting[0].Wanted != 4 {
+		t.Fatalf("the pool view is %+v (%v), want 2 of 8 free, two holders and the job of 4 waiting", view, ok)
+	}
+	for _, h := range view.Holders {
+		if h.Grant.Devices.Len() != 3 || h.Kind != core.JobCommand {
+			t.Fatalf("holder %+v, want a command of 3 devices", h)
+		}
+	}
+	if _, ok := a.PoolOf("elsewhere"); ok {
+		t.Fatal("a placement the config does not have has a pool")
 	}
 	// The record has each job's devices, which are what its launch carried, and disjoint.
 	grants := map[core.JobID][]core.DeviceIndex{}

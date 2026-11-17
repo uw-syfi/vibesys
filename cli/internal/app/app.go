@@ -114,6 +114,10 @@ type view struct {
 	slots map[string]bool
 	// unplaced is the jobs held back for the allocation machine to decide where they run.
 	unplaced []lifecycle.Ref
+	// queued is why each queued job the scheduler held back waits, in the order the machine heard
+	// of them, and holders the jobs that hold devices of a pool.
+	waiting []lifecycle.Queued
+	holders []lifecycle.GrantHolder
 	// used is the units of each resource the jobs and slots that hold the machine add up to.
 	used map[schedule.ResourceID]int
 }
@@ -357,7 +361,8 @@ func (a *App) publish(s lifecycle.State, scopes map[lifecycle.StoreID]core.Scope
 	for _, sl := range s.Slots() {
 		next.slots[sl.Slot] = sl.Granted
 	}
-	for _, q := range s.Queue() {
+	next.waiting, next.holders = s.Queue(), s.GrantHolders()
+	for _, q := range next.waiting {
 		next.queue[q.Ref] = q
 	}
 	for id, scope := range scopes {

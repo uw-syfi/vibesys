@@ -55,6 +55,15 @@ func placementCapacity(ctx context.Context, d deps, args []string) int {
 				r.GetStart().AsTime().UTC().Format(time.RFC3339), r.GetEnd().AsTime().UTC().Format(time.RFC3339), r.GetUsable())
 		}
 	}
+	if g := pc.GetGpuPool(); g != nil {
+		fmt.Fprintf(d.stdout, "  gpus: %d of %d free (%s)\n", g.GetFree(), g.GetSize(), g.GetPool())
+		if held := describeGPUHolders(g.GetHolders()); held != "" {
+			fmt.Fprintf(d.stdout, "    held: %s\n", held)
+		}
+		if waiting := describeGPUWaiters(g.GetWaiting()); waiting != "" {
+			fmt.Fprintf(d.stdout, "    waiting: %s\n", waiting)
+		}
+	}
 	for _, a := range pc.GetHeld() {
 		fmt.Fprintf(d.stdout, "  held: %s\n", describeAllocation(a))
 	}

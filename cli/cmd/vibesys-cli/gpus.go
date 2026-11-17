@@ -101,3 +101,27 @@ func describeResultGPUs(r *cliv1.Result, use *cliv1.JobGpus) string {
 	}
 	return ""
 }
+
+// describeGPUHolders names the jobs that hold devices of a pool and which: "j41 (check, run r7) on
+// devices 0-1, j42 (command) on devices 4-7", with "(whole node)" for a job that took the pool whole.
+func describeGPUHolders(holders []*cliv1.GpuHolder) string {
+	names := make([]string, len(holders))
+	for i, h := range holders {
+		name := describeHolder(&cliv1.WaitHolder{JobId: h.GetJobId(), Kind: h.GetKind(), RunId: h.GetRunId(), Gpus: h.GetGpus()}, "")
+		if h.GetGpus().GetWhole() {
+			name += " (whole node)"
+		}
+		names[i] = name
+	}
+	return strings.Join(names, ", ")
+}
+
+// describeGPUWaiters names the jobs that wait for devices of a pool and how many each wants:
+// "j43 (4 GPUs), j44 (1 GPU)".
+func describeGPUWaiters(waiting []*cliv1.GpuWaiter) string {
+	names := make([]string, len(waiting))
+	for i, w := range waiting {
+		names[i] = fmt.Sprintf("%s (%s)", w.GetJobId(), gpusWord(w.GetWanted()))
+	}
+	return strings.Join(names, ", ")
+}

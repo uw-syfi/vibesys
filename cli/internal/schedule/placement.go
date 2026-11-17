@@ -56,6 +56,15 @@ type PlacementDemand struct {
 	HostPool *Pool
 }
 
+// Pooled is what a Demand says when it hands out the GPUs of its placements by number: the pool of
+// a placement, or nil when it has none.
+type Pooled interface {
+	PoolOf(placement string) *Pool
+}
+
+// PoolOf implements Pooled.
+func (d PlacementDemand) PoolOf(placement string) *Pool { return d.Placements[placement].Pool }
+
 // PoolClaims is what a job claims of a pool while it holds the machine, or nothing for a job that
 // uses none of its GPUs:
 //
