@@ -12,6 +12,8 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/schedule"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
+	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
 )
 
 // poolRig is a daemon whose machine has a pool of eight GPUs that host jobs draw from, as a local
@@ -23,6 +25,7 @@ func poolRig(t *testing.T) (*world, *sync.Mutex, *[]lifecycle.Launch) {
 	if w.hostPool, err = core.ParseGPUCount(8, "test"); err != nil {
 		t.Fatal(err)
 	}
+	w.gpuTask()
 	pool := &schedule.Pool{Resource: "gpu:local", Size: 8, Kind: core.ResourceGPU}
 	w.scheduler = app.Scheduler{
 		Resources: []schedule.Resource{{ID: schedule.PlacementOf("local"), Capacity: 8}, {ID: "gpu:local", Capacity: 8, Devices: true}},
@@ -170,7 +173,6 @@ func TestJobsGetDisjointGPUsOfThePoolAndAFreshDaemonKeepsThemHeld(t *testing.T) 
 // nothing is queued: the refusal names --gpus, and the sizes the pool allows.
 func TestSubmitRefusesAGPUCountThePoolCannotGive(t *testing.T) {
 	w, _, _ := poolRig(t)
-	w.withTask(passes, scores)
 	a := w.newApp()
 	ask := func(spec core.JobSpec, n int) error {
 		var err error
@@ -190,4 +192,90 @@ func TestSubmitRefusesAGPUCountThePoolCannotGive(t *testing.T) {
 	if err != nil || len(jobs) != 0 {
 		t.Errorf("after the refusals: %d jobs, %v; want none queued", len(jobs), err)
 	}
+}
+
+// gpuTask puts a task into the repository that needs a GPU, as a task of the cuda backend with
+// `needs = ["gpu"]` does.
+func (w *world) gpuTask() {
+	tree := tasktest.Scripted("task", passes, scores)
+	manifest := taskDir + task.ManifestName
+	data := strings.Replace(string(tree[manifest].Data), `backends = ["cpu"]`, "backends = [\"cuda\"]\n\n[environment]\nneeds = [\"gpu\"]\n", 1)
+	tree[manifest] = task.File{Data: []byte(data)}
+	w.tasks.Put(string(call.Scope.Repository()), commit, tree)
+}
+
+// On a machine with a pool, a job on the host is asked for --gpus as a docker job is, whatever its
+// kind: a host job given none of the pool would see every GPU while the scheduler counted them
+// free. A measure takes the whole pool and refuses a count. Without a pool a host job asks for none
+// and is refused one, as it always was.
+func TestHostJobsOfATaskThatNeedsGPUsAreAskedForTheirCountWhereThereIsAPool(t *testing.T) {
+	host := func(spec core.JobSpec, n int) core.JobSpec {
+		spec.Environment = core.EnvironmentHost
+		if n > 0 {
+			var err error
+			if spec.GPUs, err = core.ParseGPUCount(uint32(n), "test"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return spec
+	}
+	harness := func() core.JobSpec {
+		spec := command("exit", "0")
+		c := spec.Settings.(core.CommandSettings)
+		c.Image = core.ImageHarness
+		spec.Settings = c
+		return spec
+	}
+	submit := func(a *app.App, spec core.JobSpec) (core.Job, error) {
+		out, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: spec, NoPlan: noPlan(spec)})
+		return out.Job, err
+	}
+	kinds := map[string]func() core.JobSpec{
+		"check":   func() core.JobSpec { return flowSpec(core.CheckSettings{}) },
+		"command": harness,
+	}
+
+	t.Run("with a pool", func(t *testing.T) {
+		w, _, _ := poolRig(t)
+		a := w.newApp()
+		for name, spec := range kinds {
+			if _, err := submit(a, host(spec(), 0)); err == nil || !strings.Contains(err.Error(), "--gpus N") {
+				t.Errorf("a host %s with no count: %v, want a refusal that asks for --gpus", name, err)
+			}
+			if _, err := submit(a, host(spec(), 9)); err == nil || !strings.Contains(err.Error(), "1 to 8") {
+				t.Errorf("a host %s of 9 GPUs: %v, want a refusal that names the sizes", name, err)
+			}
+			if _, err := submit(a, host(spec(), 2)); err != nil {
+				t.Errorf("a host %s of 2 GPUs: %v", name, err)
+			}
+		}
+		if _, err := submit(a, host(flowSpec(core.MeasureSettings{}), 2)); err == nil || !strings.Contains(err.Error(), "--gpus: a measure takes the whole node") {
+			t.Errorf("a host measure of 2 GPUs: %v, want a refusal", err)
+		}
+		measure, err := submit(a, host(flowSpec(core.MeasureSettings{}), 0))
+		if err != nil {
+			t.Fatalf("a host measure: %v", err)
+		}
+		got := awaitFinal(t, a, measure.ID)
+		if got.GPUs == nil || !got.GPUs.Whole || got.GPUs.Devices.Len() != 8 {
+			t.Errorf("the host measure was given %+v, want the whole pool of 8", got.GPUs)
+		}
+	})
+
+	t.Run("without a pool", func(t *testing.T) {
+		w := newWorld(t)
+		w.gpuTask()
+		a := w.newApp()
+		for name, spec := range kinds {
+			if _, err := submit(a, host(spec(), 0)); err != nil {
+				t.Errorf("a host %s with no count and no pool: %v", name, err)
+			}
+			if _, err := submit(a, host(spec(), 2)); err == nil || !strings.Contains(err.Error(), "--gpus") {
+				t.Errorf("a host %s of 2 GPUs with no pool: %v, want a refusal that names --gpus", name, err)
+			}
+		}
+		if _, err := submit(a, host(flowSpec(core.MeasureSettings{}), 0)); err != nil {
+			t.Errorf("a host measure with no pool: %v", err)
+		}
+	})
 }

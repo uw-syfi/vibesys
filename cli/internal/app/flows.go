@@ -75,8 +75,9 @@ func (a *App) keyFlow(ctx context.Context, sub core.Submission) (core.Submission
 // refused when none does; it records the needs, which the scheduler starts it on a placement by. A
 // host job runs on no placement, whatever was asked, as for a check or a measure. The submission
 // records the environment, the restriction and the needs. A command job has no key, so nothing is
-// fingerprinted, and a host one in the task's image names no task to read: it runs on this
-// machine as asked, as it always has.
+// fingerprinted. A host one in the task's image reads the task only where the machine has a GPU
+// pool, to ask for --gpus as a docker job is; without a pool it names no task to read and runs on
+// this machine as asked, as it always has.
 //
 // The submission names the image the command runs in, and the daemon reads the task to run it
 // there (resolveCommand), recording the command as it will run, whatever the caller sent.
@@ -85,7 +86,11 @@ func (a *App) placeFlow(ctx context.Context, sub core.Submission) (core.Submissi
 	command, _ := spec.Settings.(core.CommandSettings)
 	var needs []core.ResourceKind
 	var t task.Task
-	if spec.Environment != core.EnvironmentHost || command.Image == core.ImageCandidate {
+	// A host command reads the task only to learn whether it needs GPUs, which matters where the
+	// machine has a pool: there a host job that took no GPUs of it would see them all while the
+	// scheduler counts them free.
+	read := spec.Environment != core.EnvironmentHost || command.Image == core.ImageCandidate || a.cfg.HostPool.IsSet()
+	if read {
 		var err error
 		t, err = a.taskAt(ctx, string(c.Scope.Repository()), spec.Commit, string(c.Scope.Task()))
 		if err != nil {
@@ -105,8 +110,7 @@ func (a *App) placeFlow(ctx context.Context, sub core.Submission) (core.Submissi
 	if err != nil {
 		return sub, err
 	}
-	// A host command in the task's image reads no task, so what the task needs is not known.
-	if err := a.checkGPUs(spec, t.Name, spec.Environment == core.EnvironmentDocker || command.Image == core.ImageCandidate, needs, spec.Environment, eligible); err != nil {
+	if err := a.checkGPUs(spec, t.Name, read, needs, spec.Environment, eligible); err != nil {
 		return sub, err
 	}
 	if spec.Environment != core.EnvironmentDocker {
