@@ -128,6 +128,7 @@ Ask the user for each fact; never invent one.
 1. `"$VIBESYS_CLI" daemon restart`. A refusal names the key it did not accept; fix that key.
 2. In a repository with a task that needs `gpu`, commit, then submit a job that prints what it sees:
    `"$VIBESYS_CLI" submit command <sha> --image harness --gpus 1 --wait -- sh -c 'echo $VIBESYS_GPU_DEVICES; nvidia-smi -L'`
-   (`rocm-smi --showid` on AMD). It must show one GPU, and `jobs` must show the device it ran on.
+   (`rocm-smi --showid` on AMD; add `--env host` on a machine with no container runtime). It must
+   show one GPU, and `jobs` must show the device it ran on.
 3. Say which placements you configured and what that job showed. Without a task to run it on, say
    the check is still to do.

@@ -49,7 +49,7 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    cannot run. A broken task is the user's to fix, never yours (Rules). Leave the environment
    (`--env`) to the task unless the user chose one. When the CLI refuses
    the task (for example, no placement offers a resource the task needs), stop and report the
-   refusal as printed, and point the user to the placements section of `vibesys:setup`, which says
+   refusal as printed, and point the user to the placements reference of `vibesys:setup`, which says
    what to add to their config; never change the CLI's or the machine's configuration yourself.
 3. From `vibesys.input.toml`, check that the domain skills the task needs are available, per
    [domain-plugins.md](references/domain-plugins.md). If one is not available, stop as it says
