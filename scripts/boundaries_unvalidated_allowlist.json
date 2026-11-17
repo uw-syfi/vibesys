@@ -72,7 +72,6 @@
     "ListPlansResponse",
     "PromoteResponse",
     "ReadLogsResponse",
-    "ShowResponse",
     "StatusResponse",
     "SubmitResponse",
     "ViewPlanResponse",

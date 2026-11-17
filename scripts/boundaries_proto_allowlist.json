@@ -14,9 +14,7 @@
     "MachineDaemon.runtime_dir"
   ],
   "proto/vibesys/cli/v1/operator.proto": [
-    "ApptainerSettings.local_scratch_dir",
-    "LegacyDocker",
-    "OperatorConfig.docker"
+    "ApptainerSettings.local_scratch_dir"
   ],
   "proto/vibesys/cli/v1/service.proto": [
     "DaemonEnsureResponse.runtime_directory",
