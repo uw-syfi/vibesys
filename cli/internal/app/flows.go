@@ -44,6 +44,9 @@ func (a *App) keyFlow(ctx context.Context, sub core.Submission) (core.Submission
 	if err != nil {
 		return sub, err
 	}
+	if err := a.checkGPUs(spec, t.Name, true, t.Needs, kind, eligible); err != nil {
+		return sub, err
+	}
 	if kind != core.EnvironmentDocker {
 		spec.Placement = ""
 	}
@@ -58,7 +61,7 @@ func (a *App) keyFlow(ctx context.Context, sub core.Submission) (core.Submission
 	spec.Environment = kind
 	key, err := core.NewJobKey(core.KeyInputs{
 		Kind: spec.Settings.Kind(), Commit: spec.Commit, TaskVersion: t.Version,
-		Environment: fingerprint, Settings: spec.Settings, SchemaVersion: core.SchemaVersion,
+		Environment: fingerprint, Settings: spec.Settings, SchemaVersion: core.SchemaVersion, GPUs: spec.GPUs,
 	})
 	sub.Spec, sub.Key, sub.Needs, sub.TaskVersion = spec, key, needsOf(kind, t.Needs), t.Version
 	return sub, err
@@ -72,8 +75,9 @@ func (a *App) keyFlow(ctx context.Context, sub core.Submission) (core.Submission
 // refused when none does; it records the needs, which the scheduler starts it on a placement by. A
 // host job runs on no placement, whatever was asked, as for a check or a measure. The submission
 // records the environment, the restriction and the needs. A command job has no key, so nothing is
-// fingerprinted, and a host one in the task's image names no task to read: it runs on this
-// machine as asked, as it always has.
+// fingerprinted. A host one in the task's image reads the task only where the machine has a GPU
+// pool, to ask for --gpus as a docker job is; without a pool it names no task to read and runs on
+// this machine as asked, as it always has.
 //
 // The submission names the image the command runs in, and the daemon reads the task to run it
 // there (resolveCommand), recording the command as it will run, whatever the caller sent.
@@ -82,7 +86,11 @@ func (a *App) placeFlow(ctx context.Context, sub core.Submission) (core.Submissi
 	command, _ := spec.Settings.(core.CommandSettings)
 	var needs []core.ResourceKind
 	var t task.Task
-	if spec.Environment != core.EnvironmentHost || command.Image == core.ImageCandidate {
+	// A host command reads the task only to learn whether it needs GPUs, which matters where the
+	// machine has a pool: there a host job that took no GPUs of it would see them all while the
+	// scheduler counts them free.
+	read := spec.Environment != core.EnvironmentHost || command.Image == core.ImageCandidate || a.cfg.HostPool.IsSet()
+	if read {
 		var err error
 		t, err = a.taskAt(ctx, string(c.Scope.Repository()), spec.Commit, string(c.Scope.Task()))
 		if err != nil {
@@ -98,7 +106,11 @@ func (a *App) placeFlow(ctx context.Context, sub core.Submission) (core.Submissi
 		return sub, err
 	}
 	spec.Settings = command
-	if _, err := a.eligibleOf(spec.Environment, needs, spec.Placement); err != nil {
+	eligible, err := a.eligibleOf(spec.Environment, needs, spec.Placement)
+	if err != nil {
+		return sub, err
+	}
+	if err := a.checkGPUs(spec, t.Name, read, needs, spec.Environment, eligible); err != nil {
 		return sub, err
 	}
 	if spec.Environment != core.EnvironmentDocker {
@@ -272,6 +284,29 @@ func (a *App) eligibleOf(kind core.EnvironmentKind, needs []core.ResourceKind, r
 		return []string{restriction}, nil
 	}
 	return core.EligiblePlacements(a.cfg.Placements, needs, restriction)
+}
+
+// checkGPUs refuses a submission whose GPU count cannot be honoured (core.CheckGPUAsk), against the
+// pools of the places it may run on: the pool of each placement it may run on, or that of this
+// machine for a host job. needsKnown says the task was read.
+func (a *App) checkGPUs(spec core.JobSpec, task string, needsKnown bool, needs []core.ResourceKind, kind core.EnvironmentKind, eligible []string) error {
+	var where []core.GPUPlace
+	if kind != core.EnvironmentDocker {
+		where = []core.GPUPlace{{Name: "this machine", Pool: a.cfg.HostPool}}
+	}
+	for _, name := range eligible {
+		if kind != core.EnvironmentDocker {
+			break
+		}
+		place := core.GPUPlace{Name: name}
+		if i := slices.IndexFunc(a.cfg.Placements, func(o core.PlacementOffer) bool { return o.Name == name }); i >= 0 {
+			place.Pool = a.cfg.Placements[i].Pool
+		}
+		where = append(where, place)
+	}
+	return core.CheckGPUAsk(core.GPUAsk{
+		Kind: spec.Settings.Kind(), Task: task, Asked: spec.GPUs, NeedsKnown: needsKnown, Needs: needs, Where: where,
+	})
 }
 
 // fingerprintOf fingerprints the environment of a kind for the target the job runs. The kind is

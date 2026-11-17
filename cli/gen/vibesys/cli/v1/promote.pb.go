@@ -400,9 +400,11 @@ func (x *Promotion) GetObjectives() []*ObjectiveVerdict {
 // passing check of the same commit, task version and environment, whenever it was taken and
 // whatever moved the branch to the head.
 type CurrentResult struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Head          string                 `protobuf:"bytes,1,opt,name=head,proto3" json:"head,omitempty"`
-	Result        *Result                `protobuf:"bytes,2,opt,name=result,proto3" json:"result,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Head   string                 `protobuf:"bytes,1,opt,name=head,proto3" json:"head,omitempty"`
+	Result *Result                `protobuf:"bytes,2,opt,name=result,proto3" json:"result,omitempty"`
+	// What the record of the result's job says of its GPUs. Unset when it says nothing.
+	Gpus          *JobGpus `protobuf:"bytes,3,opt,name=gpus,proto3" json:"gpus,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -447,6 +449,13 @@ func (x *CurrentResult) GetHead() string {
 func (x *CurrentResult) GetResult() *Result {
 	if x != nil {
 		return x.Result
+	}
+	return nil
+}
+
+func (x *CurrentResult) GetGpus() *JobGpus {
+	if x != nil {
+		return x.Gpus
 	}
 	return nil
 }
@@ -529,10 +538,11 @@ const file_vibesys_cli_v1_promote_proto_rawDesc = "" +
 	"\x02at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12@\n" +
 	"\n" +
 	"objectives\x18\a \x03(\v2 .vibesys.cli.v1.ObjectiveVerdictR\n" +
-	"objectives\"S\n" +
+	"objectives\"\x80\x01\n" +
 	"\rCurrentResult\x12\x12\n" +
 	"\x04head\x18\x01 \x01(\tR\x04head\x12.\n" +
-	"\x06result\x18\x02 \x01(\v2\x16.vibesys.cli.v1.ResultR\x06result\"d\n" +
+	"\x06result\x18\x02 \x01(\v2\x16.vibesys.cli.v1.ResultR\x06result\x12+\n" +
+	"\x04gpus\x18\x03 \x01(\v2\x17.vibesys.cli.v1.JobGpusR\x04gpus\"d\n" +
 	"\x0fNoCurrentResult\x12=\n" +
 	"\x06reason\x18\x01 \x01(\x0e2%.vibesys.cli.v1.NoCurrentResultReasonR\x06reason\x12\x12\n" +
 	"\x04head\x18\x02 \x01(\tR\x04head*\xe7\x02\n" +
@@ -580,6 +590,7 @@ var file_vibesys_cli_v1_promote_proto_goTypes = []any{
 	(*EnvironmentFingerprint)(nil), // 9: vibesys.cli.v1.EnvironmentFingerprint
 	(*timestamppb.Timestamp)(nil),  // 10: google.protobuf.Timestamp
 	(*Result)(nil),                 // 11: vibesys.cli.v1.Result
+	(*JobGpus)(nil),                // 12: vibesys.cli.v1.JobGpus
 }
 var file_vibesys_cli_v1_promote_proto_depIdxs = []int32{
 	0,  // 0: vibesys.cli.v1.PromoteRefusalReason.kind:type_name -> vibesys.cli.v1.PromoteRefusalKind
@@ -591,12 +602,13 @@ var file_vibesys_cli_v1_promote_proto_depIdxs = []int32{
 	10, // 6: vibesys.cli.v1.Promotion.at:type_name -> google.protobuf.Timestamp
 	8,  // 7: vibesys.cli.v1.Promotion.objectives:type_name -> vibesys.cli.v1.ObjectiveVerdict
 	11, // 8: vibesys.cli.v1.CurrentResult.result:type_name -> vibesys.cli.v1.Result
-	1,  // 9: vibesys.cli.v1.NoCurrentResult.reason:type_name -> vibesys.cli.v1.NoCurrentResultReason
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	12, // 9: vibesys.cli.v1.CurrentResult.gpus:type_name -> vibesys.cli.v1.JobGpus
+	1,  // 10: vibesys.cli.v1.NoCurrentResult.reason:type_name -> vibesys.cli.v1.NoCurrentResultReason
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_promote_proto_init() }

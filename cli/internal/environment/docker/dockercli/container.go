@@ -67,10 +67,14 @@ func runArgs(spec docker.ContainerSpec) []string {
 		// The kernel driver's devices, and the group that may open them; ROCm's runtime is the
 		// image's own.
 		args = append(args, "--device", "/dev/kfd", "--device", "/dev/dri", "--group-add", "video")
-	case g.Devices == "":
+	case g.Devices == "" && g.NVIDIA == "":
 	case g.Runtime != "":
 		// The runtime reads the devices from a variable the GPU resource sets in Env.
 		args = append(args, "--runtime", g.Runtime)
+	case g.NVIDIA != "":
+		// Docker reads the value as CSV, in which "device=2,3" is two fields: a list of devices is
+		// quoted, and the quotes are part of the value.
+		args = append(args, "--gpus", `"device=`+g.NVIDIA+`"`)
 	default:
 		args = append(args, "--gpus", g.Devices)
 	}
@@ -101,7 +105,7 @@ func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 		return nil, unavailable("cannot make the pipe that guards the container: %v", err)
 	}
 	h := &handle{e: e, name: spec.Name, stdin: inWrite, keeperDone: make(chan struct{})}
-	cmd := e.command(context.Background(), &Allocation{Name: spec.Name, Scope: spec.Labels[docker.LabelScope], Limit: spec.Limit, Measured: spec.Measured}, runArgs(spec)...)
+	cmd := e.command(context.Background(), &Allocation{Name: spec.Name, Scope: spec.Labels[docker.LabelScope], Limit: spec.Limit, Measured: spec.Measured, GPUs: spec.AskedGPUs}, runArgs(spec)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = inRead, outWrite, &h.stderr
 	startErr := cmd.Start()
 	inRead.Close()

@@ -129,9 +129,12 @@ type User struct{ UID, GID int }
 
 // GPUs says which GPUs a container gets, and how.
 type GPUs struct {
-	// Devices is a docker --gpus value of NVIDIA GPUs, such as "all" or "device=0,1". Empty passes
-	// no NVIDIA GPU.
+	// Devices is a docker --gpus value of NVIDIA GPUs, such as "all". Empty passes no NVIDIA GPU
+	// that way.
 	Devices string
+	// NVIDIA lists the numbers of the NVIDIA GPUs to pass, such as "2,3": the engine writes them as
+	// the --gpus value "device=2,3", quoted as docker needs a list. Never set with Devices.
+	NVIDIA string
 	// Runtime, when set, is the container runtime that passes them ("nvidia"), with the devices in
 	// NVIDIA_VISIBLE_DEVICES, instead of --gpus.
 	Runtime string
@@ -166,6 +169,9 @@ type ContainerSpec struct {
 	// Measured says the container's commands are timed: an engine that places the container in
 	// an allocation gives it the whole machine, and an unmeasured container only its share.
 	Measured bool
+	// AskedGPUs is how many GPUs the job asked for (--gpus), zero when it asked for none. An engine
+	// that asks its cluster for an allocation sizes the GPUs of an unmeasured container's by it.
+	AskedGPUs int
 	// Log, when set, is the run's output, where an engine that waits while it starts the container,
 	// as for a cluster's queue, says why in whole lines (environment.Environment.Run). It writes
 	// nothing there otherwise, and nothing once Start has returned.
@@ -178,6 +184,7 @@ var (
 	envNamePattern       = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	gpuDevicesPattern    = regexp.MustCompile(`^[A-Za-z0-9=,:._-]*$`)
 	runtimePattern       = regexp.MustCompile(`^[a-z0-9._-]*$`)
+	gpuNumbersPattern    = regexp.MustCompile(`^[0-9]{1,2}(,[0-9]{1,2})*$`)
 	networkPattern       = regexp.MustCompile(`^((container:)?[A-Za-z0-9][A-Za-z0-9_.-]*)?$`)
 )
 
@@ -200,10 +207,14 @@ func (s ContainerSpec) Validate() error {
 		return invalid("%q is not a --gpus value", s.GPUs.Devices)
 	case !runtimePattern.MatchString(s.GPUs.Runtime):
 		return invalid("%q is not a container runtime name", s.GPUs.Runtime)
-	case s.GPUs.Runtime != "" && s.GPUs.Devices == "":
+	case s.GPUs.Runtime != "" && s.GPUs.Devices == "" && s.GPUs.NVIDIA == "":
 		return invalid("the runtime %q is for GPUs, and no GPU is given", s.GPUs.Runtime)
-	case s.GPUs.ROCm && s.GPUs.Devices != "":
-		return invalid("the GPUs are passed both as AMD GPUs and with the --gpus value %q", s.GPUs.Devices)
+	case s.GPUs.ROCm && (s.GPUs.Devices != "" || s.GPUs.NVIDIA != ""):
+		return invalid("the GPUs are passed both as AMD GPUs and with the --gpus value %q", s.GPUs.Devices+s.GPUs.NVIDIA)
+	case s.GPUs.Devices != "" && s.GPUs.NVIDIA != "":
+		return invalid("the GPUs are passed both with the --gpus value %q and by number (%s)", s.GPUs.Devices, s.GPUs.NVIDIA)
+	case s.GPUs.NVIDIA != "" && !gpuNumbersPattern.MatchString(s.GPUs.NVIDIA):
+		return invalid("%q is not a list of GPU numbers such as 2,3", s.GPUs.NVIDIA)
 	case !networkPattern.MatchString(s.Network):
 		return invalid("%q is not a network mode", s.Network)
 	case s.Limit < 0:

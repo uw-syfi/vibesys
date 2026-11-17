@@ -55,6 +55,9 @@ func describe(j *cliv1.Job) string {
 	case spec.GetMeasure() != nil:
 		fmt.Fprintf(&b, "\tmeasure (%d samples)", spec.GetMeasure().GetSamples())
 	}
+	if g := describeJobGPUs(j); g != "" {
+		fmt.Fprintf(&b, "\t%s", g)
+	}
 	if p := placementOf(j.GetEnvironment()); p != "" {
 		fmt.Fprintf(&b, "\ton %s", p)
 	}

@@ -149,6 +149,34 @@ func Result(r core.Result) *cliv1.Result {
 	return out
 }
 
+// JobGPUs says what the records of the jobs say of the GPUs of each result's job: how many it asked
+// for and the devices it was given, in the order of the results, and nothing for a job whose record
+// says nothing or is not among the jobs. A result's file keeps neither, since the job's record is
+// where they are written, so a reader of results gets them from the jobs.
+func JobGPUs(results []core.Result, jobs []core.Job) []*cliv1.JobGpus {
+	byID := map[core.JobID]core.Job{}
+	for _, j := range jobs {
+		byID[j.ID] = j
+	}
+	var out []*cliv1.JobGpus
+	for _, r := range results {
+		j, ok := byID[r.Job]
+		if !ok || (!j.Spec.GPUs.IsSet() && j.GPUs == nil) {
+			continue
+		}
+		use := &cliv1.JobGpus{JobId: string(j.ID)}
+		if j.Spec.GPUs.IsSet() {
+			n := uint32(j.Spec.GPUs.Int())
+			use.Asked = &n
+		}
+		if j.GPUs != nil {
+			use.Grant = GpuGrant(*j.GPUs)
+		}
+		out = append(out, use)
+	}
+	return out
+}
+
 func measureResult(o core.MeasureOutcome) *cliv1.MeasureResult {
 	m := &cliv1.MeasureResult{
 		Metric:  &cliv1.Metric{Name: o.Metric.Name, Direction: direction(o.Metric.Direction), Unit: o.Metric.Unit},

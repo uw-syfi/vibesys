@@ -35,3 +35,23 @@ func TestEveryRecordEnumValueIsTranslatedOrRefused(t *testing.T) {
 	checkEnum(t, "command", cliv1.Command_name, wire.ToCommand, wire.Command)
 	checkEnum(t, "outcome", cliv1.CommandOutcome_name, wire.ToCommandOutcome, wire.CommandOutcome)
 }
+
+// The source of a grant is stored with a job, and is refused when it is unspecified, as a grant
+// always has one.
+func TestEveryGrantSourceIsTranslatedOrRefused(t *testing.T) {
+	for n, name := range cliv1.GrantSource_name {
+		domain, err := wire.ToGrantSource("source", cliv1.GrantSource(n))
+		if n == 0 {
+			if err == nil {
+				t.Errorf("%s was read as %q", name, domain)
+			}
+			continue
+		}
+		if err != nil || wire.GrantSource(domain) != cliv1.GrantSource(n) {
+			t.Errorf("%s went to %q, %v", name, domain, err)
+		}
+	}
+	if got, err := wire.ToGrantSource("source", -12345); err == nil {
+		t.Errorf("a value no build names was read as %q", got)
+	}
+}

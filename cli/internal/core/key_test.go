@@ -339,3 +339,47 @@ func TestCommitValidIsFortyLowercaseHexCharacters(t *testing.T) {
 		t.Error("a commit made of 40 hex digits is invalid")
 	}
 }
+
+// goldenCheckKey and goldenCheckGPUsKey are the keys of goldenInputs as a check, without a count of
+// GPUs and asking for 2, computed by the same separate implementation as goldenKey: a count follows
+// the settings' kind as a tag byte (1) and the count, and a key without one is unchanged.
+const (
+	goldenCheckKey     = "5c6c29c7d0880d350addf7df418f3b62b5cc2a0cc0f9e3523fc1f5218cfc9e56"
+	goldenCheckGPUsKey = "c439edb0dae1037e09f2cf0278c56d237c23fde59744c0c9e6a8d06a1251bcb1"
+)
+
+// A job that asked for no count of GPUs keeps the key it always had, so no saved result is
+// retired; one that asked for a count is keyed by it, and every count gives another key.
+func TestTheCountOfGPUsTakesPartInTheKeyOnlyWhenThereIsOne(t *testing.T) {
+	check := goldenInputs()
+	check.Kind, check.Settings = core.JobCheck, core.CheckSettings{}
+	if key := keyOf(t, check); string(key) != goldenCheckKey {
+		t.Fatalf("check key %s, want %s", key, goldenCheckKey)
+	}
+	two, err := core.ParseGPUCount(2, "--gpus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check.GPUs = two
+	if key := keyOf(t, check); string(key) != goldenCheckGPUsKey {
+		t.Fatalf("check key with 2 GPUs %s, want %s: the key encoding changed, see the comment on goldenKey", key, goldenCheckGPUsKey)
+	}
+	r := newRand(13)
+	for range properties {
+		in := randomKeyInputs(r)
+		in.GPUs = core.GPUCount{}
+		none := keyOf(t, in)
+		seen := map[core.JobKey]int{none: 0}
+		for n := 1; n <= core.MaxPoolSize; n++ {
+			in.GPUs, err = core.ParseGPUCount(uint32(n), "--gpus")
+			if err != nil {
+				t.Fatal(err)
+			}
+			key := keyOf(t, in)
+			if other, ok := seen[key]; ok {
+				t.Fatalf("%d GPUs and %d GPUs have one key", n, other)
+			}
+			seen[key] = n
+		}
+	}
+}

@@ -17,6 +17,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/host"
+	"github.com/uw-syfi/vibesys/cli/internal/resource/gpu"
 )
 
 var facts = core.MachineFacts{HostID: "host-a", OS: "linux", Arch: "amd64", CPUModel: "Test CPU", LogicalCPUs: 8, MemoryBytes: 16 << 30}
@@ -120,5 +121,51 @@ func TestTheConfiguredGraceIsWhatAStopWaitsFor(t *testing.T) {
 			t.Fatal("the run did not end after the grace period")
 		}
 		cancel()
+	}
+}
+
+// A job given GPUs of the machine's pool is told them in the variables of the vendor's role and in
+// the words every vendor shares, in every command it starts; one given none is told nothing of them,
+// not even what the daemon's own environment holds; and a grant of another pool is refused before
+// anything starts.
+func TestACommandOnTheHostIsToldTheGPUsItWasGiven(t *testing.T) {
+	t.Setenv("VIBESYS_GPUS", "left-over")
+	t.Setenv("VIBESYS_GPU_DEVICES", "left-over")
+	size, err := core.ParseGPUCount(8, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	devices, err := gpu.NewDevices(gpu.DevicesConfig{Machine: "local", Size: size})
+	if err != nil {
+		t.Fatal(err)
+	}
+	group, err := core.ParseDeviceGroup([]uint32{2, 3, 6}, size, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := devices.Pool()
+	read := func(grant *core.Grant) (core.Attempt, string) {
+		var out bytes.Buffer
+		ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+		defer cancel()
+		env := host.New(host.Config{Backend: machine(), Timers: clock.System{}, Devices: devices, GPUs: grant})
+		a := env.Run(ctx, core.Execution{
+			Checkout: checkout(t, nil), Timeout: time.Hour,
+			Argv: []string{"/bin/sh", "-c", `printf '%s|%s|%s|%s' "$CUDA_VISIBLE_DEVICES" "$CUDA_DEVICE_ORDER" "$VIBESYS_GPUS" "$VIBESYS_GPU_DEVICES"`},
+		}, &out)
+		return a, out.String()
+	}
+	a, got := read(&core.Grant{Pool: id, Size: size, Devices: group, Source: core.GrantByCLI})
+	if e, ok := a.(core.Ended); !ok || e.Exec.ExitCode != 0 || got != "2,3,6|PCI_BUS_ID|3|2,3,6" {
+		t.Errorf("a job given GPUs 2,3,6: attempt %+v, output %q", a, got)
+	}
+	if a, got := read(nil); got != "|||" {
+		t.Errorf("a job given none: attempt %+v, output %q, want none of the variables", a, got)
+	}
+	other := &core.Grant{Pool: "gpu:host-b", Size: size, Devices: group, Source: core.GrantByCLI}
+	if a, got := read(other); got != "" {
+		t.Errorf("a grant of another pool: attempt %+v, output %q, want it refused before anything starts", a, got)
+	} else if ns, ok := a.(core.NotStarted); !ok || ns.Failure.Kind != core.FailureInvalidInput {
+		t.Errorf("a grant of another pool: attempt %+v, want not started, invalid input", a)
 	}
 }

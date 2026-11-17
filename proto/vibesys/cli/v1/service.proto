@@ -619,6 +619,9 @@ message ShowResponse {
   // The commit's measurements pooled as compare pools them: one per environment, task version,
   // metric and objectives, holding the samples of every measure job of that kind, oldest first.
   repeated Measurement measurements = 2;
+  // What the record of each job of the results says of its GPUs, one per job whose record says
+  // anything, in the order of the results.
+  repeated JobGpus job_gpus = 3 [(buf.validate.field).repeated.max_items = 4096];
 }
 
 message CompareRequest {

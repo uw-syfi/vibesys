@@ -20,7 +20,13 @@ func (s *Server) Show(ctx context.Context, req *cliv1.ShowRequest) (*cliv1.ShowR
 	if err != nil {
 		return nil, wire.Error(err)
 	}
-	return &cliv1.ShowResponse{Results: wire.Results(results), Measurements: wire.Measurements(core.PoolMeasurements(results))}, nil
+	jobs, err := s.app.Jobs(ctx, call.Scope, core.JobFilter{Commit: core.Commit(req.GetCommit())})
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	return &cliv1.ShowResponse{
+		Results: wire.Results(results), Measurements: wire.Measurements(core.PoolMeasurements(results)), JobGpus: wire.JobGPUs(results, jobs),
+	}, nil
 }
 
 // Compare implements cliv1.DaemonServiceServer.
@@ -96,5 +102,15 @@ func (s *Server) CurrentResult(ctx context.Context, req *cliv1.CurrentResultRequ
 	if err != nil {
 		return nil, wire.Error(err)
 	}
-	return wire.CurrentResultResponse(answer), nil
+	out := wire.CurrentResultResponse(answer)
+	if current, ok := answer.(core.CurrentResult); ok {
+		jobs, err := s.app.Jobs(ctx, call.Scope, core.JobFilter{Commit: current.Head})
+		if err != nil {
+			return nil, wire.Error(err)
+		}
+		if use := wire.JobGPUs([]core.Result{current.Result}, jobs); len(use) > 0 {
+			out.GetCurrent().Gpus = use[0]
+		}
+	}
+	return out, nil
 }

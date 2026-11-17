@@ -4,6 +4,7 @@ package host
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strconv"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/resource"
 )
 
 // DefaultProbePause is how long Run waits between two readiness probes of a service.
@@ -30,6 +32,15 @@ type Config struct {
 	// Grace is how long the commands get, after a cancel or the limit asks them to terminate, to
 	// clean up before they are killed. Zero means environment.DefaultGrace.
 	Grace time.Duration
+	// Devices is how this machine's GPUs are given to a job by number, nil when the machine
+	// declares no pool. With GPUs it sets the variables of the group in every process the
+	// environment starts. Nothing but the process's own respect for them keeps it to the group: a
+	// process on the host can open any GPU.
+	Devices resource.Devices
+	// GPUs are the GPUs of the pool the daemon gave the job this environment runs, nil for a job
+	// that was given none, which runs with the environment it inherits. They must be of Devices'
+	// pool.
+	GPUs *core.Grant
 }
 
 // Environment is the host environment. Create it with New.
@@ -38,6 +49,8 @@ type Environment struct {
 	timers  clock.Timers
 	pause   time.Duration
 	grace   time.Duration
+	devices resource.Devices
+	gpus    *core.Grant
 }
 
 var _ environment.Environment = (*Environment)(nil)
@@ -52,7 +65,7 @@ func New(cfg Config) *Environment {
 	if grace <= 0 {
 		grace = environment.DefaultGrace
 	}
-	return &Environment{backend: cfg.Backend, timers: cfg.Timers, pause: pause, grace: grace}
+	return &Environment{backend: cfg.Backend, timers: cfg.Timers, pause: pause, grace: grace, devices: cfg.Devices, gpus: cfg.GPUs}
 }
 
 // Kind implements environment.Environment.
@@ -111,11 +124,35 @@ func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) 
 	if out == nil {
 		out = io.Discard
 	}
+	vars, err := e.gpuVariables()
+	if err != nil {
+		return core.NotStarted{Failure: core.AsFailure(err)}
+	}
 	r, err := newRun(ctx, e, x, out)
 	if err != nil {
 		return environment.Finish(ctx, core.NotStarted{Failure: core.AsFailure(err)}, nil)
 	}
+	r.gpuVars = vars
 	attempt := r.execute()
 	// What the command wrote and was not kept makes its end one the environment cannot vouch for.
 	return environment.Finish(ctx, attempt, r.end())
+}
+
+// gpuVariables are the variables that name the job's group of the machine's pool, which every
+// process of a run is started with: none for a job that was given no GPUs. A grant of another pool
+// than this machine's, or of a machine that declares none, is refused: it would tell the job to use
+// devices that are not this machine's.
+func (e *Environment) gpuVariables() (map[string]string, error) {
+	if e.gpus == nil {
+		return nil, nil
+	}
+	if e.devices == nil {
+		return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
+			"host: the job was given GPUs of the pool %s, and this machine declares no pool of GPUs", e.gpus.Pool)}
+	}
+	if id, _ := e.devices.Pool(); id != e.gpus.Pool {
+		return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
+			"host: the job was given GPUs of the pool %s, and this machine's is %s", e.gpus.Pool, id)}
+	}
+	return e.devices.Process(e.gpus.Devices)
 }

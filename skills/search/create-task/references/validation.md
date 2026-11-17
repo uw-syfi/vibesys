@@ -4,7 +4,9 @@ Each recipe is a job, so the result is what the optimization will see. Pass `--t
 every call. Wait as `vibesys:measure` says and branch on the exit code.
 
 If the task declares `needs`, check that the first `vibesys-cli submit check` is not refused for a
-missing resource before anything else; a refusal names it and is the operator's to fix.
+missing resource before anything else; a refusal names it and is the operator's to fix. A task that
+needs GPUs takes `--gpus N` on a check or command where a placement has a GPU pool: ask for the
+fewest the check can run on (a refusal names the allowed sizes), and a measure takes none.
 
 ## The base
 

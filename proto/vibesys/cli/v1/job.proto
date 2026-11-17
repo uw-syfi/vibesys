@@ -134,6 +134,14 @@ message JobSpec {
   // running allocation of the run that it fits and otherwise queues it as a job with no allocation
   // is queued. Empty runs the job as it always has. In a launch (Launch.spec) it is as submitted.
   string allocation = 5 [(buf.validate.field).string.pattern = "^(any|a[1-9][0-9]{0,17})?$"];
+  // How many GPUs of a placement's GPU pool the job asks for (--gpus). Unset when the submission
+  // named none: a job of a task that needs no GPU, a job on a placement without a pool, a measure
+  // (which takes the whole pool), and a job saved before this field was. A check's cache key
+  // takes the count only when it is set, so a key without one is the key it always was.
+  optional uint32 gpus = 6 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 64
+  }];
   oneof settings {
     CheckSettings check = 10;
     CommandSettings command = 11;
@@ -249,6 +257,52 @@ message Job {
   // image) and a job saved before this field was. A reader that must tell a candidate that did not
   // build from one the check rejected reads this and not exit_code, which both leave nonzero.
   JobStage failed_stage = 20 [(buf.validate.field).enum.defined_only = true];
+  // The GPUs of a pool the job was given, written with its start, before any of its processes
+  // runs. They are recorded to say where the job ran, and never take part in its key. Unset on a
+  // queued job, on a job that was given none, and on a job started before this field was, whose
+  // GPUs are unknown.
+  GpuGrant gpus = 21;
+}
+
+// GrantSource is who chose the devices of a grant.
+enum GrantSource {
+  GRANT_SOURCE_UNSPECIFIED = 0;
+  // The CLI chose them from the pool's free devices.
+  GRANT_SOURCE_CLI = 1;
+  // Slurm chose them for the job's allocation, and the CLI read them back after the job started.
+  GRANT_SOURCE_SLURM = 2;
+}
+
+// GpuGrant is the GPUs of one pool a job was given.
+message GpuGrant {
+  option (buf.validate.message).cel = {
+    id: "gpu_grant.devices"
+    message: "a grant names devices of its pool, and one the CLI chose names at least one"
+    expression: "this.devices.all(d, d < this.pool_size) && (this.source == 2 || size(this.devices) > 0)"
+  };
+  // The pool, which names the machine whose GPUs they are, such as gpu:local.
+  string pool = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  // The pool's size when the job started.
+  uint32 pool_size = 2 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 64
+  }];
+  // The device numbers of the pool the job was given, in ascending order. Empty only for a grant
+  // Slurm chose and the CLI has not read back.
+  repeated uint32 devices = 3 [(buf.validate.field).repeated = {
+    unique: true
+    max_items: 64
+  }];
+  // Set when the job took the whole pool (a measure) rather than a count it asked for.
+  bool whole = 4;
+  // 2 is SLURM in the rule above.
+  GrantSource source = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
 }
 
 // JobStage is the step of a check or measure job that ended it.
@@ -302,6 +356,9 @@ message WaitHolder {
   JobKind kind = 3;
   // The run that submitted the job first. Empty when it named none.
   string run_id = 4;
+  // The GPUs of a pool the job holds, with the devices, when it holds some. Unset for a job that
+  // holds none, and for one that holds no devices of the resource the waiting job needs.
+  GpuGrant gpus = 5;
 }
 
 // WaitReason says why a queued job has not started, as the daemon's scheduler decided at its last
@@ -324,6 +381,10 @@ message WaitReason {
   string detail = 4;
   // Who holds the lease, for LEASED.
   LeaseHolder elsewhere = 5;
+  // For a wait on a pool of GPUs (FULL or BEHIND, on its resource): how many GPUs the job
+  // claims, and how many the pool has free now. Both are zero for any other wait.
+  uint32 gpus_wanted = 6 [(buf.validate.field).uint32.lte = 64];
+  uint32 gpus_free = 7 [(buf.validate.field).uint32.lte = 64];
 }
 
 // JobWait is why one queued job waits.

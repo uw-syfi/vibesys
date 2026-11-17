@@ -192,6 +192,45 @@ func FuzzDecodeJobSpec(f *testing.F) {
 	})
 }
 
+// The GPUs a job was given, decoded from anything, are a pool, its size and its source, and devices
+// of the pool in ascending order, each once; a grant the CLI chose names at least one.
+func FuzzDecodeGpuGrant(f *testing.F) {
+	r := newRand(12)
+	var seeds []proto.Message
+	for range 12 {
+		seeds = append(seeds, wire.GpuGrant(anyGrant(r)))
+	}
+	seedMessages(f, seeds...)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.GpuGrant{}
+		decode(t, data, message)
+		first, err := wire.ToGpuGrant("gpus", message)
+		if err != nil {
+			if !wire.IsInvalidInput(err) {
+				t.Fatalf("a refused grant gave %v, want an invalid-input failure", err)
+			}
+			return
+		}
+		devices := first.Devices.Devices()
+		if first.Pool == "" || !first.Size.IsSet() || !slices.IsSorted(devices) || len(slices.Compact(slices.Clone(devices))) != len(devices) ||
+			(first.Source == core.GrantByCLI && len(devices) == 0) {
+			t.Fatalf("a decoded grant %+v is not one the domain accepts", first)
+		}
+		for _, d := range devices {
+			if int(d) >= first.Size.Int() {
+				t.Fatalf("a decoded grant %+v names a device outside its pool", first)
+			}
+		}
+		if _, err := wire.ToGrantSource("source", wire.GrantSource(first.Source)); err != nil {
+			t.Fatalf("a decoded grant's source %q is refused once encoded again: %v", first.Source, err)
+		}
+		again, err := wire.ToGpuGrant("gpus", wire.GpuGrant(first))
+		if err != nil || !reflect.DeepEqual(again, first) {
+			t.Fatalf("a decoded grant changed when encoded and decoded again: %+v, %v; want %+v", again, err, first)
+		}
+	})
+}
+
 func FuzzDecodeLaunch(f *testing.F) {
 	r := newRand(12)
 	var seeds []proto.Message

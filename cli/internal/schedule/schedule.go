@@ -50,6 +50,12 @@ type Resource struct {
 	ID ResourceID
 	// Capacity is how many units of it the claims on it may add up to. It is at least 1.
 	Capacity int
+	// Devices says its units are the numbered devices of a pool, 0 to Capacity-1, which each job
+	// that holds a claim of it is given by number: a job that claims n of it holds n of its
+	// devices, and a claim that is Exclusive holds them all. Step only counts. Whoever starts a
+	// job on such a claim chooses its devices (core.TakeDevices) and keeps them as long as the
+	// job holds the claim, so that no two jobs hold one.
+	Devices bool
 }
 
 // Claim is what a job holds of one resource while it runs: Amount units of it, or with Exclusive

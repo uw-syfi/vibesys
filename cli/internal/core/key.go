@@ -13,6 +13,9 @@ import (
 // result on purpose.
 const keyDomain = "vibesys-cli/job-key"
 
+// keyTagGPUs marks the count of GPUs a job asked for in a key's encoding.
+const keyTagGPUs = 1
+
 // NewJobKey is the cache key of a job: the SHA-256 of a canonical encoding of the inputs, as 64
 // lowercase hexadecimal characters.
 //
@@ -24,7 +27,9 @@ const keyDomain = "vibesys-cli/job-key"
 // version, the environment as Fingerprint.Equal compares it and the schema version. A docker
 // environment's facts say where its container ran and are left out, so a result is reused on any
 // placement. Settings take part through their
-// kind and the fields that change what is computed, and there are none yet. MeasureSettings
+// kind and the fields that change what is computed, and there are none yet. The count of GPUs a
+// job asked for takes part when there is one: a check that passed on 2 GPUs says nothing of one on
+// 4. Which devices it was given never does. MeasureSettings
 // leaves out both of its fields on purpose. Samples is a quantity the cache tops up (PlanCache),
 // so results taken for different counts must share a key; Recheck changes how a check is
 // obtained, never what is measured. Notes, plans and the caller never take part.
@@ -46,6 +51,11 @@ func NewJobKey(in KeyInputs) (JobKey, error) {
 	e.fingerprint(in.Environment.identity())
 	e.string(string(in.Settings.Kind()))
 	// Key-relevant settings fields would follow here. See the doc comment above for why none do.
+	if in.GPUs.IsSet() {
+		// After the settings' kind, which is length prefixed, so a key without a count is
+		// byte for byte the key it was before jobs could ask for GPUs.
+		e.bytes = append(e.bytes, keyTagGPUs, byte(in.GPUs.Int()))
+	}
 	sum := sha256.Sum256(e.bytes)
 	return JobKey(hex.EncodeToString(sum[:])), nil
 }

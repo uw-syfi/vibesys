@@ -49,12 +49,14 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    cannot run. A broken task is the user's to fix, never yours (Rules). Leave the environment
    (`--env`) to the task unless the user chose one. When the CLI refuses
    the task (for example, no placement offers a resource the task needs), stop and report the
-   refusal as printed; never change the CLI's or the machine's configuration.
+   refusal as printed, and point the user to the placements reference of `vibesys:setup`, which says
+   what to add to their config; never change the CLI's or the machine's configuration yourself.
 3. From `vibesys.input.toml`, check that the domain skills the task needs are available, per
    [domain-plugins.md](references/domain-plugins.md). If one is not available, stop as it says
    (install commands, or in a run the orchestrator started a `final` report); do not plan without it.
 4. Create or resume the optimization (`vibesys:state`). A new one first needs a base that passes
-   its check: run `vibesys-cli submit check <base> --wait` (a pass is saved and later measures reuse
+   its check: run `vibesys-cli submit check <base> --wait` (with `--gpus N` for a task that needs
+   GPUs, as `vibesys:measure` says; a pass is saved and later measures reuse
    it). If it fails, the base can never be measured and every promotion would be refused
    `unmeasured`: read [from-scratch.md](references/from-scratch.md) and create nothing else
    until it says to. Otherwise it gets the result branch `vibesys/result/<task>` at the base
@@ -155,7 +157,10 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
   running checks when capacity is short.
   `vibesys-cli jobs` says under each queued job why it waits; a queued job with a reason is
   waiting its turn, not stuck. Give each brief a budget in samples and jobs, and look at
-  `vibesys-cli jobs` before you fund more.
+  `vibesys-cli jobs` before you fund more. A long queue is not a reason to stop work: keep workers
+  implementing and committing the next ideas while their jobs wait, so the best candidate is ready
+  when a slot opens, and say why when you leave a slot idle
+  ([reading the queue](../measure/references/jobs.md#reading-the-queue)).
 - Run fully autonomously and never block on a question to the user, unless the user asked to be
   consulted. Decide, write the decision into the plan, keep going, and report it in the next
   report so the user can reverse it.

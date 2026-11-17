@@ -38,9 +38,14 @@ you cannot find, in one round of questions, in their words, each with your propo
    change (a frozen copy of today's code, golden outputs, or an invariant checker).
 5. **Environment:** host or a Dockerfile, the hardware backend, the resources a job needs from
    the operator's placement (`[environment] needs`: a GPU, a Kubernetes cluster, shared
-   mounts), and what one sample may cost in time (aim for 10 seconds to a few minutes).
+   mounts), the hardware budget, and what one sample may cost in time (aim for 10 seconds to a few
+   minutes). The budget is the accelerator model and count the result is measured on. The machine
+   may have more, and the CLI does not stop a candidate from using it: declare the budget in
+   `[catalogue.hardware]`, state it in `OBJECTIVE.md`, and where you can, enforce it in the
+   benchmark (for example, by making only the budgeted devices visible to the server it measures).
 6. **Rules:** what counts as cheating here (caching across samples, special-casing the
-   benchmark's inputs, skipping work the checker does not see).
+   benchmark's inputs, skipping work the checker does not see, using more hardware than the
+   budget).
 
 ## 2. Write the task
 

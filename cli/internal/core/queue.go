@@ -47,6 +47,10 @@ type JobWait struct {
 	Detail string
 	// Elsewhere is who holds the lease for WaitLeased, and nil otherwise.
 	Elsewhere *LeaseHolder
+	// GPUsWanted and GPUsFree are, for a wait on a pool of GPUs (WaitFull or WaitBehind on its
+	// resource), how many GPUs the job claims and how many the pool has free now. Both are zero
+	// for any other wait.
+	GPUsWanted, GPUsFree int
 }
 
 // LeaseHolder is who holds the lease of a resource: the user and the machine a daemon runs as and
@@ -84,4 +88,6 @@ type WaitHolder struct {
 	Task TaskName
 	Kind JobKind
 	Run  RunID
+	// GPUs are the devices of the awaited pool that the job holds, nil when it holds none.
+	GPUs *Grant
 }

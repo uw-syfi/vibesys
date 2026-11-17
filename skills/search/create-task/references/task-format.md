@@ -61,8 +61,13 @@ metric = "requests_per_sec"       # the top-level field of that JSON file
 - Refused by the CLI: `[evaluator]`, `entrypoint` or `args` in a command section,
   `requires_accuracy = false`, more than one backend, `[environment.modal]`, and in docker
   `docker_in_docker = true` or an accelerator backend other than `cuda`.
-- Accepted and not read by the CLI: `[agent]`, `[catalogue]`, `[profile]`, `[profile_guided]`,
-  `[resources]`, `[workspace]`, `[plan]`, `[[comparison]]`.
+- Accepted and not read by the CLI: `[agent]`, `[profile]`, `[profile_guided]`, `[resources]`,
+  `[workspace]`, `[plan]`, `[[comparison]]`, and `[catalogue]` except `[catalogue.hardware]`.
+- `[catalogue.hardware]` (`accelerator`, `count`, `vendor`) is the task's hardware budget, which
+  `vibesys-cli task card <task>` prints. The accelerator is a name from the CLI's registry, and
+  `task card` refuses an unknown one, naming the file and the key. Nothing stops a candidate from
+  using more GPUs than the budget, so state it in `OBJECTIVE.md` too, and enforce it in the
+  benchmark where you can. How agents read the budget: [GPUs](../../measure/references/gpus.md).
 - A benchmark may instead speak the evaluator record stream with `result_protocol = 2` in
   `[benchmark]`, and no `[benchmark.result]`. Use it when the project already does, and for a
   multi-objective task (below).

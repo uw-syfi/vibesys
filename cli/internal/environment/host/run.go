@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,6 +52,8 @@ type run struct {
 	lifeWrite *os.File // the caller's end: closing it, or dying, ends every group
 	procs     []*proc
 	wg        sync.WaitGroup
+	// gpuVars are the variables that name the job's GPUs, set for every process the run starts.
+	gpuVars map[string]string
 }
 
 func newRun(ctx context.Context, e *Environment, x core.Execution, out io.Writer) (*run, error) {
@@ -88,9 +91,17 @@ func (r *run) Start(argv []string, sink io.Writer) (environment.Process, error) 
 	cmd := exec.Command("/bin/sh", args...)
 	cmd.Dir = dir
 	// A command on the host is told about its job as one in a container is.
-	job, err := environment.JobVariables(&cliv1.JobEnvironment{Artifacts: r.x.Artifacts, TimeoutSeconds: environment.TimeoutSeconds(r.x.Timeout)})
+	note := &cliv1.JobEnvironment{Artifacts: r.x.Artifacts, TimeoutSeconds: environment.TimeoutSeconds(r.x.Timeout)}
+	environment.NoteGPUs(note, r.env.gpus)
+	job, err := environment.JobVariables(note)
 	if err != nil {
 		return nil, &core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("host: the job environment is not valid: %v", err)}
+	}
+	if len(r.gpuVars) > 0 {
+		if job.Set == nil {
+			job.Set = map[string]string{}
+		}
+		maps.Copy(job.Set, r.gpuVars)
 	}
 	cmd.Env = environment.Overlay(os.Environ(), job)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

@@ -362,6 +362,16 @@ func (r *run) containerSpec(b *box, id string, img Image, as role, url string) (
 	if as == roleBeside || as == roleAgainst {
 		job.ServiceUrl = url
 	}
+	given, err := r.attachments(as)
+	if err != nil {
+		return ContainerSpec{}, err
+	}
+	if given.GPUs.Given() {
+		// The job's commands are told which GPUs of the pool they are, beside the vendor's own
+		// variables; a container that is given none, such as the task's beside a candidate's
+		// server, is told nothing of them.
+		environment.NoteGPUs(job, r.grantOf())
+	}
 	jobVariables, err := environment.JobVariables(job)
 	if err != nil {
 		return ContainerSpec{}, &core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("docker: the job environment is not valid: %v", err)}
@@ -369,10 +379,6 @@ func (r *run) containerSpec(b *box, id string, img Image, as role, url string) (
 	// The user has no home in the image, and tools want one they can write to.
 	env := map[string]string{"HOME": "/tmp"}
 	maps.Copy(env, jobVariables.Set)
-	given, err := r.attachments(as)
-	if err != nil {
-		return ContainerSpec{}, err
-	}
 	taken := map[string]bool{}
 	for _, m := range mounts {
 		taken[m.Container] = true
@@ -383,7 +389,7 @@ func (r *run) containerSpec(b *box, id string, img Image, as role, url string) (
 		}
 		mounts = append(mounts, Mount{Host: m.Host, Container: m.Container, ReadOnly: m.ReadOnly})
 	}
-	gpus := GPUs{Devices: given.GPUs.Devices, Runtime: given.GPUs.Runtime, ROCm: given.GPUs.ROCm}
+	gpus := GPUs{Devices: given.GPUs.Devices, NVIDIA: given.GPUs.NVIDIA, Runtime: given.GPUs.Runtime, ROCm: given.GPUs.ROCm}
 	b.check = given.Check
 	given.Env = maps.Clone(given.Env)
 	maps.Copy(given.Env, given.GPUEnv)
@@ -394,17 +400,18 @@ func (r *run) containerSpec(b *box, id string, img Image, as role, url string) (
 		env[k] = given.Env[k]
 	}
 	cs := ContainerSpec{
-		Name:     b.name,
-		Image:    img.ID,
-		Labels:   runLabels(p.cfg.Scope, id),
-		User:     user,
-		Dir:      r.x.Checkout.Dir,
-		Mounts:   mounts,
-		Env:      env,
-		GPUs:     gpus,
-		Network:  given.Network,
-		Limit:    r.x.Timeout,
-		Measured: r.x.Measured,
+		Name:      b.name,
+		Image:     img.ID,
+		Labels:    runLabels(p.cfg.Scope, id),
+		User:      user,
+		Dir:       r.x.Checkout.Dir,
+		Mounts:    mounts,
+		Env:       env,
+		GPUs:      gpus,
+		Network:   given.Network,
+		Limit:     r.x.Timeout,
+		Measured:  r.x.Measured,
+		AskedGPUs: r.e.target.AskedGPUs.Int(),
 	}
 	// A job that runs inside a standing allocation names it on its first container, which the
 	// placement's engine reads (Config.AllocationLabel) to run the container inside it.
@@ -434,9 +441,26 @@ func (r *run) attachments(as role) (resource.Attachment, error) {
 		if !s.given {
 			continue
 		}
+		var pooled *resource.Attachment
+		if devices := r.e.p.cfg.Devices; devices != nil && devices.Kind() == res.Kind() {
+			// The GPUs of a pool: the job's group, which its grant names. A job given none gets
+			// none of this resource.
+			grant := r.grantOf()
+			if grant == nil {
+				continue
+			}
+			d, err := r.devicesOf(devices, grant)
+			if err != nil {
+				return resource.Attachment{}, err
+			}
+			pooled = &d
+		}
 		a, err := res.Attach(r.ctx)
 		if err != nil {
 			return resource.Attachment{}, err
+		}
+		if pooled != nil {
+			all = append(all, *pooled)
 		}
 		if s.readOnly {
 			a.Mounts = slices.Clone(a.Mounts)
@@ -447,6 +471,40 @@ func (r *run) attachments(as role) (resource.Attachment, error) {
 		all = append(all, a)
 	}
 	return resource.Combine(all)
+}
+
+// grantOf is the GPUs of a pool the run's job is given: those the daemon gave it, or, for a pool the
+// daemon does not count (Config.AssignDevices), the group the environment chooses: as many devices
+// as the job asked for, the whole pool when it asked for none, from a node it holds alone.
+func (r *run) grantOf() *core.Grant {
+	if g := r.e.target.GPUs; g != nil {
+		return g
+	}
+	devices := r.e.p.cfg.Devices
+	if devices == nil || !r.e.p.cfg.AssignDevices {
+		return nil
+	}
+	id, size := devices.Pool()
+	asked := r.e.target.AskedGPUs
+	if !asked.IsSet() || asked.Int() > size.Int() {
+		asked = size
+	}
+	group, ok := core.TakeDevices(size, nil, asked)
+	if !ok {
+		return nil
+	}
+	return &core.Grant{Pool: id, Size: size, Devices: group, Whole: asked == size, Source: core.GrantByCLI}
+}
+
+// devicesOf is what the container gets of the group of a pool that the job's grant names, by the
+// vendor's role. The grant must be of this placement's pool.
+func (r *run) devicesOf(devices resource.Devices, grant *core.Grant) (resource.Attachment, error) {
+	id, _ := devices.Pool()
+	if grant.Pool != id {
+		return resource.Attachment{}, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
+			"docker: the job was given GPUs of the pool %s, and the placement %q has the pool %s", grant.Pool, r.e.p.cfg.Placement, id)}
+	}
+	return devices.Container(grant.Devices)
 }
 
 // share is how a container of a run gets a resource of the placement.

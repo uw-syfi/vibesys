@@ -109,6 +109,7 @@ portable and the *thresholds* as `cuda`-specific.
 
 ## Pitfalls
 
+- **Idle devices.** An engine started with its defaults uses one device (vLLM and SGLang default to TP=1, DP=1) however many the machine has, and a measure still holds the whole node. Count the devices a measure sees, then the devices the launch command places work on (TP x PP x DP, or the replica count). A model that fits on one device is usually best served by DP replicas, one per device, behind one endpoint; a model that does not fit takes the smallest TP that holds weights plus KV cache, then DP across the remaining groups (8 devices: TP=2 x DP=4, say). Confirm under load that every device is busy (per-device utilization and memory), since a launch flag can be accepted and still leave devices idle. Where `OBJECTIVE.md` or the task fixes the device count or the parallel layout, follow it and report the idle devices instead.
 - **NVLink-domain boundaries matter most.** TP=16 across two NVL8 islands is almost always worse than TP=8 + something-else across the boundary.
 - **DP-attention needs separate KV caches per rank.** Radix cache / APC must be per-rank-scoped, not shared across DP replicas.
 - **SP without TP is nonsense.** SP is a TP activation-memory optimization, not an independent axis.

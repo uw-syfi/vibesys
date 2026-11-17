@@ -28,6 +28,10 @@ var spelledAt = map[string][]string{
 	// The accelerator registry spells the display names a task authors ("NVIDIA H100"), which are
 	// the closed set of identities the domain knows, in the one file that holds them.
 	"nvidia": {"cli/internal/backend/nvidia/", "cli/internal/resource/gpu/", "cli/internal/core/accelerator.go"},
+	// The variables that name the GPUs a process may use are each vendor's own, and only its role
+	// (resource.Devices) writes them; the apptainer engine lists the ones a cluster's Slurm sets.
+	"cuda_visible_devices": {"cli/internal/resource/gpu/", "cli/internal/environment/apptainer/cluster.go"},
+	"rocr_visible_devices": {"cli/internal/resource/rocm/", "cli/internal/environment/apptainer/cluster.go"},
 }
 
 // Spellings returns the spellings the rule holds, sorted.

@@ -204,6 +204,8 @@ Go one, each small). One corpus
 | `service_url` | `VIBESYS_SERVICE_URL` | the candidate's server, for a task of two images, or the job's server, for a task with `[service]` |
 | `timeout_seconds` | `VIBESYS_JOB_TIMEOUT_SECONDS` | the longest the job may run, in whole seconds, rounded up |
 | `mounts` | `VIBESYS_MOUNTS` | the names of the read-only data sets, separated by commas |
+| `gpus` | `VIBESYS_GPUS` | how many GPUs of the machine's pool the job was given, whatever their vendor |
+| `gpu_devices` | `VIBESYS_GPU_DEVICES` | their numbers in the pool, ascending and separated by commas, such as `2,3` |
 
 A job that needs a cluster also gets `KubernetesEnvironment`: `KUBECONFIG`,
 `VIBESYS_K8S_REGISTRY` and `VIBESYS_K8S_BUILDER`. A variable that does not apply
@@ -230,7 +232,7 @@ refuses it naming the variable, where the release took it as it was.
 | Identity of the environment | The image digest, plus the machine: architecture, CPU model and count, and, when GPUs are passed, GPU model, count, driver and the driver's CUDA version. Two results are comparable only when all of these are equal. |
 | Containment | One container per command run (a check, or one benchmark sample). The CLI removes it on every path: exit, timeout, cancel, and the death of the process that started it. A timeout or a cancel first sends SIGTERM to the command's processes and waits for them to end, up to `stop_grace_seconds` (30 by default), so a trusted wrapper can delete what it created outside the container; then the container is removed. |
 | Placement | Where the Docker engine runs: this machine, another machine over ssh, or another machine inside a Slurm allocation. Chosen in the operator config. |
-| GPU access | `docker run --gpus <value>`, or `--runtime nvidia` with `NVIDIA_VISIBLE_DEVICES`. Never CDI. |
+| GPU access | `docker run --gpus all`, or `--runtime nvidia` with `NVIDIA_VISIBLE_DEVICES`; for a pool, the job's own devices by number, `--gpus '"device=2,3"'` (the quotes are part of the value: docker reads a list as CSV) or the runtime's variable. Never CDI. A placement's GPUs are a pool of `count` devices declared in the operator config, and a job is given a group of them by the vendor's role (`resource.Devices`); AMD GPUs are confined by `ROCR_VISIBLE_DEVICES` alone, and a host process by its variables alone, since neither the ROCm driver's devices nor a host process can be hidden by number. |
 | Build cache | A directory per task image on the engine's machine, mounted at `/vibesys/cache` and kept across commits and jobs. |
 | Artifacts | A directory per command run, mounted at `/vibesys/artifacts`, kept with the job afterwards. |
 | Machine-local inputs | Read-only directories the operator names, mounted at `/vibesys/mounts/<name>`. |
@@ -243,47 +245,59 @@ what it reads from a mount).
 ## The operator config
 
 Settings about the machine belong to whoever runs the CLI, never to a task: the
-host, the Slurm partition and GRES, Slurm options, GPU passthrough, a
+host, the Slurm partition and GPU type, Slurm options, the machine's GPUs, a
 Kubernetes cluster and machine-local mounts. They live in
 `$XDG_CONFIG_HOME/vibesys/cli.toml` (`~/.config/vibesys/cli.toml` by default;
 `VIBESYS_CLI_CONFIG` names another file), whose schema is `OperatorConfig` in
 `proto/vibesys/cli/v1/operator.proto`. Unknown keys are refused with the key's
 name. With no file, docker jobs run on this machine with no GPU, as before.
 
-A file names placements, where a docker job's container runs, and the
-resources each gives a container. A task names the resources its jobs need
-(`[environment] needs = ["kubernetes"]`), and a job may run on any placement
-that gives every need, which the scheduler chooses when the job starts, or only
-on the one `--placement` or `VIBESYS_PLACEMENT` restricts it to. Placements are
-interchangeable: where a result was taken is recorded with it and does not
-decide which results are compared or reused. The [CLI README](https://github.com/uw-syfi/vibesys/blob/main/cli/README.md#the-operator-config) lists every key.
-A file of the earlier shape below is read as the one placement `default`. The keys follow `vs-slurm`'s
-operator config where they mean the same thing (`host`, `ssh_command`,
-`rsync_command`, `remote_workspace_root`, `poll_interval_seconds`,
-`queue_timeout_seconds`).
+A file says `version = "0.2"`, the one version this build reads; a file with no
+version or another one, and every key of the shape before it (top-level
+`[docker]`, `[remote]` and `[slurm]`, `[scheduler] max_jobs`,
+`resources.gpu.devices`, `[slurm] gres`, `shared_gres` and `exclusive`), is
+refused, naming the key. It names placements, where a docker job's container
+runs, and the resources each gives a container. A task names the resources its
+jobs need (`[environment] needs = ["kubernetes"]`), and a job may run on any
+placement that gives every need, which the scheduler chooses when the job
+starts, or only on the one `--placement` or `VIBESYS_PLACEMENT` restricts it to.
+Placements are interchangeable: where a result was taken is recorded with it and
+does not decide which results are compared or reused. The [CLI README](https://github.com/uw-syfi/vibesys/blob/main/cli/README.md#the-operator-config)
+lists every key and has an example of each kind of placement. The keys follow
+`vs-slurm`'s operator config where they mean the same thing (`host`,
+`ssh_command`, `rsync_command`, `remote_workspace_root`,
+`poll_interval_seconds`, `queue_timeout_seconds`).
+
+A placement's GPUs are a table by vendor, `[placements.<name>.resources.gpu]`
+for NVIDIA and `[placements.<name>.resources.rocm]` for AMD, whose one fact is
+`count`, the GPUs of the machine (of each node, for a cluster). A count makes
+the GPUs `0` to `count - 1` a pool, from which jobs are given GPUs of their own,
+and on a placement of this machine it is also the default `max_jobs`. An empty table gives every job all of the machine's GPUs, as
+before. A Slurm placement needs the count, since its allocations ask for GPUs
+by count; `gres_type` names the cluster's GPU type when a partition names
+types. What an allocation asks for is computed from the count and the job, so
+the file has no GRES string, no shared GRES and no exclusive switch.
 
 ```toml
-[docker]
-placement = "slurm"        # "local" (default), "ssh" or "slurm"
-gpus = "all"               # a docker --gpus value; empty passes no GPU
-runtime = ""               # "nvidia": --runtime nvidia instead of --gpus
+version = "0.2"
 
-[docker.mounts]
-hf-cache = "/home/user/.cache/huggingface"   # on the engine's machine, read-only
-
-[remote]                   # for "ssh" and "slurm"
+[placements.spark]
+kind = "slurm"             # "local", "ssh", "slurm" or "apptainer"
+[placements.spark.remote]  # for "ssh", "slurm" and "apptainer"
 host = "host-a"            # an ssh destination or alias
 remote_workspace_root = "/home/user/vibesys-cli"
-
-[slurm]
+[placements.spark.slurm]
 partition = "gpu"
-gres = "gpu:1"             # what a benchmark sample asks for
-shared_gres = "shard:1"    # what a check asks for; gres when unset
-exclusive = true           # a benchmark sample holds the whole node
 cpus = 8                   # what a build and a check ask for
 memory = "32G"             # optional, a Slurm size
 srun_arguments = []
 queue_timeout_seconds = 86400
+[placements.spark.resources.gpu]
+count = 1                  # GPUs per node; the allocation asks for gpu:1
+# gres_type = "gb10"       # asks for gpu:gb10:1 instead
+runtime = ""               # "nvidia": --runtime nvidia instead of --gpus
+[placements.spark.resources.mounts]
+hf-cache = "/home/user/.cache/huggingface"   # on the engine's machine, read-only
 ```
 
 ## Decisions
@@ -460,11 +474,12 @@ when the container runs. The wait is bounded by `queue_timeout_seconds`.
 The ssh host must be the node that Docker runs on: the CLI inspects images,
 starts processes in the container and removes it by running `docker` there.
 That fits a single-node Slurm partition such as the DGX Spark, or a partition
-pinned to one node with `srun_arguments`. GPUs are passed with the configured
-`--gpus` value, not the GPUs Slurm allocated: on a node with one GPU, such as
-the Spark, "all" is the allocated GPU; on a node with several, a check that is
-not exclusive could see a GPU allocated to another job (see "What is not
-done").
+pinned to one node with `srun_arguments`. A container is passed the GPUs Slurm
+assigned to its step (`SLURM_STEP_GPUS`, else `SLURM_JOB_GPUS`) by number, in
+place of `--gpus all`, because Docker runs outside Slurm's cgroups and only the
+device list keeps it to them; a step that is told none passes what the container
+was configured with. This is not verified on a cluster with several GPUs per
+node (see "What is not done").
 
 ### An allocation asks for what its command needs
 
@@ -476,8 +491,16 @@ it runs:
 | Command | Asks for | Confined by |
 | --- | --- | --- |
 | Image build | `cpus` and `memory`; no GRES, not exclusive | a BuildKit builder of its own whose container is limited to the allocation's CPUs and `memory` |
-| Check (accuracy) | `shared_gres` (or `gres`), `cpus` and `memory`; not exclusive | `docker run --cpuset-cpus` with the allocation's CPUs |
-| Benchmark sample | `gres` and, with `exclusive = true`, the whole node | the same, which is then every CPU |
+| Check or command | as many GPUs as the job asked for (`--gpus N`; all of the node's when it asked for no count), `gpu[:<gres_type>]:<N>`, with `cpus` and `memory`; not exclusive | `docker run --cpuset-cpus` with the allocation's CPUs, and the GPUs Slurm assigned |
+| Benchmark sample | every GPU of the node (`gpu[:<gres_type>]:<count>`) and the whole node (`--exclusive`) | the same, which is then every CPU |
+
+An `apptainer` placement asks the same only when its GPU table has a `gres_type`, which says the
+cluster has a GPU resource to ask in. A cluster with none (its `scontrol show config` has no
+`GresTypes`, and `srun --gres=gpu:2` is refused) leaves `gres_type` out: Slurm then cannot keep two
+allocations off one GPU, so every allocation of the placement is a whole node (`--exclusive`), and
+the job's devices are chosen by the CLI inside it: as many as the job asked for, the lowest block of
+them, named in `ROCR_VISIBLE_DEVICES` (and `VIBESYS_GPUS`, `VIBESYS_GPU_DEVICES`). The ROCm runtime
+honours the variable and nothing enforces it: the container is given the driver's devices whole.
 
 The core marks an execution `Measured` when it is a benchmark sample, the docker
 environment passes that to the engine, and only the Slurm allocator reads it. A
@@ -816,8 +839,10 @@ later; until then the check covers 1.0 and every later schema.
   The node's GPUs are passed with `--rocm`,
   and whether a step on a partition that isolates GPUs gets the job's GPUs
   without `--gres` on the step is not verified.
-- Passing exactly the GPUs Slurm allocated on a node with several, instead of
-  the configured `--gpus` value, under `slurm`.
+- Passing exactly the GPUs Slurm allocated on a node with several is written
+  and unit-tested (the step's variables are read in the allocation's shell), and
+  has not been run on such a cluster, nor have the `--gres` an allocation asks
+  for per job.
 - A build's log is kept only when the build fails (its last lines are in the
   error); a successful build's output is discarded, so its duration is not in
   the job's log.
@@ -825,12 +850,10 @@ later; until then the check covers 1.0 and every later schema.
   task starts the candidate's compiler cache cold (on the Spark, 308 s for the
   candidate build instead of 9 to 10 s warm). Keying it by the task alone
   would keep it, at the cost of a cache that a new toolchain may misuse.
-- Without GPU shards, one GPU is one GRES: dropping `--exclusive` lets a
-  check share the node's CPUs, not its GPU, so two GPU jobs on a one-GPU node
-  still run one after the other. With the node's GPU split into Slurm shards
-  (`Gres=gpu:gb10:1,shard:4`), `shared_gres = "shard:1"` lets up to four checks
-  share it, while a sample still asks for `gpu:1` and the whole node. A shard
-  is a scheduling token, not a limit on the GPU, and `memory` is one too for a
+- One GPU is one GRES: dropping `--exclusive` lets a check share the node's
+  CPUs, not its GPU, so two GPU jobs on a one-GPU node still run one after the
+  other. Slurm shards of a GPU (`shard:<n>`) are not asked for: version 0.2 of
+  the operator config has no key for them. `memory` is a scheduling token for a
   container (the Docker daemon runs outside Slurm's cgroups): a bounded
   `memory` keeps Slurm from packing more checks onto the node than its unified
   memory holds, but nothing stops one check from using more.

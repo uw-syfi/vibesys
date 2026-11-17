@@ -9,6 +9,7 @@ import (
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/alloc"
+	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
@@ -40,6 +41,9 @@ func (s *Server) ReadPlacementCapacity(ctx context.Context, req *cliv1.ReadPlace
 	} else {
 		return nil, wire.Error(&core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("placement %q is not in the operator config", placement)})
 	}
+	if pool, ok := s.app.PoolOf(placement); ok {
+		out.GpuPool = gpuPoolOf(pool)
+	}
 	if run := req.GetRunId(); run != "" && s.app.HasAllocations(placement) {
 		vs, err := s.app.Allocations(core.RunID(run), false)
 		if err != nil {
@@ -52,4 +56,16 @@ func (s *Server) ReadPlacementCapacity(ctx context.Context, req *cliv1.ReadPlace
 		}
 	}
 	return &cliv1.ReadPlacementCapacityResponse{Capacity: out}, nil
+}
+
+// gpuPoolOf is the contract's message for a placement's pool of GPUs.
+func gpuPoolOf(p app.PoolView) *cliv1.GpuPoolCapacity {
+	out := &cliv1.GpuPoolCapacity{Pool: string(p.Pool), Size: uint32(p.Size), Free: uint32(p.Free)}
+	for _, h := range p.Holders {
+		out.Holders = append(out.Holders, &cliv1.GpuHolder{JobId: string(h.Job), Kind: wire.JobKind(h.Kind), RunId: string(h.Run), Gpus: wire.GpuGrant(h.Grant)})
+	}
+	for _, w := range p.Waiting {
+		out.Waiting = append(out.Waiting, &cliv1.GpuWaiter{JobId: string(w.Job), Wanted: uint32(w.Wanted)})
+	}
+	return out
 }

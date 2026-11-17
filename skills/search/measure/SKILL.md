@@ -30,9 +30,9 @@ Commit first: a job runs a commit, never a working copy, so what is not committe
 
 | You need | Run |
 | --- | --- |
-| The correctness check on a commit | `vibesys-cli submit check <sha>` |
+| The correctness check on a commit | `vibesys-cli submit check <sha> [--gpus N]` |
 | The official number: check, then benchmark samples | `vibesys-cli submit measure <sha> --samples 5 --plan <n>` |
-| Any other work that drives load (a sanity or tuning run, a profile) | `vibesys-cli submit command <sha> --image harness\|candidate -- <argv...>` |
+| Any other work that drives load (a sanity or tuning run, a profile) | `vibesys-cli submit command <sha> --image harness\|candidate [--gpus N] -- <argv...>` |
 
 Each prints a job id and returns at once. A command names the image it runs in, with no default:
 `--image harness` is the task's image, where its check and benchmark run, and on a task with
@@ -45,6 +45,9 @@ whose `--wrap '<profiler>'` starts the candidate's server under the profiler:
 your plan, so the number is read against that idea, and `--no-plan` says it tests none, as the
 baseline and a re-measure of the head do. A measure from a run that gives neither is refused,
 naming both flags; give both and it is refused too. `--plan` also links a check or a command job.
+GPUs: a check or command of a GPU task says `--gpus N` (the fewest the step needs; there is no
+default), and a measure takes the whole node. The task's GPU budget, how to check per-device use,
+and what to report are in [gpus.md](references/gpus.md).
 Useful flags: `--note "<text>"` says why you ran it (notes are for readers; they change no result), and
 `--service` with `--probe` runs the command against a service the CLI starts and stops (not
 beside a candidate's server, which the CLI already starts).

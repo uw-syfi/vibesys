@@ -40,6 +40,28 @@ func words(r *rand.Rand, n int) []string {
 	return out
 }
 
+// anyGPUCount is a count of GPUs from 1 to most.
+func anyGPUCount(r *rand.Rand, most int) core.GPUCount {
+	// The number is in range, so it is always a count.
+	c, _ := core.ParseGPUCount(uint32(1+r.IntN(most)), "gpus")
+	return c
+}
+
+// anyGrant is GPUs of a pool, some of whose devices other jobs hold, chosen by the CLI or a cluster.
+func anyGrant(r *rand.Rand) core.Grant {
+	size := anyGPUCount(r, core.MaxPoolSize)
+	held, _ := core.TakeDevices(size, nil, anyGPUCount(r, size.Int()))
+	devices, ok := core.TakeDevices(size, []core.DeviceGroup{held}, anyGPUCount(r, size.Int()))
+	source := pick(r, core.GrantByCLI, core.GrantByCluster)
+	switch {
+	case !ok:
+		devices = held
+	case source == core.GrantByCluster && r.IntN(2) == 0:
+		devices = core.DeviceGroup{} // not read back yet
+	}
+	return core.Grant{Pool: core.PoolID(pick(r, "gpu:local", "rocm:mi300@login-a")), Size: size, Devices: devices, Whole: r.IntN(2) == 0, Source: source}
+}
+
 func anyJob(r *rand.Rand) core.Job {
 	j := core.Job{
 		ID:          core.JobID(fmt.Sprintf("j%d", r.IntN(100))),
@@ -61,6 +83,13 @@ func anyJob(r *rand.Rand) core.Job {
 	default:
 		j.Spec = core.JobSpec{Commit: commit, Settings: core.MeasureSettings{Samples: uint32(r.IntN(9)), Recheck: r.IntN(2) == 0}}
 		j.Key = "k2"
+	}
+	if r.IntN(2) == 0 {
+		j.Spec.GPUs = anyGPUCount(r, core.MaxPoolSize)
+	}
+	if r.IntN(2) == 0 {
+		g := anyGrant(r)
+		j.GPUs = &g
 	}
 	if r.IntN(2) == 0 {
 		fp := core.Fingerprint{Kind: core.EnvironmentHost, Backend: pick(r, core.BackendCPU, core.BackendCUDA)}
@@ -437,6 +466,48 @@ func TestAReceivedFailureKeepsAKindThisBuildDoesNotKnow(t *testing.T) {
 		}
 		if r := wire.ReceivedOf(err); r == nil || r.Failure.GetKind() != kind {
 			t.Fatalf("ReceivedOf kind %d = %v", kind, r)
+		}
+	}
+}
+
+// The GPUs said of results are what their jobs' records have, for every job: the count it asked
+// for and the grant it was given, and nothing for a job the record says nothing of or one that is
+// not among the jobs.
+func TestTheGPUsSaidOfResultsAreWhatTheirJobsRecordsHave(t *testing.T) {
+	r := newRand(21)
+	for range 300 {
+		var jobs []core.Job
+		var results []core.Result
+		for i := range 1 + r.IntN(5) {
+			j := anyJob(r)
+			j.ID = core.JobID(fmt.Sprintf("j%d", i))
+			results = append(results, core.Result{Job: j.ID})
+			jobs = append(jobs, j)
+		}
+		results = append(results, core.Result{Job: "stranger"})
+		got := wire.JobGPUs(results, jobs)
+		byJob := map[string]*cliv1.JobGpus{}
+		for _, u := range got {
+			byJob[u.GetJobId()] = u
+		}
+		for _, j := range jobs {
+			u := byJob[string(j.ID)]
+			says := j.Spec.GPUs.IsSet() || j.GPUs != nil
+			if says != (u != nil) {
+				t.Fatalf("job %s: record says something = %v, got %v", j.ID, says, u)
+			}
+			if u == nil {
+				continue
+			}
+			if j.Spec.GPUs.IsSet() != (u.Asked != nil) || (u.Asked != nil && int(u.GetAsked()) != j.Spec.GPUs.Int()) {
+				t.Fatalf("job %s asked %d, got %v", j.ID, j.Spec.GPUs.Int(), u.Asked)
+			}
+			if (j.GPUs != nil) != (u.Grant != nil) || (j.GPUs != nil && !proto.Equal(u.Grant, wire.GpuGrant(*j.GPUs))) {
+				t.Fatalf("job %s holds %+v, got %v", j.ID, j.GPUs, u.Grant)
+			}
+		}
+		if byJob["stranger"] != nil {
+			t.Fatal("a result of no known job has GPUs said of it")
 		}
 	}
 }

@@ -154,7 +154,7 @@ class SkillEnvironment(Message[_SkillEnvironmentFields]):
 
         cli: str
 
-_JobEnvironmentFields: TypeAlias = Literal["artifacts", "cache", "service_url", "timeout_seconds", "mounts"]
+_JobEnvironmentFields: TypeAlias = Literal["artifacts", "cache", "service_url", "timeout_seconds", "mounts", "gpus", "gpu_devices"]
 
 class JobEnvironment(Message[_JobEnvironmentFields]):
     """
@@ -202,9 +202,26 @@ class JobEnvironment(Message[_JobEnvironmentFields]):
             ```proto
             repeated string mounts = 5;
             ```
+        gpus:
+            How many GPUs of the machine's pool the job was given, whatever their vendor. Zero (not set)
+            when the job was given none from a pool.
+
+            ```proto
+            uint32 gpus = 6;
+            ```
+        gpu_devices:
+            The numbers of those GPUs in the pool, which are the numbers the vendor's own variable takes
+            (CUDA_VISIBLE_DEVICES, ROCR_VISIBLE_DEVICES), in ascending order and separated by commas, such
+            as "2,3". Inside a container the vendor's runtime may number the devices it passes from zero,
+            so a program that reads the vendor's variable reads that and not this one; this one says which
+            GPUs of the machine they are.
+
+            ```proto
+            string gpu_devices = 7;
+            ```
     """
 
-    __slots__ = ("artifacts", "cache", "service_url", "timeout_seconds", "mounts")
+    __slots__ = ("artifacts", "cache", "service_url", "timeout_seconds", "mounts", "gpus", "gpu_devices")
 
     if TYPE_CHECKING:
 
@@ -216,6 +233,8 @@ class JobEnvironment(Message[_JobEnvironmentFields]):
             service_url: str = "",
             timeout_seconds: int = 0,
             mounts: list[str] | None = None,
+            gpus: int = 0,
+            gpu_devices: str = "",
         ) -> None:
             pass
 
@@ -224,6 +243,8 @@ class JobEnvironment(Message[_JobEnvironmentFields]):
         service_url: str
         timeout_seconds: int
         mounts: list[str]
+        gpus: int
+        gpu_devices: str
 
 _KubernetesEnvironmentFields: TypeAlias = Literal["kubeconfig", "registry", "builder"]
 
@@ -335,7 +356,7 @@ extend google.protobuf.MessageOptions { optional string env_namespace = 50100 [j
 
 
 _DESC = file_desc(
-    b'\n\x18vibesys/cli/v1/env.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto"\x9b\x02\n\x0cAgentContext\x128\n\nrepository\x18\x01 \x01(\tR\nrepositoryB\x18\xbaH\x05r\x03(\x80 \xa2\xbb\x18\x0cVIBESYS_REPO\x12,\n\x04task\x18\x02 \x01(\tR\x04taskB\x18\xbaH\x05r\x03(\x80\x02\xa2\xbb\x18\x0cVIBESYS_TASK\x12.\n\x06run_id\x18\x03 \x01(\tR\x05runIdB\x17\xbaH\x05r\x03(\x80\x02\xa2\xbb\x18\x0bVIBESYS_RUN\x12B\n\x07harness\x18\x04 \x01(\tR\x07harnessB(\xbaH\x12r\x10(@2\x0c^[a-z0-9-]*$\xa2\xbb\x18\x0fVIBESYS_HARNESS\x12/\n\x05agent\x18\x05 \x01(\tR\x05agentB\x19\xbaH\x05r\x03(\x80\x02\xa2\xbb\x18\rVIBESYS_AGENT"N\n\x0fOperatorContext\x12;\n\tplacement\x18\x01 \x01(\tR\tplacementB\x1d\xbaH\x05r\x03(\x80\x02\xa2\xbb\x18\x11VIBESYS_PLACEMENT"J\n\x10SkillEnvironment\x126\n\x03cli\x18\x01 \x01(\tR\x03cliB$\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\x0bVIBESYS_CLI"\xa8\x03\n\x0eJobEnvironment\x12O\n\tartifacts\x18\x01 \x01(\tR\tartifactsB1\xbaH\x15r\x13(\x80 2\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\x15VIBESYS_ARTIFACTS_DIR\x12C\n\x05cache\x18\x02 \x01(\tR\x05cacheB-\xbaH\x15r\x13(\x80 2\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\x11VIBESYS_CACHE_DIR\x12V\n\x0bservice_url\x18\x03 \x01(\tR\nserviceUrlB5\xbaH\x1br\x19(\x80\x102\x14^(https?://[^\\s]+)?$\xa2\xbb\x18\x13VIBESYS_SERVICE_URL\x12R\n\x0ftimeout_seconds\x18\x04 \x01(\rR\x0etimeoutSecondsB)\xbaH\x07*\x05\x18\x80\xe7\x84\x0f\xa2\xbb\x18\x1bVIBESYS_JOB_TIMEOUT_SECONDS\x12T\n\x06mounts\x18\x05 \x03(\tR\x06mountsB<\xbaH\'\x92\x01$\x10@\x18\x01"\x1er\x1c2\x1a^[a-z0-9][a-z0-9_-]{0,62}$\xa2\xbb\x18\x0eVIBESYS_MOUNTS"\x86\x02\n\x15KubernetesEnvironment\x12F\n\nkubeconfig\x18\x01 \x01(\tR\nkubeconfigB&\xbaH\x15r\x13(\x80 2\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\nKUBECONFIG\x12S\n\x08registry\x18\x02 \x01(\tR\x08registryB7\xbaH\x1cr\x1a(\x80\x042\x15^[A-Za-z0-9._:/@+-]*$\xa2\xbb\x18\x14VIBESYS_K8S_REGISTRY\x12P\n\x07builder\x18\x03 \x01(\tR\x07builderB6\xbaH\x1cr\x1a(\x80\x042\x15^[A-Za-z0-9._:/@+-]*$\xa2\xbb\x18\x13VIBESYS_K8S_BUILDER"m\n\x0cJobToolPlace\x12]\n\x11runtime_directory\x18\x01 \x01(\tR\x10runtimeDirectoryB0\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\x17VIBESYS_CLI_RUNTIME_DIR::\n\x08env_name\x18\xb4\x87\x03 \x01(\t\x12\x1d.google.protobuf.FieldOptionsR\x07envName:F\n\renv_namespace\x18\xb4\x87\x03 \x01(\t\x12\x1f.google.protobuf.MessageOptionsR\x0cenvNamespaceB9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3',
+    b'\n\x18vibesys/cli/v1/env.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto"\x9b\x02\n\x0cAgentContext\x128\n\nrepository\x18\x01 \x01(\tR\nrepositoryB\x18\xbaH\x05r\x03(\x80 \xa2\xbb\x18\x0cVIBESYS_REPO\x12,\n\x04task\x18\x02 \x01(\tR\x04taskB\x18\xbaH\x05r\x03(\x80\x02\xa2\xbb\x18\x0cVIBESYS_TASK\x12.\n\x06run_id\x18\x03 \x01(\tR\x05runIdB\x17\xbaH\x05r\x03(\x80\x02\xa2\xbb\x18\x0bVIBESYS_RUN\x12B\n\x07harness\x18\x04 \x01(\tR\x07harnessB(\xbaH\x12r\x10(@2\x0c^[a-z0-9-]*$\xa2\xbb\x18\x0fVIBESYS_HARNESS\x12/\n\x05agent\x18\x05 \x01(\tR\x05agentB\x19\xbaH\x05r\x03(\x80\x02\xa2\xbb\x18\rVIBESYS_AGENT"N\n\x0fOperatorContext\x12;\n\tplacement\x18\x01 \x01(\tR\tplacementB\x1d\xbaH\x05r\x03(\x80\x02\xa2\xbb\x18\x11VIBESYS_PLACEMENT"J\n\x10SkillEnvironment\x126\n\x03cli\x18\x01 \x01(\tR\x03cliB$\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\x0bVIBESYS_CLI"\xb8\x04\n\x0eJobEnvironment\x12O\n\tartifacts\x18\x01 \x01(\tR\tartifactsB1\xbaH\x15r\x13(\x80 2\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\x15VIBESYS_ARTIFACTS_DIR\x12C\n\x05cache\x18\x02 \x01(\tR\x05cacheB-\xbaH\x15r\x13(\x80 2\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\x11VIBESYS_CACHE_DIR\x12V\n\x0bservice_url\x18\x03 \x01(\tR\nserviceUrlB5\xbaH\x1br\x19(\x80\x102\x14^(https?://[^\\s]+)?$\xa2\xbb\x18\x13VIBESYS_SERVICE_URL\x12R\n\x0ftimeout_seconds\x18\x04 \x01(\rR\x0etimeoutSecondsB)\xbaH\x07*\x05\x18\x80\xe7\x84\x0f\xa2\xbb\x18\x1bVIBESYS_JOB_TIMEOUT_SECONDS\x12T\n\x06mounts\x18\x05 \x03(\tR\x06mountsB<\xbaH\'\x92\x01$\x10@\x18\x01"\x1er\x1c2\x1a^[a-z0-9][a-z0-9_-]{0,62}$\xa2\xbb\x18\x0eVIBESYS_MOUNTS\x12+\n\x04gpus\x18\x06 \x01(\rR\x04gpusB\x17\xbaH\x04*\x02\x18@\xa2\xbb\x18\x0cVIBESYS_GPUS\x12a\n\x0bgpu_devices\x18\x07 \x01(\tR\ngpuDevicesB@\xbaH&r$2"^([0-9]{1,2}(,[0-9]{1,2}){0,63})?$\xa2\xbb\x18\x13VIBESYS_GPU_DEVICES"\x86\x02\n\x15KubernetesEnvironment\x12F\n\nkubeconfig\x18\x01 \x01(\tR\nkubeconfigB&\xbaH\x15r\x13(\x80 2\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\nKUBECONFIG\x12S\n\x08registry\x18\x02 \x01(\tR\x08registryB7\xbaH\x1cr\x1a(\x80\x042\x15^[A-Za-z0-9._:/@+-]*$\xa2\xbb\x18\x14VIBESYS_K8S_REGISTRY\x12P\n\x07builder\x18\x03 \x01(\tR\x07builderB6\xbaH\x1cr\x1a(\x80\x042\x15^[A-Za-z0-9._:/@+-]*$\xa2\xbb\x18\x13VIBESYS_K8S_BUILDER"m\n\x0cJobToolPlace\x12]\n\x11runtime_directory\x18\x01 \x01(\tR\x10runtimeDirectoryB0\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\x17VIBESYS_CLI_RUNTIME_DIR::\n\x08env_name\x18\xb4\x87\x03 \x01(\t\x12\x1d.google.protobuf.FieldOptionsR\x07envName:F\n\renv_namespace\x18\xb4\x87\x03 \x01(\t\x12\x1f.google.protobuf.MessageOptionsR\x0cenvNamespaceB9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3',
     [
         validate_pb.desc(),
         descriptor_pb.desc(),

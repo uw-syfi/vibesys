@@ -67,12 +67,16 @@ type Exporter interface {
 // Sizing is what an allocation asks for, by what its container runs.
 type Sizing struct {
 	Partition string
-	// Gres is what a measured container's allocation asks for.
-	Gres string
-	// SharedGres is what an unmeasured container's allocation asks for instead of Gres, when set.
-	SharedGres string
-	// Exclusive gives a measured container's allocation the whole node.
-	Exclusive bool
+	// GPUs is how many GPUs a node has, which the placement's GPU table declares: zero when the
+	// allocations ask for none.
+	GPUs int
+	// GresType is the type of the cluster's GPU resource. When it is set the cluster is taken to
+	// have one, and an allocation asks for gpu:<type>:<n>: every GPU of the node for a measured
+	// container, and as many as the job asked for for any other. When it is empty the cluster is
+	// taken to have none that an allocation can ask for (a request for one is refused), so nothing
+	// keeps two allocations off one GPU, and every allocation holds a whole node: the CLI gives the
+	// job the devices it asked for of it by variable, which the runtime honours and nothing enforces.
+	GresType string
 	// CPUs is how many CPUs an allocation that is not the whole node asks for; zero is 8.
 	CPUs int
 	// Memory, when set, is the memory such an allocation asks for, as Slurm writes a size.
@@ -82,20 +86,26 @@ type Sizing struct {
 }
 
 // Options are the submit command's options of an allocation for a container that is measured or
-// not.
-func (s Sizing) Options(measured bool) []string {
+// not, for the whole node's GPUs. A standing or reused allocation is sized so.
+func (s Sizing) Options(measured bool) []string { return s.OptionsFor(measured, 0) }
+
+// OptionsFor is Options for an allocation of a job that asked for gpus GPUs (zero for none): an
+// unmeasured container's allocation asks for that many of the node's when the cluster has a GPU
+// resource to ask for them in (GresType), and a measured one for all of them.
+func (s Sizing) OptionsFor(measured bool, gpus int) []string {
 	var out []string
 	if s.Partition != "" {
 		out = append(out, "--partition="+s.Partition)
 	}
-	gres := s.Gres
-	if !measured && s.SharedGres != "" {
-		gres = s.SharedGres
+	if s.GPUs > 0 && s.GresType != "" {
+		n := s.GPUs
+		if !measured && gpus > 0 && gpus < s.GPUs {
+			n = gpus
+		}
+		out = append(out, fmt.Sprintf("--gres=gpu:%s:%d", s.GresType, n))
 	}
-	if gres != "" {
-		out = append(out, "--gres="+gres)
-	}
-	if measured && s.Exclusive {
+	// A cluster with no GPU resource cannot keep two allocations off one GPU, so each holds a node.
+	if measured || (s.GPUs > 0 && s.GresType == "") {
 		out = append(out, "--exclusive")
 	} else {
 		cpus := s.CPUs
@@ -642,7 +652,7 @@ func (e *Engine) allocate(ctx context.Context, b *box, log io.Writer) error {
 	}
 	job, err := e.cfg.Cluster.Submit(ctx, Allocation{
 		Name: JobName(b.name), Comment: RunComment(e.placementScope(scope), scope), Limit: limit,
-		Options: e.cfg.Sizing.Options(b.spec.Measured),
+		Options: e.cfg.Sizing.OptionsFor(b.spec.Measured, b.spec.AskedGPUs),
 	})
 	if err != nil {
 		return err

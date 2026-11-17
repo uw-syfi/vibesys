@@ -232,3 +232,100 @@ func TestAMeasureOfAnIsolatedPlacementTakesASlot(t *testing.T) {
 		t.Fatalf("started %v, want %v", started, want)
 	}
 }
+
+// What a job claims of a pool follows its work, in every combination of what it asked for, whether
+// it is a measure, whether its task needs the pool's kind and whether it started: a recorded grant
+// is claimed as it is, alone when it is the whole pool; a count is claimed as asked; a measure takes the
+// whole pool alone; a job of a task that needs GPUs and asked for no count takes the whole pool
+// alone; and any other job claims none. A claim is always of the pool and never more than the
+// pool's size, for a job that has not started.
+func TestWhatAJobClaimsOfAPool(t *testing.T) {
+	const size = 8
+	pool := &schedule.Pool{Resource: "gpu:local", Size: size, Kind: core.ResourceGPU}
+	r := rand.New(rand.NewPCG(5, 6))
+	for range 4000 {
+		n := 1 + r.IntN(size)
+		var asked core.GPUCount
+		if r.IntN(2) == 0 {
+			asked, _ = core.ParseGPUCount(uint32(n), "test")
+		}
+		measure, needs, started := r.IntN(3) == 0, r.IntN(2) == 0, r.IntN(2) == 0
+		job := core.Job{Spec: core.JobSpec{GPUs: asked}}
+		if needs {
+			job.Needs = []core.ResourceKind{core.ResourceGPU}
+		}
+		if started {
+			job.Environment = &core.Fingerprint{}
+		}
+		var recorded *core.Grant
+		if started && r.IntN(2) == 0 {
+			sz, _ := core.ParseGPUCount(size, "test")
+			g := 1 + r.IntN(size)
+			devices := make([]uint32, g)
+			for i := range devices {
+				devices[i] = uint32(i)
+			}
+			group, err := core.ParseDeviceGroup(devices, sz, "test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			recorded = &core.Grant{Pool: "gpu:local", Size: sz, Devices: group, Whole: g == size && measure, Source: core.GrantByCLI}
+			job.GPUs = recorded
+		}
+		got := schedule.PoolClaims(pool, job, measure)
+		var want []schedule.Claim
+		switch {
+		case recorded != nil:
+			want = []schedule.Claim{{Resource: "gpu:local", Amount: recorded.Devices.Len(), Exclusive: recorded.Whole}}
+		case started && (measure || needs):
+			want = []schedule.Claim{{Resource: "gpu:local", Amount: size, Exclusive: true}}
+		case started:
+		case asked.IsSet():
+			want = []schedule.Claim{{Resource: "gpu:local", Amount: n}}
+		case measure || needs:
+			want = []schedule.Claim{{Resource: "gpu:local", Amount: size, Exclusive: true}}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("job %+v (measure %v): claims %+v, want %+v", job, measure, got, want)
+		}
+	}
+	if got := schedule.PoolClaims(nil, core.Job{Spec: core.JobSpec{GPUs: gpuCount(t, 2)}}, true); got != nil {
+		t.Errorf("a placement with no pool: claims %+v", got)
+	}
+}
+
+func gpuCount(t *testing.T, n int) core.GPUCount {
+	t.Helper()
+	c, err := core.ParseGPUCount(uint32(n), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// A job on a placement with a pool claims its slot, then its pool; a host job claims a slot of the
+// host and the machine's pool, so that host and docker jobs there draw from the same GPUs.
+func TestAJobOnAPlacementWithAPoolClaimsItsSlotAndItsGPUs(t *testing.T) {
+	pool := &schedule.Pool{Resource: "gpu:local", Size: 8, Kind: core.ResourceGPU}
+	d := schedule.PlacementDemand{
+		Placements: map[string]schedule.Offered{"here": {Resources: []core.ResourceKind{core.ResourceGPU}, Pool: pool}},
+		Host:       schedule.PlacementOf("here"), HostPool: pool,
+	}
+	for _, env := range []core.EnvironmentKind{core.EnvironmentDocker, core.EnvironmentHost} {
+		job := core.Job{Spec: core.JobSpec{Environment: env, GPUs: gpuCount(t, 3), Settings: core.CheckSettings{}}}
+		if env == core.EnvironmentDocker {
+			job.Needs = []core.ResourceKind{core.ResourceGPU}
+		}
+		options := d.Options(job)
+		want := []schedule.Claim{{Resource: schedule.PlacementOf("here"), Amount: 1}, {Resource: "gpu:local", Amount: 3}}
+		if len(options) != 1 || !reflect.DeepEqual(options[0].Claims, want) {
+			t.Errorf("%s job: options %+v, want the claims %+v", env, options, want)
+		}
+		job.Spec.Settings = core.MeasureSettings{}
+		job.Spec.GPUs = core.GPUCount{}
+		want = []schedule.Claim{{Resource: schedule.PlacementOf("here"), Amount: 1, Exclusive: true}, {Resource: "gpu:local", Amount: 8, Exclusive: true}}
+		if options = d.Options(job); len(options) != 1 || !reflect.DeepEqual(options[0].Claims, want) {
+			t.Errorf("%s measure: options %+v, want the claims %+v", env, options, want)
+		}
+	}
+}

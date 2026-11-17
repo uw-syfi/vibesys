@@ -4,6 +4,7 @@ package vibesys.cli.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/job.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
 
@@ -201,9 +202,56 @@ message PlacementCapacity {
   repeated Allocation held = 4 [(buf.validate.field).repeated.max_items = 1024];
   // How long recent allocations of the placement waited to start, newest first.
   repeated WaitSample recent_waits = 5 [(buf.validate.field).repeated.max_items = 256];
+  // The placement's GPU pool, when its file declares a count and the CLI hands the devices out
+  // (a local or ssh placement). Unset otherwise.
+  GpuPoolCapacity gpu_pool = 6;
   oneof detail {
     SlurmCapacity slurm = 20;
   }
+}
+
+// GpuPoolCapacity is a pool of a machine's GPUs, how many of them are free now, and which jobs hold
+// the others and which wait for some.
+message GpuPoolCapacity {
+  option (buf.validate.message).cel = {
+    id: "gpu_pool_capacity.free_within_size"
+    message: "free is at most size"
+    expression: "this.free <= this.size"
+  };
+
+  // The pool, which names the machine whose GPUs they are, such as gpu:local.
+  string pool = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  uint32 size = 2 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 64
+  }];
+  uint32 free = 3 [(buf.validate.field).uint32.lte = 64];
+  // The jobs that hold devices of the pool, oldest first.
+  repeated GpuHolder holders = 4 [(buf.validate.field).repeated.max_items = 64];
+  // The jobs that wait for devices of the pool, in the order they will be served.
+  repeated GpuWaiter waiting = 5 [(buf.validate.field).repeated.max_items = 1024];
+}
+
+// GpuHolder is a job that holds devices of a pool.
+message GpuHolder {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  JobKind kind = 2;
+  // The run that submitted the job first. Empty when it named none.
+  string run_id = 3;
+  // The devices the job holds.
+  GpuGrant gpus = 4 [(buf.validate.field).required = true];
+}
+
+// GpuWaiter is a job that waits for devices of a pool, and how many it claims.
+message GpuWaiter {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  uint32 wanted = 2 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 64
+  }];
 }
 
 // WaitSample is how long one allocation waited from its request to its start.

@@ -101,10 +101,10 @@ var commands = map[string]func(context.Context, deps, []string) int{
 const usage = `usage: vibesys-cli <command> [flags]
 
 commands:
-  submit check <commit> [flags]                  queue the task's check and print the job
+  submit check <commit> [--gpus n] [flags]       queue the task's check and print the job
   submit measure <commit> [--samples n] [--recheck] [--plan n | --no-plan] [flags]
                                                  queue the task's benchmark and print the job
-  submit command <commit> --image harness|candidate [--wrap prefix] [flags] -- <argv...>
+  submit command <commit> --image harness|candidate [--gpus n] [--wrap prefix] [flags] -- <argv...>
                                                  queue a command in the task's image (harness:
                                                  where the check and benchmark run, beside the
                                                  candidate's server, which --wrap wraps, on a task

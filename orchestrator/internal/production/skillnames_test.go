@@ -21,6 +21,7 @@ const skillsRoot = "../../../skills/search"
 // each with its owner. The installer's settings are read by POSIX sh before any binary of ours exists
 // (docs/contributing/process-boundaries.md), so it stays a plain name.
 var namesOfOthers = map[string]string{
+	"VIBESYS_CLI_CONFIG":       "vibesys-cli's own setting, the operator config file it reads (cli/internal/operator), which the setup skill tells a user how to write",
 	"VIBESYS_CLI_INSTALL_DIR":  "the installer's own setting, where it puts vibesys-cli",
 	"VIBESYS_CLI_VERSION":      "the installer's own setting, the version it installs instead of the newest",
 	"VIBESYS_CLI_RELEASES_URL": "the installer's own setting, the mirror it reads release assets from",

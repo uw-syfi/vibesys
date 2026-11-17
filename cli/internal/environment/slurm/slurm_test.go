@@ -190,8 +190,6 @@ func srunOptions(t *testing.T, argv []string) ([]string, []string) {
 	return argv[1:i], argv[i+1:]
 }
 
-// Builds ask for CPUs only, checks for the GPUs and a share of the node, and only a measured
-// container, when the operator asks for it, for the whole node.
 func TestAnAllocationIsSizedByWhatTheCommandIs(t *testing.T) {
 	base := []string{"--job-name=vibesys-docker-c", "--nodes=1", "--ntasks=1"}
 	cases := []struct {
@@ -200,27 +198,27 @@ func TestAnAllocationIsSizedByWhatTheCommandIs(t *testing.T) {
 		x         dockercli.Allocation
 		want      []string
 	}{
-		{"a build", slurm.Allocator{Partition: "gpu", Gres: "gpu:1", Exclusive: true, CPUs: 6, Memory: "16G"},
+		{"a build", slurm.Allocator{Partition: "gpu", GPUs: 8, CPUs: 6, Memory: "16G"},
 			dockercli.Allocation{Name: "c", Build: true},
 			[]string{"--time=240", "--partition=gpu", "--cpus-per-task=6", "--mem=16G"}},
-		{"a check", slurm.Allocator{Partition: "gpu", Gres: "gpu:1", Exclusive: true, Memory: "16G"},
+		{"a check that asked for no count has every GPU", slurm.Allocator{Partition: "gpu", GPUs: 8, Memory: "16G"},
 			dockercli.Allocation{Name: "c", Scope: "d42", Limit: time.Hour},
-			[]string{"--time=70", "--comment=d42", "--partition=gpu", "--gres=gpu:1", "--cpus-per-task=8", "--mem=16G"}},
-		{"a sample", slurm.Allocator{Partition: "gpu", Gres: "gpu:1", Exclusive: true, Memory: "16G", Arguments: []string{"--nodelist=node-a"}},
-			dockercli.Allocation{Name: "c", Scope: "d42", Limit: time.Hour, Measured: true},
-			[]string{"--time=70", "--comment=d42", "--partition=gpu", "--gres=gpu:1", "--exclusive", "--nodelist=node-a"}},
-		{"a sample on a shared node", slurm.Allocator{Gres: "gpu:1", CPUs: 4},
-			dockercli.Allocation{Name: "c", Limit: time.Minute, Measured: true},
-			[]string{"--time=11", "--gres=gpu:1", "--cpus-per-task=4"}},
-		{"a check on a sharded GPU", slurm.Allocator{Gres: "gpu:1", SharedGres: "shard:1", Exclusive: true, Memory: "32G"},
+			[]string{"--time=70", "--comment=d42", "--partition=gpu", "--gres=gpu:8", "--cpus-per-task=8", "--mem=16G"}},
+		{"a check that asked for 2", slurm.Allocator{Partition: "gpu", GPUs: 8, Memory: "16G"},
+			dockercli.Allocation{Name: "c", Scope: "d42", Limit: time.Hour, GPUs: 2},
+			[]string{"--time=70", "--comment=d42", "--partition=gpu", "--gres=gpu:2", "--cpus-per-task=8", "--mem=16G"}},
+		{"a check that asked for 2 of a type", slurm.Allocator{GPUs: 8, GresType: "a100"},
+			dockercli.Allocation{Name: "c", Limit: time.Minute, GPUs: 2},
+			[]string{"--time=11", "--gres=gpu:a100:2", "--cpus-per-task=8"}},
+		{"a check that asked for more than a node has", slurm.Allocator{GPUs: 4},
+			dockercli.Allocation{Name: "c", Limit: time.Minute, GPUs: 8},
+			[]string{"--time=11", "--gres=gpu:4", "--cpus-per-task=8"}},
+		{"a sample takes every GPU and the node, whatever the job asked", slurm.Allocator{Partition: "gpu", GPUs: 8, GresType: "h100", Memory: "16G", Arguments: []string{"--nodelist=node-a"}},
+			dockercli.Allocation{Name: "c", Scope: "d42", Limit: time.Hour, Measured: true, GPUs: 2},
+			[]string{"--time=70", "--comment=d42", "--partition=gpu", "--gres=gpu:h100:8", "--exclusive", "--nodelist=node-a"}},
+		{"a check of a placement with no GPUs", slurm.Allocator{CPUs: 4},
 			dockercli.Allocation{Name: "c", Limit: time.Minute},
-			[]string{"--time=11", "--gres=shard:1", "--cpus-per-task=8", "--mem=32G"}},
-		{"a sample on a sharded GPU", slurm.Allocator{Gres: "gpu:1", SharedGres: "shard:1", Exclusive: true, Memory: "32G"},
-			dockercli.Allocation{Name: "c", Limit: time.Minute, Measured: true},
-			[]string{"--time=11", "--gres=gpu:1", "--exclusive"}},
-		{"a build on a sharded GPU", slurm.Allocator{Gres: "gpu:1", SharedGres: "shard:1", Exclusive: true},
-			dockercli.Allocation{Name: "c", Build: true},
-			[]string{"--time=240", "--cpus-per-task=8"}},
+			[]string{"--time=11", "--cpus-per-task=4"}},
 	}
 	for _, c := range cases {
 		opts, _ := srunOptions(t, c.allocator.Allocate(c.x, []string{"docker", "run", "x"}))
@@ -246,9 +244,17 @@ func fakeDocker(t *testing.T) (program, calls string) {
 // runAllocated runs what srun would run of an allocated command line, here.
 func runAllocated(t *testing.T, argv []string, fail string) (int, string) {
 	t.Helper()
+	return runAllocatedWith(t, argv, fail)
+}
+
+// runAllocatedWith is runAllocated in an environment that also holds the variables, as Slurm sets
+// those of a step.
+func runAllocatedWith(t *testing.T, argv []string, fail string, variables ...string) (int, string) {
+	t.Helper()
 	_, inner := srunOptions(t, argv)
 	cmd := exec.Command(inner[0], inner[1:]...)
-	cmd.Env = append(cmd.Environ(), "FAIL="+fail)
+	cmd.Env = append(append(cmd.Environ(), "SLURM_STEP_GPUS=", "SLURM_JOB_GPUS="), "FAIL="+fail)
+	cmd.Env = append(cmd.Env, variables...)
 	err := cmd.Run()
 	code := 0
 	var exit *exec.ExitError
@@ -284,6 +290,30 @@ func TestAContainerIsConfinedToTheCPUsOfItsAllocation(t *testing.T) {
 	}
 	if got, want := readLines(t, calls), []string{"run --cpuset-cpus=" + cpus + " --rm img sh -c a b"}; !slices.Equal(got, want) {
 		t.Errorf("docker was called with %q, want %q", got, want)
+	}
+}
+
+// A container gets the GPUs Slurm assigned to its step, by number, in place of "all": the step's, or
+// else the job's; a value of --gpus that is not "all" is the caller's and stays; and a step that is
+// told none passes what it was configured with.
+func TestAContainerGetsTheGPUsSlurmAssignedItsStep(t *testing.T) {
+	for name, tc := range map[string]struct {
+		variables []string
+		flag      string
+		want      string
+	}{
+		"the step's GPUs":               {[]string{"SLURM_STEP_GPUS=2,3", "SLURM_JOB_GPUS=0,1,2,3"}, "all", `--gpus "device=2,3"`},
+		"the job's GPUs when no step's": {[]string{"SLURM_JOB_GPUS=5"}, "all", `--gpus "device=5"`},
+		"none assigned":                 {nil, "all", "--gpus all"},
+		"a value the caller chose":      {[]string{"SLURM_STEP_GPUS=2,3"}, "device=0", "--gpus device=0"},
+	} {
+		program, calls := fakeDocker(t)
+		argv := slurm.Allocator{GPUs: 4}.Allocate(dockercli.Allocation{Name: "c"}, []string{program, "run", "--gpus", tc.flag, "--rm", "img", "sh", "-c", "a b"})
+		code, cpus := runAllocatedWith(t, argv, "", tc.variables...)
+		want := "run --cpuset-cpus=" + cpus + " " + tc.want + " --rm img sh -c a b"
+		if got := readLines(t, calls); code != 0 || !slices.Equal(got, []string{want}) {
+			t.Errorf("%s: exit %d, docker was called with %q, want %q", name, code, got, want)
+		}
 	}
 }
 

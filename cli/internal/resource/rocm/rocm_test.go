@@ -3,14 +3,17 @@ package rocm_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"os/exec"
+	"reflect"
 	"slices"
 	"sync"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
+	"github.com/uw-syfi/vibesys/cli/internal/resource/devicestest"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/resourcetest"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/rocm"
 )
@@ -98,5 +101,63 @@ func TestOffersReadTheFingerprintFacts(t *testing.T) {
 	offers, err := r.Offers(t.Context())
 	if err != nil || len(offers) != 1 || offers[0].Count != 1 || offers[0].Model != core.ModelMI210 {
 		t.Fatalf("offers %v, %v", offers, err)
+	}
+}
+
+func TestAMDDevicesPassTheContract(t *testing.T) {
+	for _, size := range []int{1, 2, 4, core.MaxPoolSize} {
+		t.Run(fmt.Sprintf("size %d", size), func(t *testing.T) {
+			devicestest.Run(t, func(t *testing.T) devicestest.Subject {
+				n, err := core.ParseGPUCount(uint32(size), "test")
+				if err != nil {
+					t.Fatal(err)
+				}
+				d, err := rocm.NewDevices(rocm.DevicesConfig{Machine: "login-a", Size: n})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return devicestest.Subject{Devices: d, Kind: core.ResourceROCm}
+			})
+		})
+	}
+}
+
+// The group goes in ROCR_VISIBLE_DEVICES alone: HIP_VISIBLE_DEVICES counts what remains after it,
+// so a second variable with the same numbers would filter twice. The driver's devices are passed
+// whole, and so nothing confines the job: the attachment says it by giving no per-device flag.
+func TestAMDDevicesNameTheGroupInOneVariable(t *testing.T) {
+	size, _ := core.ParseGPUCount(4, "test")
+	group, err := core.ParseDeviceGroup([]uint32{1, 3}, size, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := rocm.NewDevices(rocm.DevicesConfig{Machine: "login-a", Size: size})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id, n := d.Pool(); id != "rocm:login-a" || n != size {
+		t.Errorf("Pool = %q, %d", id, n.Int())
+	}
+	got, err := d.Container(group)
+	want := resource.Attachment{GPUs: resource.GPUs{ROCm: true}, GPUEnv: map[string]string{"ROCR_VISIBLE_DEVICES": "1,3"}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("Container = %+v, %v, want %+v", got, err, want)
+	}
+	vars, err := d.Process(group)
+	if err != nil || !maps.Equal(vars, map[string]string{"ROCR_VISIBLE_DEVICES": "1,3"}) {
+		t.Errorf("Process = %v, %v", vars, err)
+	}
+}
+
+// A pool's resource claims nothing, and attaches the check only: the GPUs a job gets are its group's.
+func TestAPoolOfAMDGPUsClaimsNothingItself(t *testing.T) {
+	size, _ := core.ParseGPUCount(4, "test")
+	r, err := rocm.New(rocm.Config{Pool: size, Machine: "login-a", Facts: &facts{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := r.Attach(t.Context())
+	if len(r.Claims()) != 0 || err != nil || a.GPUs.Given() || len(a.Check) == 0 {
+		t.Errorf("Claims = %v, Attach = %+v, %v", r.Claims(), a, err)
 	}
 }

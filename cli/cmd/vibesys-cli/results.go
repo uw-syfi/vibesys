@@ -59,19 +59,24 @@ func showCommand(ctx context.Context, d deps, args []string) int {
 		if len(resp.GetResults()) == 0 {
 			fmt.Fprintf(d.stdout, "no results for %s\n", shortCommit(commit))
 		}
+		uses := map[string]*cliv1.JobGpus{}
+		for _, u := range resp.GetJobGpus() {
+			uses[u.GetJobId()] = u
+		}
 		// A commit's measurements are printed pooled, one line per kind, as compare counts them:
 		// a measure job that topped up an earlier one is part of the same measurement.
 		for _, r := range resp.GetResults() {
 			if r.GetCheck() != nil {
-				fmt.Fprintln(d.stdout, describeResult(r))
+				fmt.Fprintln(d.stdout, describeResult(r, uses[r.GetJobId()]))
 			}
 		}
-		placed := map[string]string{}
+		placed, gpus := map[string]string{}, map[string]string{}
 		for _, r := range resp.GetResults() {
 			placed[r.GetJobId()] = placementOf(r.GetEnvironment())
+			gpus[r.GetJobId()] = describeResultGPUs(r, uses[r.GetJobId()])
 		}
 		for _, m := range resp.GetMeasurements() {
-			fmt.Fprintln(d.stdout, describeMeasurement(m, placed))
+			fmt.Fprintln(d.stdout, describeMeasurement(m, placed, gpus))
 		}
 		return exitOK
 	})
@@ -233,7 +238,7 @@ func resultCommand(ctx context.Context, d deps, args []string) int {
 			return code
 		}
 		if cur := resp.GetCurrent(); cur != nil {
-			fmt.Fprintf(d.stdout, "head %s\n%s\n", shortCommit(cur.GetHead()), describeResult(cur.GetResult()))
+			fmt.Fprintf(d.stdout, "head %s\n%s\n", shortCommit(cur.GetHead()), describeResult(cur.GetResult(), cur.GetGpus()))
 			return code
 		}
 		none := resp.GetNone()
@@ -341,19 +346,26 @@ func placementOf(e *cliv1.EnvironmentFingerprint) string {
 
 // describeMeasurement is a commit's pooled measurement in a line, with its numbers rounded: the
 // jobs it pools, then what describeResult says of a measurement, and the placements its jobs ran
-// on, each once in the jobs' order, from placed (by job id).
-func describeMeasurement(m *cliv1.Measurement, placed map[string]string) string {
+// on, each once in the jobs' order, from placed (by job id), and the GPUs its jobs took, as gpus
+// (by job id) says them, each once.
+func describeMeasurement(m *cliv1.Measurement, placed, gpus map[string]string) string {
 	env := m.GetEnvironment()
 	line := describeResult(&cliv1.Result{
 		JobId: strings.Join(m.GetJobIds(), ","), Commit: m.GetCommit(),
 		Environment: &cliv1.EnvironmentFingerprint{Kind: env.GetKind(), Backend: env.GetBackend(), ImageDigest: env.GetImageDigest()},
 		Outcome:     &cliv1.Result_Measure{Measure: m.GetMeasure()},
-	})
-	var on []string
+	}, nil)
+	var on, taken []string
 	for _, id := range m.GetJobIds() {
 		if p := placed[id]; p != "" && !slices.Contains(on, p) {
 			on = append(on, p)
 		}
+		if g := gpus[id]; g != "" && !slices.Contains(taken, g) {
+			taken = append(taken, g)
+		}
+	}
+	if len(taken) > 0 {
+		line += "\t" + strings.Join(taken, "; ")
 	}
 	if len(on) > 0 {
 		line += "\ton " + strings.Join(on, ", ")
@@ -363,7 +375,7 @@ func describeMeasurement(m *cliv1.Measurement, placed map[string]string) string 
 
 // describeResult is one saved result in a line, with its numbers rounded, and the placement it was
 // taken on, for telling where a number came from.
-func describeResult(r *cliv1.Result) string {
+func describeResult(r *cliv1.Result, use *cliv1.JobGpus) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\t", r.GetJobId())
 	if m := r.GetMeasure(); m != nil {
@@ -372,6 +384,9 @@ func describeResult(r *cliv1.Result) string {
 		b.WriteString("check\tpassed")
 	}
 	fmt.Fprintf(&b, "\t%s\t%s", environmentName(r.GetEnvironment()), shortCommit(r.GetCommit()))
+	if g := describeResultGPUs(r, use); g != "" {
+		fmt.Fprintf(&b, "\t%s", g)
+	}
 	if p := placementOf(r.GetEnvironment()); p != "" {
 		fmt.Fprintf(&b, "\ton %s", p)
 	}

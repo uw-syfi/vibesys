@@ -27,6 +27,10 @@ type Launch struct {
 	// AllocationEnterBy is the latest time the job's first container may enter the allocation
 	// (environment.Target.EnterBy); zero for none.
 	AllocationEnterBy time.Time
+	// GPUs are the GPUs of a pool the daemon gave the job when it started it, which the job's
+	// environment passes to its commands. The daemon records them on the job before any command
+	// starts. Nil for a job that was given none.
+	GPUs *core.Grant
 }
 
 // Ref is the job's identity.

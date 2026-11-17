@@ -221,9 +221,9 @@ func TestAnIntegerTooBigForItsFieldIsRefusedNamingItsKey(t *testing.T) {
 		{&cliv1.TaskManifestV02{}, "[benchmark]\nresult_protocol = 5000000000", "benchmark.result_protocol"},
 		{&cliv1.TaskManifestV02{}, "[benchmark]\ntimeout_seconds = 4294967296", "benchmark.timeout_seconds"},
 		{&cliv1.TaskManifestV02{}, "[benchmark]\nresult_protocol = 99999999999999999", "benchmark.result_protocol"},
-		// int32 field of the operator config (slurm.cpus), over and under its range.
-		{&cliv1.OperatorConfig{}, "[slurm]\ncpus = 3000000000", "slurm.cpus"},
-		{&cliv1.OperatorConfig{}, "[slurm]\ncpus = -3000000000", "slurm.cpus"},
+		// int32 field of the operator config (a placement's slurm.cpus), over and under its range.
+		{&cliv1.OperatorConfig{}, "[placements.x.slurm]\ncpus = 3000000000", "placements.x.slurm.cpus"},
+		{&cliv1.OperatorConfig{}, "[placements.x.slurm]\ncpus = -3000000000", "placements.x.slurm.cpus"},
 	} {
 		err := tomlproto.Decode([]byte(c.text), c.msg, tomlproto.Options{})
 		if err == nil || !strings.Contains(err.Error(), c.says) || strings.Contains(err.Error(), "proto:") {
@@ -239,10 +239,10 @@ func TestAnIntegerThatFitsItsFieldIsRead(t *testing.T) {
 		t.Errorf("the largest uint32: %v", err)
 	}
 	var cpus cliv1.OperatorConfig
-	if err := tomlproto.Decode([]byte("[slurm]\ncpus = 2147483647"), &cpus, tomlproto.Options{}); err != nil {
+	if err := tomlproto.Decode([]byte("[placements.x.slurm]\ncpus = 2147483647"), &cpus, tomlproto.Options{}); err != nil {
 		t.Errorf("the largest int32: %v", err)
 	}
-	if got := cpus.GetSlurm().GetCpus(); got != 2147483647 {
+	if got := cpus.GetPlacements()["x"].GetSlurm().GetCpus(); got != 2147483647 {
 		t.Errorf("cpus = %d, want the largest int32", got)
 	}
 }

@@ -1,10 +1,12 @@
 package fakeresource_test
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
+	"github.com/uw-syfi/vibesys/cli/internal/resource/devicestest"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/fakeresource"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/resourcetest"
 )
@@ -19,6 +21,20 @@ func TestTheFakePassesTheContract(t *testing.T) {
 					Claimed:  []core.Claim{{Resource: string(kind) + ":x", Amount: 1}},
 				}
 				return resourcetest.Subject{Resource: f, Kind: kind, Break: f.Break}
+			})
+		})
+	}
+}
+
+func TestTheDevicesFakePassesTheContract(t *testing.T) {
+	for _, size := range []int{1, 2, 8, core.MaxPoolSize} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			devicestest.Run(t, func(t *testing.T) devicestest.Subject {
+				n, err := core.ParseGPUCount(uint32(size), "test")
+				if err != nil {
+					t.Fatal(err)
+				}
+				return devicestest.Subject{Devices: &fakeresource.Devices{Of: core.ResourceGPU, ID: "gpu:host-a", Size: n}, Kind: core.ResourceGPU}
 			})
 		})
 	}

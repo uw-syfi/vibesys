@@ -144,7 +144,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/backend/amd/` | The AMD GPU facts of a machine (model, count, the amdgpu driver's version) for a fingerprint, read with `rocminfo` or `amd-smi` and `/sys/module/amdgpu/version`. |
 | `internal/resource/rocm/` | The `rocm` resource: the machine's AMD GPUs, and a check, run in the container before the command, that the image's ROCm runtime sees them. |
 | `internal/tomlproto/` | Decoding TOML into a proto message by its field names, refusing an unknown key by name, and a key newer than the schema version the file declares (`task_schema_since_minor`). The task manifest and the operator config are read with it. |
-| `internal/operator/` | The operator config (`cli.toml`), decoded into `OperatorConfig` in `operator.proto` with unknown keys refused by name: its named placements, each placement's kind and sections, and a file of the earlier shape read as the placement `default`. What a kind's section means is that kind's package's business. |
+| `internal/operator/` | The operator config (`cli.toml`), decoded into `OperatorConfig` in `operator.proto` with unknown keys refused by name: its version (`0.2`, the only one read; every key of the earlier shape refused by name), its named placements, each placement's kind and sections, its GPU pools, and the defaults the file leaves out. What a kind's section means is that kind's package's business. |
 | `internal/resource/` | `Resource`: what a placement gives every container (`Kind`, `Claims` for scheduling, `Fingerprint`, and `Attach`, the mounts, variables, network and GPUs a container is made with), and the contract suite in `resourcetest/` every resource passes, with the Fake in `fakeresource/` (tests only). |
 | `internal/resource/gpu/` | The `gpu` resource: GPUs passed with `--gpus`, or by a runtime that reads `NVIDIA_VISIBLE_DEVICES`; its fingerprint is the GPUs' facts. |
 | `internal/resource/kubernetes/` | The `kubernetes` resource: a cluster's kubeconfig mounted read-only at `KUBECONFIG`, the network mode that reaches it, and the registry and builder addresses; its fingerprint is the API server and its version, read with `kubectl`. |
@@ -273,8 +273,8 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 
 | Command | What it does |
 | --- | --- |
-| `submit check <commit> [flags]` | Queue the task's check. A pass already saved for the commit answers it without running. Also `--wait`, `--note`, `--no-cache`, `--plan` and `--env`. |
-| `submit measure <commit> [--samples n] [--recheck] [--plan n \| --no-plan] [flags]` | Queue the task's benchmark for `n` samples (the task's default when omitted). Saved samples count: only the missing ones run. Flags as for `check`. `--plan n` says the measurement tests plan `n`, which the plan's view and a run's chart show beside the point; `--no-plan` says it tests none, as the baseline's does. A measure submitted from a run (a call that carries `--run`, or `VIBESYS_RUN`) must give one of them, since every point on a run's chart is a measure job and the plan is what the app shows beside it: without either the daemon refuses it as `INVALID_INPUT`, naming both flags. A person at a terminal, with no run, is not asked. The two are never given together, and `--plan 0` is not "none". Only a measure job takes `--no-plan`. An unknown plan is `NOT_FOUND`, naming `--plan`. |
+| `submit check <commit> [flags]` | Queue the task's check. A pass already saved for the commit answers it without running. Also `--wait`, `--note`, `--no-cache`, `--plan`, `--env` and `--gpus N` (see "GPU pools"). |
+| `submit measure <commit> [--samples n] [--recheck] [--plan n \| --no-plan] [flags]` | Queue the task's benchmark for `n` samples (the task's default when omitted). Saved samples count: only the missing ones run. Flags as for `check`, except that a measure takes the whole node and refuses `--gpus`. `--plan n` says the measurement tests plan `n`, which the plan's view and a run's chart show beside the point; `--no-plan` says it tests none, as the baseline's does. A measure submitted from a run (a call that carries `--run`, or `VIBESYS_RUN`) must give one of them, since every point on a run's chart is a measure job and the plan is what the app shows beside it: without either the daemon refuses it as `INVALID_INPUT`, naming both flags. A person at a terminal, with no run, is not asked. The two are never given together, and `--plan 0` is not "none". Only a measure job takes `--no-plan`. An unknown plan is `NOT_FOUND`, naming `--plan`. |
 | `submit command <commit> --image harness\|candidate [flags] -- <argv...>` | Queue a command and print its id. Returns at once; `--wait` blocks as `wait` does. `--image` is required, with no default: `harness` runs the command in the task's image, where its check and benchmark run (the host for a task with no Dockerfile), and on a task with `[candidate]` beside the candidate's server exactly as the check and the benchmark run (server started from `[candidate] serve`, readiness polled, `VIBESYS_SERVICE_URL` set, the same resource shares; the server's startup time is added to `--timeout`); `candidate` runs it in the image built from the commit's `[candidate] dockerfile`, with no server, and is refused for a task without `[candidate]` or with `--env host`. Also `--note`, `--no-cache`, `--plan`, `--env`, `--timeout`, `--service`, `--probe` and `--wrap`. A revision is resolved to a full commit id. `--service`, `--probe` and `--wrap` are split into words as a shell would split them, with single quotes, double quotes and backslashes, and nothing else of a shell. The daemon puts `--wrap` in front of the candidate's server for `--image harness` on a task with `[candidate]` (a profile: `--wrap '<profiler>' -- <load argv>`), and otherwise in front of `--service` when it is given and of the command when not; `--service` is refused beside the candidate's server. Never cached or scored; its artifacts are kept with it. `jobs` names the image of each command job, and the job's output starts by naming it for a docker job. (`submit profile` and the 0.2 `[profile]` it read are retired; a manifest with `[profile]` still loads.) |
 | `wait <job>... [--any] [--timeout d]` | Block until the jobs are final, or with `--any` until one is. The daemon decides how the wait ended and keeps the timeout. |
 | `cancel <job> [--reason text]` | Stop a job and print it once it is final. Cancelling a final job prints it unchanged. |
@@ -503,13 +503,18 @@ queued jobs start from `schedule`:
 - A job holds claims from its launch until its end is recorded. A docker job claims a slot of
   `placement:<name>`, the placement it runs on, which has the placement's `max_jobs` slots, and
   what the placement's resources claim: `kubernetes:<machine><kubeconfig>` for a cluster,
-  `gpu:<machine>/<devices>` and `rocm:<machine>` for GPUs, which every placement that gives the
-  same one shares, and `rocm:<placement>@<login node>` for the AMD GPUs of an `apptainer`
-  placement, whose jobs each get the GPUs of a Slurm allocation of their own. A host
-  job claims a slot of `placement:default` when that placement is local, and otherwise of `host`,
-  one slot of its own. A measure job claims each of them whole, so a benchmark sample never runs
-  beside another job of its placement or of another placement on its cluster or GPUs, while the
-  jobs of other placements run. A command job chooses its placement as a check does.
+  `gpu:<machine>/<devices>` and `rocm:<machine>` for GPUs every job of the placement gets whole,
+  which every placement that gives the same one shares, and `rocm:<placement>@<login node>` for the
+  AMD GPUs of an `apptainer` placement, whose jobs each get the GPUs of a Slurm allocation of their
+  own. The GPUs of a `local` or `ssh` placement whose table has a `count` are a pool instead: one
+  resource, `gpu:<machine>` or `rocm:<machine>` (`local` for this machine, the host for `ssh`),
+  with that many numbered devices, which a job claims some of ("GPU pools", below). A host job
+  claims a slot of the local placement that declares this machine's GPUs, and otherwise of
+  `placement:default` when that placement is local, and otherwise of `host`, one slot of its own;
+  and, as a docker job of that placement does, the GPUs it asks for of the pool. A measure job
+  claims each of them whole, so a benchmark sample never runs beside another job of its placement
+  or of another placement on its cluster or GPUs, while the jobs of other placements run. A command
+  job chooses its placement as a check does.
 - A cluster is held alone by every job that runs with it, of every kind: each job deploys into
   the cluster with CPU and memory the scheduler does not see, so two checks on one cluster could
   starve each other's pods. So jobs on a placement that gives a cluster run one at a time whatever
@@ -524,6 +529,8 @@ queued jobs start from `schedule`:
   can run; one whose work the daemon could not read holds every resource. Recovery adopts running
   jobs with their claims, even past a smaller capacity, and starts nothing beside them that does
   not fit. A job whose claims can never be granted stays queued, and a wait on it ends with why.
+  A job a restart finds running holds the devices its store records for it, whatever the daemon
+  chose before; a job whose supervisor is parked holds its devices while it waits for its place.
 - With the defaults the daemon runs one job at a time, the oldest queued first, as before
   schedulers. A change of policy or `max_jobs` takes a `daemon restart` and nothing else: what the
   scheduler knows is derived from the jobs.
@@ -727,10 +734,10 @@ refused with the reason.
 
   | Resource | What the container gets |
   | --- | --- |
-  | `gpu` | The GPUs, by `--gpus`, or by the runtime with `NVIDIA_VISIBLE_DEVICES`. |
+  | `gpu` | The GPUs, by `--gpus all`, or by the runtime with `NVIDIA_VISIBLE_DEVICES`. When the table has a `count`, the devices of the job's own group instead, by number: `--gpus '"device=2,3"'`, quoted as docker needs a list, or the runtime's variable, and `VIBESYS_GPUS` and `VIBESYS_GPU_DEVICES` (see "GPU pools"). |
   | `kubernetes` | The kubeconfig, read-only, at `/vibesys/kubeconfig`, with `KUBECONFIG` naming it; the network mode (`docker run --network`), such as `host` for a cluster whose API server listens on the machine's loopback address; `VIBESYS_K8S_REGISTRY` and `VIBESYS_K8S_BUILDER` when the config names them. The task deploys to the cluster and cleans up after itself; the daemon does not manage the cluster. |
   | `mounts` | Each directory, read-only, at `/vibesys/mounts/<name>`, with `VIBESYS_MOUNTS` listing the names. |
-  | `rocm` | The machine's AMD GPUs: `--device /dev/kfd --device /dev/dri --group-add video` under docker, `--rocm` under Apptainer, and each of `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`, `GPU_DEVICE_ORDINAL` and `CUDA_VISIBLE_DEVICES` that Slurm set. Before the command, the container checks that its ROCm runtime sees a GPU; when it does not, the job fails before its command with why, naming the image's ROCm version and the machine's amdgpu driver version. In a task of two images the GPUs are the server's. |
+  | `rocm` | The machine's AMD GPUs: `--device /dev/kfd --device /dev/dri --group-add video` under docker, `--rocm` under Apptainer, and each of `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`, `GPU_DEVICE_ORDINAL` and `CUDA_VISIBLE_DEVICES` that Slurm set. When the table has a `count`, the devices are the same, and `ROCR_VISIBLE_DEVICES` names the job's group (see "GPU pools"). Before the command, the container checks that its ROCm runtime sees a GPU; when it does not, the job fails before its command with why, naming the image's ROCm version and the machine's amdgpu driver version. In a task of two images the GPUs are the server's. |
 
   A task names the resources its jobs need in its manifest, `[environment] needs = ["kubernetes"]`
   (any of `gpu`, `kubernetes`, `mounts`, `rocm`). A job runs only on a placement that gives them all, and
@@ -775,75 +782,48 @@ Settings about the machine belong to whoever runs the CLI, never to a task. They
 `VIBESYS_CLI_CONFIG` names, when the daemon and each supervisor start; `daemon restart` applies a
 change. The schema is `OperatorConfig` in `proto/vibesys/cli/v1/operator.proto`; unknown keys and
 values its rules refuse are refused, naming the key. With no file, there is one placement,
-`default`, of kind `local`, with no resource.
+`default`, of kind `local`, with no resource, running one job at a time.
 
-A file names its placements, each a table of its own:
-
-```toml
-[placements.local]
-kind = "local"
-max_jobs = 1
-[placements.local.resources.kubernetes]
-kubeconfig = "/home/me/.kube/kind-config"
-registry = "localhost:5001"
-builder = "tcp://127.0.0.1:1234"
-network = "host"
-
-[placements.a100]
-kind = "slurm"
-[placements.a100.remote]
-host = "host-a"
-remote_workspace_root = "/scratch/me/vibesys-cli"
-[placements.a100.slurm]
-partition = "a100"
-gres = "gpu:1"
-[placements.a100.resources.gpu]
-devices = "all"
-
-[placements.mi210]
-kind = "apptainer"
-[placements.mi210.remote]
-host = "host-a"
-remote_workspace_root = "/shared/vibesys"
-[placements.mi210.slurm]
-partition = "mi210"
-[placements.mi210.apptainer]
-submit_command = ["/opt/site/bin/sbatch-wrapper"]
-submit_arguments = ["--account=acct-a"]
-[placements.mi210.resources.rocm]
-[placements.mi210.resources.mounts]
-hf = "/shared/hf-cache"
-```
+A file starts with `version = "0.2"`, the one version this build reads, and names its placements,
+each a table of its own. A file with no version or another one is refused, and so is every key of
+the shape before 0.2, naming it and saying what 0.2 writes instead: top-level `[docker]`, `[remote]`
+and `[slurm]` (write each placement under `[placements.<name>]`), `[scheduler] max_jobs` (set
+`max_jobs` on each placement), `resources.gpu.devices` (write `count`), and `[slurm] gres`,
+`shared_gres` and `exclusive` (write the GPUs of each node as the GPU table's `count`, and their
+type as its `gres_type`). Nothing reads a file of the earlier shape: rewrite it by the examples
+below.
 
 | Key | Meaning |
 | --- | --- |
+| `version` | Required: `"0.2"`. |
 | `[scheduler] policy` | Which job starts next: `fifo` (default) or `fair-share`. |
 | `stop_grace_seconds` | How long a job's commands get to clean up after a cancel or the time limit asks them to terminate, before they are killed, on the host and on every placement (30 by default, at most 240). See "Stopping a command". |
-| `[scheduler] max_jobs` | In a file of the earlier shape only: the `max_jobs` of its one placement. |
 | `[placements.<name>] kind` | `local` (this machine's docker), `ssh` (docker runs on `remote.host`, reached over ssh), `slurm` (as `ssh`, with every container and image build inside a new allocation made by `srun`) or `apptainer` (a Slurm cluster reached through its login node `remote.host`, whose compute nodes run Apptainer and no Docker; see "The apptainer placement"). A name is lower-case letters, digits, `_` and `-`. |
-| `[placements.<name>] max_jobs` | How many jobs may run on the placement at once (1 by default). A measure job runs alone on it, but on an `apptainer` placement of `[slurm] exclusive`, where it runs alone on a node of its own and takes one of the slots as any job does. More than 1 needs kind `local` or `apptainer`: an `ssh` or `slurm` placement stages and sweeps one job at a time on one shared Docker daemon, while each job of an `apptainer` placement has staged directories and allocations of its own (see below). |
+| `[placements.<name>] max_jobs` | How many jobs may run on the placement at once. Unset, it is the `count` of the placement's GPU pool for kind `local` (one job per GPU at most; a job that needs no GPU takes a slot too), and 1 otherwise. A value above the pool's `count` lets jobs that need no GPU run beside those that hold every GPU. Only kinds `local` and `apptainer` run more than one job at a time, and a larger `max_jobs` on `ssh` or `slurm` is refused, naming the key: those placements stage and sweep one job at a time on one shared Docker daemon (an `ssh` placement with a pool still confines that one job to the GPUs it asks for), while each job of an `apptainer` placement has staged directories and allocations of its own (see below). A measure job runs alone on its placement, but on an `apptainer` placement, where it runs alone on a node of its own and takes one of the slots as any job does. |
 | `[placements.<name>.remote] host`, `ssh_command`, `rsync_command` | For `ssh`, `slurm` and `apptainer`: the ssh destination (the login node, for `apptainer`) and the programs that reach it. |
 | `[placements.<name>.remote] remote_workspace_root` | An absolute directory there for the copies of runs' directories (`staged/`) and the caches (`cache/`). For `apptainer` it must be on the file system the compute nodes share, and also holds the images (`images/`), the probe program (`bin/`) and the last reading of a node (`nodes/`). |
-| `[placements.<name>.slurm] partition`, `gres`, `shared_gres`, `exclusive`, `cpus`, `memory`, `srun_arguments` | For `slurm`: what an allocation asks for, by what it runs: an image build asks for `cpus` (8 by default) and `memory` only, and builds in a BuildKit builder confined to them; a check asks for `shared_gres` (such as `shard:1` of a GPU Slurm shares; `gres` when unset) and the same share of the node; a benchmark sample asks for `gres` and, with `exclusive` (true by default), the whole node. Every container is confined to its allocation's CPUs. |
+| `[placements.<name>.slurm] partition`, `cpus`, `memory`, `srun_arguments` | For `slurm`: what an allocation asks for, by what it runs: an image build asks for `cpus` (8 by default) and `memory` only, and builds in a BuildKit builder confined to them; a check or command asks for as many of the node's GPUs as the job asked for (`--gpus N`: `gpu:<N>`, or `gpu:<gres_type>:<N>`; all of them when it asked for no count) with `cpus` and `memory`; a benchmark sample asks for every GPU and the whole node (`--exclusive`). Every container is confined to its allocation's CPUs, and given the GPUs Slurm assigned to its step by number (`SLURM_STEP_GPUS`, else `SLURM_JOB_GPUS`). |
 | `[placements.<name>.slurm] poll_interval_seconds`, `queue_timeout_seconds` | The pause between reads of a job's state while its cancel is confirmed, and the bound on the wait for an allocation (24 hours by default). |
 | `[placements.<name>.slurm] max_time_seconds` | For `apptainer`, optional: the longest time limit the cluster grants a job of the placement, as a site's QOS or partition caps it, a multiple of 60 (Slurm counts minutes). No allocation asks for more: a reused allocation is `allocation_limit_seconds` long, at most this (this by default); a container's own allocation is its run's limit and 10 minutes; and a run whose limit and those 10 minutes do not fit is refused before anything is submitted, with an error that names this key and both numbers, instead of the site's `sbatch` error. Unset, there is no cap. See "Reused allocations". |
-| `[placements.<name>.slurm]` for `apptainer` | The same keys but `srun_arguments`, which is refused: a run's allocation is a batch job, which asks for `gres` and, with `exclusive`, the whole node when it measures, and `shared_gres` (or `gres`), `cpus` and `memory` when it does not. |
+| `[placements.<name>.slurm]` for `apptainer` | The same keys but `srun_arguments`, which is refused: a run's allocation is a batch job, which asks for every GPU and the whole node when it measures, and, when it does not, for the GPUs the job asked for (see `gres_type`), `cpus` and `memory`. |
 | `[placements.<name>.apptainer] submit_command`, `submit_arguments`, `program` | For `apptainer`, all optional: the command that submits a batch job on the login node (`sbatch`, or a site's wrapper that takes its arguments), the options passed to it after the ones the CLI sets (such as an account or a QOS the site requires on every job), and the apptainer program of the compute nodes (`apptainer`), which only runs SIFs. |
 | `[placements.<name>.apptainer] local_scratch_dir`, `convert_timeout_seconds` | For `apptainer`, optional: the absolute directory of this machine where an image is converted to a SIF (the archive, the image unpacked and the SIF, which is kept there until the cluster has it; `vibesys-cli/apptainer` under `XDG_CACHE_HOME` or `~/.cache` by default), and the bound on converting one image and copying its SIF, or on streaming its files and making its squashfs under `pyxis` (3600 by default). See "The apptainer placement". |
-| `[placements.<name>.apptainer] idle_release_seconds`, `allocation_limit_seconds` | For `apptainer`, optional: reuse allocations. With `idle_release_seconds` set, a container's allocation is kept when the container is removed, for the next container of the daemon's scope (of the same job or a later one) to claim, and it ends itself once no container has claimed it for that long; each such allocation asks for the whole node (`gres`, and `exclusive`) whatever it runs, and its time limit is `allocation_limit_seconds` (`[slurm] max_time_seconds` by default, or a day without it; at most the partition's, and at most `max_time_seconds`). Unset, each container has an allocation of its own, as before. See "Reused allocations". |
+| `[placements.<name>.apptainer] idle_release_seconds`, `allocation_limit_seconds` | For `apptainer`, optional: reuse allocations. With `idle_release_seconds` set, a container's allocation is kept when the container is removed, for the next container of the daemon's scope (of the same job or a later one) to claim, and it ends itself once no container has claimed it for that long; each such allocation asks for the whole node (every GPU of the pool, and `--exclusive`) whatever it runs, and its time limit is `allocation_limit_seconds` (`[slurm] max_time_seconds` by default, or a day without it; at most the partition's, and at most `max_time_seconds`). Unset, each container has an allocation of its own, as before. See "Reused allocations". |
 | `[placements.<name>.apptainer] runtime` | For `apptainer`, optional: what runs the containers on the compute nodes, `apptainer` (the default) or `pyxis` (Slurm's Pyxis plugin over Enroot, for a cluster without Apptainer). `pyxis` refuses `program` and `local_scratch_dir`, and needs no Apptainer on this machine. See "The pyxis runtime". |
 | `[placements.<name>.allocations] max_held`, `max_for` | Optional: lets a run hold standing allocations of the placement, at most `max_held` at once (1 to 64, pending and running, renewals included), each asked for at most `max_for`, a duration such as `"24h"` (for `apptainer`, at most `[slurm] max_time_seconds`). Unset, the placement offers none. See "Standing allocations". |
 | `[placements.<name>.allocations] fit_margin`, `run_idle_end` | Optional: the time a job's fit keeps free before its allocation ends (`"2m"` by default), and how long a run holding allocations of the placement may make no call before it is taken to have ended, as `alloc end-run` ends it (`"2h"` by default, at least `"1m"`). |
-| `[placements.<name>.resources.gpu] devices`, `runtime` | A `docker --gpus` value such as `all`; with `runtime` (such as `nvidia`) the GPUs are passed by that runtime and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
+| `[placements.<name>.resources.gpu] count`, `gres_type`, `runtime` | The machine's NVIDIA GPUs. `count` (1 to 64) is how many the machine has (for a cluster, each node): set, the GPUs `0` to `count - 1` are a pool that jobs share, each job given GPUs of its own, and it must equal the number of GPUs the machine reports where the CLI reads it (`nvidia-smi -L \| wc -l`). An empty table, with no `count`, gives every job all of the machine's GPUs. `slurm` placements need `count`, since their allocations ask for GPUs by count. `gres_type`, for `slurm` only, is the GPU type of the cluster's GRES (`a100` asks for `gpu:a100:<n>`), for a partition that names or mixes types. With `runtime` (such as `nvidia`) the GPUs are passed by that container runtime and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
+| `[placements.<name>.resources.rocm] count`, `gres_type` | The machine's AMD GPUs, for tasks of the `rocm` backend, with the same `count` and `gres_type` as `gpu` (`rocm-smi --showid` lists them); `apptainer` placements need `count`. `gres_type` says the cluster has a GPU resource to ask for GPUs in (`--gres=gpu:<gres_type>:<n>`, per job); an `apptainer` placement without it asks for none, since a cluster with no such resource refuses the request: Slurm cannot then keep two allocations off one GPU, so every allocation is a whole node (`--exclusive`) and the CLI names the job's devices inside it in `ROCR_VISIBLE_DEVICES` (as many as the job asked for, the lowest block), which the runtime honours and nothing enforces. An `apptainer` placement gives GPUs only this way; it refuses `gpu` and `kubernetes`. A placement gives the GPUs of one vendor, never both tables. |
 | `[placements.<name>.resources.kubernetes] kubeconfig`, `registry`, `builder`, `network` | An absolute path of the kubeconfig on the engine's machine (required), the registry and image builder addresses the container gets, and its network mode (empty leaves docker's default). |
 | `[placements.<name>.resources.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`; for `apptainer`, a directory of the compute nodes, such as one on the shared file system. |
-| `[placements.<name>.resources.rocm]` | An empty table: the machine's AMD GPUs, for tasks of the `rocm` backend. An `apptainer` placement gives GPUs only this way; it refuses `gpu` and `kubernetes`. |
 
-A file of the earlier shape is read as the one placement `default`, and needs no edit: `[docker]
-placement` is its kind, `[remote]` and `[slurm]` its sections, `[docker] gpus` and `runtime` its
-`gpu` resource and `[docker.mounts]` its `mounts` resource. A file holds one shape or the other.
-Each placement's containers have a scope of their own, and those of `default` keep the scope the
-daemon's one placement had.
+A machine's GPUs are declared once: two placements of this machine (every `local` placement is
+this machine), or two `ssh` placements of one host, may both give its GPUs whole, but when one of
+them gives a `count` no other may declare that vendor's GPUs of that machine. A cluster's
+placements are kept apart by the cluster, which gives each allocation GPUs of its own.
+
+Each placement's containers have a scope of their own, and those of a placement named `default`
+keep the scope the daemon's one placement of an earlier build had.
 On another machine, a run's checkout and scratch directory are copied to `remote_workspace_root`
 and mounted at their local paths; the scratch directory and the artifacts are copied back when the
 command ends, and a copy that fails makes the command's ending unknown. Under `slurm`, a container
@@ -851,6 +831,195 @@ is removed and then its allocation is cancelled and confirmed ended, on every pa
 Docker daemon runs outside Slurm's cgroups; a run first cancels any allocation of its scope that a
 dead run left. The queue wait does not count against a command's timeout. The ssh host must be the
 node Docker runs on.
+
+#### Examples
+
+This machine, Docker, NVIDIA GPUs shared by the jobs:
+
+```toml
+version = "0.2"
+
+[placements.local]
+kind = "local"
+[placements.local.resources.gpu]
+count = 8            # nvidia-smi -L | wc -l; max_jobs is 8 unless set
+```
+
+A machine with no container runtime, whose jobs run on the host (`--env host`, or a task with no
+Dockerfile). Kind `local` is "this machine"; declaring it needs no Docker:
+
+```toml
+version = "0.2"
+
+[placements.pod]
+kind = "local"
+[placements.pod.resources.gpu]
+count = 8
+```
+
+Another machine over ssh, Docker:
+
+```toml
+version = "0.2"
+
+[placements.box]
+kind = "ssh"
+[placements.box.remote]
+host = "host-a"
+remote_workspace_root = "/scratch/vibesys"
+[placements.box.resources.gpu]
+count = 4
+```
+
+A Slurm cluster whose nodes run Docker, NVIDIA GPUs:
+
+```toml
+version = "0.2"
+
+[placements.spark]
+kind = "slurm"
+[placements.spark.remote]
+host = "host-b"
+remote_workspace_root = "/scratch/vibesys"
+[placements.spark.slurm]
+partition = "gpu"
+[placements.spark.resources.gpu]
+count = 8              # GPUs per node
+# gres_type = "a100"   # only when the partition names or mixes GPU types
+```
+
+A Slurm cluster whose nodes run Apptainer, AMD GPUs, with standing allocations:
+
+```toml
+version = "0.2"
+
+[placements.mi300]
+kind = "apptainer"
+[placements.mi300.remote]
+host = "login-a"
+remote_workspace_root = "/shared/vibesys"
+[placements.mi300.slurm]
+partition = "mi300"
+max_time_seconds = 43200
+[placements.mi300.apptainer]
+submit_arguments = ["--account=acct-a"]
+[placements.mi300.allocations]
+max_held = 2
+max_for = "12h"
+[placements.mi300.resources.rocm]
+count = 8              # GPUs per node
+# gres_type = "mi300x" # only when the cluster has GPU GRES; without it every allocation is a whole node
+[placements.mi300.resources.mounts]
+hf = "/shared/hf-cache"
+```
+
+Several placements in one file, with a policy and a Kubernetes cluster on this machine:
+
+```toml
+version = "0.2"
+
+[scheduler]
+policy = "fair-share"
+
+[placements.local]
+kind = "local"
+[placements.local.resources.gpu]
+count = 2
+[placements.local.resources.kubernetes]
+kubeconfig = "/home/me/.kube/config"
+network = "host"
+
+[placements.box]
+kind = "ssh"
+[placements.box.remote]
+host = "host-a"
+remote_workspace_root = "/scratch/vibesys"
+[placements.box.resources.gpu]
+count = 8
+
+[placements.mi300]
+kind = "apptainer"
+[placements.mi300.remote]
+host = "login-a"
+remote_workspace_root = "/shared/vibesys"
+[placements.mi300.slurm]
+partition = "mi300"
+[placements.mi300.resources.rocm]
+count = 8
+```
+
+### GPU pools
+
+A `local` or `ssh` placement whose GPU table (`gpu` or `rocm`) has a `count` makes the machine's GPUs
+`0` to `count - 1` a pool, and jobs share it by number. At daemon start the CLI reads how many GPUs
+the machine has, with `nvidia-smi` or the AMD tools (an ssh host is read over ssh), and refuses to
+start when the `count` is not that number, naming the key
+(`placements.pod.resources.gpu.count = 8, and local has 4 GPUs`); a machine it cannot read says
+nothing, and its `count` is believed.
+
+- **Claims.** A check or command job of a task that needs GPUs claims as many devices of the pool as
+  its `--gpus N` says, and a measure takes the whole pool, alone, with its placement, as it takes
+  its placement today. `--gpus N` is required of a check or command whose task needs GPUs where a placement declares a pool, and is refused (`INVALID_INPUT`, naming `--gpus` and the placements' sizes, `1 to <count>`) on a measure, for a task that needs no GPU, for a placement with no pool, and for more GPUs than any placement it may run on has; there is no default. A host command in the task's image reads no task, so it is not asked for a count. A job of a task that needs no GPU claims a slot and no device. The pool is
+  a resource of `count` units that the scheduler counts like any other: a job waits when its
+  devices are not free, and waits behind an earlier job that waits for more, so a job of the whole
+  pool is not starved by a stream of one-GPU jobs. A job that waits for devices says how many it
+  wants and which resource is full (`jobs` and `wait`).
+- **What is shown.** `jobs`, `wait`, `submit`, `show` and `result` say each job's GPUs: `gpus 2,
+  devices 0-1 (chosen by the CLI)` (or `by the cluster`), `gpus 8 (whole node), ...` for a measure,
+  `gpus 2` for a job that asked and has not started, and `gpus unknown` for a job of a task that
+  needs GPUs whose record has neither, as one saved before they were recorded (never a guess). The
+  devices are for diagnosis. A job that waits for devices says `waiting for 4 GPUs of gpu:local, 2
+  free, held by j41 (check) on devices 0-2, ...` (`gpus_wanted`, `gpus_free` and the holders'
+  grants in `--json`). `show --json` has `job_gpus` (and `result --json` `current.gpus`), read from
+  the jobs' records, which are where the GPUs are written; a result's file does not keep them.
+  `placement capacity <placement>` of a pooled local or ssh placement adds `gpus: 2 of 8 free`, the
+  jobs that hold the others with their devices, and the jobs that wait with how many they want
+  (`gpu_pool` in `--json`).
+- **Devices.** When the scheduler starts a job, the daemon picks its devices (`core.TakeDevices`):
+  the lowest wholly free aligned block of the next power of two that holds the job's count, so jobs
+  of 2, 4 or 8 GPUs get neighbouring devices where they can, and otherwise the lowest free devices.
+  The choice depends on the state alone. It is recorded in the job (`Job.gpus`: the pool, its size,
+  the devices, whether it is the whole pool) with the move to running, after the job's supervisor
+  is up and before any command starts, and the supervisor's launch carries the same grant. A
+  daemon that dies before the record leaves the job queued, and it is given devices afresh, since
+  nothing ran on the first; one that dies after it finds the job running, or its supervisor parked,
+  with the devices recorded, and no other job is given them.
+- **What a job is given.** A job reads `VIBESYS_GPUS` (how many) and `VIBESYS_GPU_DEVICES` (their
+  numbers in the pool, such as `2,3`), whatever the vendor, beside the vendor's own variables. The
+  numbers are those the vendor's own variable takes: for NVIDIA GPUs those of `nvidia-smi` (the
+  order of the PCI bus, which is not CUDA's default order, so a job on the host is also given
+  `CUDA_DEVICE_ORDER=PCI_BUS_ID`); for AMD GPUs those of the ROCm runtime, which are not
+  `rocm-smi`'s and not the order of the render nodes under `/dev/dri`. A job given no GPUs of a pool
+  (a task that needs none) is told nothing and gets none.
+- **How firmly.** The environment decides, not the scheduler. A docker container gets its NVIDIA
+  devices by number (`--gpus '"device=2,3"'`, with the quotes docker needs around a list, or, with
+  `runtime`, `NVIDIA_VISIBLE_DEVICES`), and the others do not exist in it. An AMD container gets
+  the driver's devices whole, since binding one render node does not hide the others from the ROCm
+  runtime, and `ROCR_VISIBLE_DEVICES` names its group: the runtime honours it, and nothing stops a
+  process that ignores it. A job on the host gets the variables of its group
+  (`CUDA_VISIBLE_DEVICES`, or `ROCR_VISIBLE_DEVICES`) and nothing else: a host process that ignores
+  them can open any GPU, and so can a process that vibesys did not start, which the pool never
+  sees. Only `ROCR_VISIBLE_DEVICES` is set for AMD GPUs: `HIP_VISIBLE_DEVICES` counts the devices
+  left after it, so setting both to the group would filter twice.
+- **Host jobs** take their GPUs from the pool of the local placement that declares this machine's
+  GPUs, and its slot, so a host job and a docker job of this machine never share a GPU. A machine
+  with no container runtime declares `kind = "local"` with a `count` (the second example below)
+  and runs its jobs on the host. A `cuda` task is accepted on the host: its result is
+  fingerprinted by the host, which reads no GPU facts. A config whose two local placements both
+  declare this machine's GPUs (one of each vendor) is refused: a host job could not say which it
+  uses.
+- **Clusters and ssh.** `slurm` and `apptainer` placements are not counted by the CLI: where the
+  cluster has a GPU resource, Slurm keeps two allocations off one GPU and a job's allocation asks it
+  for the job's GPUs (`--gres=gpu[:<gres_type>]:<N>`, every GPU for a measure, which also holds the
+  node), with no job running beside another inside an allocation; where it has none (an
+  `apptainer` placement with no `gres_type`), each allocation is a whole node and the CLI names the
+  job's devices inside it, by variable. An `ssh`
+  placement runs one job at a time (its jobs share one staging scope on the host), and its job is
+  given the GPUs it asks for of the pool.
+
+Adding a vendor is a package under `internal/resource/` with its role (`resource.Devices`: the
+pool's id and size, what a container is given for a group, and the variables a host process is
+given) and its resource, a line in the wiring, and its `devicestest` suite: no other file changes.
 
 ### The apptainer placement
 
@@ -916,15 +1085,12 @@ start without it, saying to install it.
   one of them changes, and the node and how long it waited once it runs. A run whose allocation
   runs at once writes nothing of it. `vibesys-cli jobs` shows such a job as running.
 - The AMD GPUs a job gets are its allocation's: Slurm keeps two allocations off one GPU, and gives
-  a measure the whole node with `[slurm] exclusive` (the default). So the GPUs are claimed per
-  placement, `rocm:<placement>@<login node>`, and a measure is alone on its node without holding
-  its placement alone: it takes one of the placement's `max_jobs` slots as any job does, and other
-  measures and jobs of any task run beside it, each in allocations of its own, on other nodes. A
-  reused allocation (`idle_release_seconds`) is sized for a measure and runs one job at a time, so
-  it is a node of its own too. With `exclusive = false`, a measure's allocation is a slice of a
-  node whose other slices may run other jobs, of this daemon's other placements or of anyone, so a
-  measure holds its own placement alone, and the jobs of the cluster's other placements run beside
-  it. Nothing of a placement of this kind
+  a measure the whole node. So the GPUs are claimed per placement, `rocm:<placement>@<login node>`,
+  and a measure is alone on its node without holding its placement alone: it takes one of the
+  placement's `max_jobs` slots as any job does, and other measures and jobs of any task run beside
+  it, each in allocations of its own, on other nodes. A reused allocation (`idle_release_seconds`)
+  is sized for a measure and runs one job at a time, so it is a node of its own too. Nothing of a
+  placement of this kind
   is leased between daemons: Slurm, which grants each its own allocations, is what keeps them
   apart.
 - The machine's facts and load, and the AMD GPUs' facts, are read on the node inside the
@@ -972,8 +1138,7 @@ start without it, saying to install it.
   died leaves no allocation behind, so a lost holder is not reconnected. The step is started again
   only while it never reached the login node.
 - Several jobs of one placement run at once, up to its `max_jobs`, each in allocations of its own,
-  which Slurm keeps apart (with `exclusive`, the default, a measured container holds its whole
-  node). Each job's runs are a scope of their own under the placement's: its allocations are
+  which Slurm keeps apart (a measured container holds its whole node). Each job's runs are a scope of their own under the placement's: its allocations are
   commented `<placement scope>.<run scope>`, and its checkouts are staged in
   `staged/<placement scope>/<run scope>/` under `remote_workspace_root`. A job's process holds a
   lock of its run scope (in `placement-runs/` of the daemon's runtime directory) for as long as it
@@ -981,7 +1146,7 @@ start without it, saying to install it.
   removes the staged directories its own job's earlier attempts and every dead job of the placement
   left (an earlier binary's among them), and leaves a live job's alone. A measure job still runs
   alone on its placement: besides the node, it shares this machine (image builds and conversions)
-  and the login node with whatever runs beside it, and `exclusive` may be off.
+  and the login node with whatever runs beside it.
 
 ### Standing allocations
 

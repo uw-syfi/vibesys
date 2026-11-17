@@ -72,6 +72,9 @@ func ValidPlacementName(name string) error {
 type PlacementOffer struct {
 	Name      string
 	Resources []ResourceKind
+	// Pool is how many GPUs the placement's file declares (count), the most one job of it may ask
+	// for with --gpus. Unset when it declares none.
+	Pool GPUCount
 }
 
 // Lacks returns the first of needs the placement does not give, or "" when it gives them all.

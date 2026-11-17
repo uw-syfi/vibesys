@@ -114,6 +114,10 @@ type view struct {
 	slots map[string]bool
 	// unplaced is the jobs held back for the allocation machine to decide where they run.
 	unplaced []lifecycle.Ref
+	// queued is why each queued job the scheduler held back waits, in the order the machine heard
+	// of them, and holders the jobs that hold devices of a pool.
+	waiting []lifecycle.Queued
+	holders []lifecycle.GrantHolder
 	// used is the units of each resource the jobs and slots that hold the machine add up to.
 	used map[schedule.ResourceID]int
 }
@@ -357,7 +361,8 @@ func (a *App) publish(s lifecycle.State, scopes map[lifecycle.StoreID]core.Scope
 	for _, sl := range s.Slots() {
 		next.slots[sl.Slot] = sl.Granted
 	}
-	for _, q := range s.Queue() {
+	next.waiting, next.holders = s.Queue(), s.GrantHolders()
+	for _, q := range next.waiting {
 		next.queue[q.Ref] = q
 	}
 	for id, scope := range scopes {
@@ -438,11 +443,45 @@ func (a *App) Waits(scope core.Scope, ids []core.JobID) map[core.JobID]core.JobW
 		}
 		w := core.JobWait{Kind: q.Reason.Kind, Resource: string(q.Reason.Resource), Detail: q.Reason.Detail, Elsewhere: q.Reason.Elsewhere}
 		for _, b := range q.Blockers {
-			w.Holders = append(w.Holders, core.WaitHolder{Job: b.Ref.Job, Task: v.tasks[b.Ref.Store], Kind: b.Work.Kind, Run: b.Work.Run})
+			w.Holders = append(w.Holders, core.WaitHolder{Job: b.Ref.Job, Task: v.tasks[b.Ref.Store], Kind: b.Work.Kind, Run: b.Work.Run, GPUs: heldOf(b.Grant, q.Reason.Resource)})
+		}
+		if q.Reason.Kind == core.WaitFull || q.Reason.Kind == core.WaitBehind {
+			w.GPUsWanted, w.GPUsFree = a.poolShare(q.Reason.Resource, q.Work, v.used)
 		}
 		out[id] = w
 	}
 	return out
+}
+
+// heldOf is the grant when it is of the pool the resource names, and nil for any other.
+func heldOf(g *core.Grant, resource schedule.ResourceID) *core.Grant {
+	if g == nil || string(g.Pool) != string(resource) {
+		return nil
+	}
+	return g
+}
+
+// poolShare is, for a resource that is a pool of GPUs, how many of its units the work claims and
+// how many are free given what the jobs that hold the machine use; both are zero for any other
+// resource, whose units are not GPUs.
+func (a *App) poolShare(resource schedule.ResourceID, w lifecycle.Work, used map[schedule.ResourceID]int) (wanted, free int) {
+	i := slices.IndexFunc(a.cfg.Scheduler.Resources, func(r schedule.Resource) bool { return r.ID == resource && r.Devices })
+	if i < 0 {
+		return 0, 0
+	}
+	size := a.cfg.Scheduler.Resources[i].Capacity
+	for _, o := range w.Options {
+		for _, c := range o.Claims {
+			if c.Resource == resource {
+				wanted = c.Amount
+				if c.Exclusive {
+					wanted = size
+				}
+				return min(wanted, size), max(size-used[resource], 0)
+			}
+		}
+	}
+	return 0, 0
 }
 
 func (a *App) now() time.Time { return a.cfg.Clock.Now() }

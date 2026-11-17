@@ -177,7 +177,11 @@ type JobSpec struct {
 	// in a running allocation of the run that it fits and otherwise queues it as a job with no
 	// allocation is queued. Empty runs it as it always has.
 	Allocation string
-	Settings   Settings
+	// GPUs is how many GPUs of a placement's GPU pool the job asks for (--gpus). It is no count when
+	// the submission named none: a job of a task that needs no GPU, a job on a placement without a
+	// pool, a measure, which takes the whole pool, and a job saved before jobs could ask.
+	GPUs     GPUCount
+	Settings Settings
 }
 
 // AllocationAny is JobSpec.Allocation for a job that takes any allocation of its run it fits.
@@ -192,6 +196,8 @@ type KeyInputs struct {
 	Environment   Fingerprint
 	Settings      Settings
 	SchemaVersion uint32
+	// GPUs is the count of GPUs the job asked for, which takes part only when it is a count.
+	GPUs GPUCount
 }
 
 // Note is free text on a job. It never takes part in a cache key, a verdict or a promotion.
@@ -236,7 +242,11 @@ type Job struct {
 	NoCache bool
 	// Environment is pinned when the job starts and nil while it is queued.
 	Environment *Fingerprint
-	Notes       []Note
+	// GPUs are the GPUs of a pool the job was given when it started. It is nil while the job is
+	// queued, for a job given none, and for a job started before grants were recorded, whose GPUs
+	// are unknown. It never takes part in the job's key.
+	GPUs  *Grant
+	Notes []Note
 	// Plans are every plan a submission linked this job to, in link order.
 	Plans       []PlanNumber
 	SubmittedAt time.Time
@@ -402,6 +412,10 @@ type Transition struct {
 	At   time.Time
 	// Environment is set on the move to running.
 	Environment *Fingerprint
+	// GPUs, set only on the move to running, is the GPUs of a pool the job was given: recorded
+	// with the start, before any of the job's commands runs, so that a restart finds what the job
+	// holds. Nil for a job that was given none.
+	GPUs *Grant
 	// Key, set only on the move to running of a check or measure job, is the key the job runs
 	// under from then on: that of the environment it pinned. Empty keeps the key it was queued
 	// under.

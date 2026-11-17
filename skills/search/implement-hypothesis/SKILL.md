@@ -45,12 +45,21 @@ set; export it as the absolute path of the vibesys-cli to use`.
    gain over your parent.
 4. With the verdict in hand, build the next step on it, or stop.
 
+GPUs: stay inside the task's GPU budget. When your change touches how the server launches,
+places or shards work, or claims a throughput gain, check per-device use under load and report how
+many budgeted devices were busy ([GPUs](../measure/references/gpus.md)). Your own check and
+command jobs take `--gpus N`: the fewest the step needs.
+
 Any run that drives load, including a short sanity or tuning run, is a `vibesys-cli submit command
 <sha> --image harness -- <argv...>` job on a committed `wip` checkpoint (`vibesys:measure` says
 which image; on a task with `[candidate]` the harness command runs beside the candidate's server,
 and on another task `--service` and `--probe` start a server). Do not run benchmarks or servers in your own shell (unit tests and the in-process
 microbenchmarks of Work step 2 are the exception), and do not queue more jobs than your
-budget allows.
+budget allows. While a job is queued, do not poll or stop: wait in the background and go on to your
+next step. A job runs the commit it was submitted with and the CLI cannot change it. When a newer
+commit of yours makes your own queued job's result useless, cancel that job and submit the newer
+commit, or, on a placement with a standing allocation, submit it into the allocation. Leave other
+agents' jobs alone ([reading the queue](../measure/references/jobs.md#reading-the-queue)).
 
 ## Never
 

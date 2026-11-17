@@ -162,6 +162,10 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	if err != nil {
 		return err
 	}
+	// A pool that is not the machine's GPUs would hand out devices that do not exist.
+	if err := p.checkPools(ctx, op, clk); err != nil {
+		return err
+	}
 	logf := func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, "%s %s: %s\n", clk.Now().UTC().Format("2006-01-02T15:04:05Z"), daemonName, fmt.Sprintf(format, args...))
 	}
@@ -200,6 +204,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 			}),
 			Environments:    wired.Environments,
 			Placements:      wired.Placements,
+			HostPool:        wired.HostPool,
 			PlacementReader: app.NewPlacementReader(wired.probes, clk, clk, app.DefaultCallTimeout),
 			Branches:        gitrepo.System{},
 			Repositories:    gitrepo.System{},
@@ -230,7 +235,10 @@ const hostResource schedule.ResourceID = "host"
 type Wired struct {
 	Environments environment.Environments
 	// Placements are the placements a docker job can run on.
-	Placements  []core.PlacementOffer
+	Placements []core.PlacementOffer
+	// HostPool is the size of the GPU pool of this machine that host jobs draw from, unset when
+	// the config declares none.
+	HostPool    core.GPUCount
 	Scheduler   app.Scheduler
 	Allocations app.Allocations
 	// Capacities measure the placements whose capacity is a cluster's.
@@ -268,7 +276,7 @@ func (p Process) Wire(op *cliv1.OperatorConfig, clk Clocks, dir runtimedir.Dir, 
 		return Wired{}, err
 	}
 	return Wired{
-		Environments: machines.environments, Placements: machines.offers, Scheduler: scheduler, Allocations: allocations,
+		Environments: machines.environments, Placements: machines.offers, HostPool: machines.hostPool, Scheduler: scheduler, Allocations: allocations,
 		Capacities: capacitiesOf(machines.clusters), claims: machines.claims, probes: machines.probes,
 		ProcessesLeft: machines.processesLeft,
 	}, nil
@@ -280,8 +288,12 @@ func (p Process) Wire(op *cliv1.OperatorConfig, clk Clocks, dir runtimedir.Dir, 
 // resources claim, with room for every job of the placements that claim it, so that it bounds only
 // the claims that take it whole: a measure's, but on a placement that keeps it apart by itself
 // (isolated), and those a resource makes exclusive, such as a cluster's. A host job runs on this
-// machine beside the jobs of the local placement "default" of the earlier shape, so it claims a
-// slot of that placement; without one, host jobs have a resource of one slot of their own.
+// machine beside the jobs of a local placement named "default" (that of no file), so it claims a
+// slot of that placement; without one, host jobs have a resource of one slot of their own. The GPUs
+// of a local or ssh placement that declares a count are a pool: a resource of that many devices,
+// which a job claims some of, and the daemon gives each job devices of it by number (the vendor's
+// role, resource.Devices). Host jobs take theirs from the pool of the local placement that declares
+// one, and take its slot too.
 func schedulerOf(op *cliv1.OperatorConfig, offers []core.PlacementOffer, claims map[string][]core.Claim) (app.Scheduler, error) {
 	policy := op.GetScheduler().GetPolicy()
 	newPolicy, ok := policies[policy]
@@ -290,13 +302,22 @@ func schedulerOf(op *cliv1.OperatorConfig, offers []core.PlacementOffer, claims 
 		return app.Scheduler{}, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
 			"the operator config: scheduler.policy: %q is not a policy (%s)", policy, strings.Join(names, ", "))}
 	}
+	pools, err := poolsOf(op)
+	if err != nil {
+		return app.Scheduler{}, err
+	}
 	demand := schedule.PlacementDemand{Placements: map[string]schedule.Offered{}}
 	var resources []schedule.Resource
 	shared := map[schedule.ResourceID]int{}
+	counted := map[schedule.ResourceID]int{}
 	for _, name := range slices.Sorted(maps.Keys(op.GetPlacements())) {
 		slots := int(op.GetPlacements()[name].GetMaxJobs())
 		resources = append(resources, schedule.Resource{ID: schedule.PlacementOf(name), Capacity: slots})
 		offered := schedule.Offered{Isolated: isolated(op.GetPlacements()[name])}
+		if p := pools[name]; p != nil {
+			offered.Pool = &p.counted
+			counted[p.counted.Resource] = p.counted.Size
+		}
 		if i := slices.IndexFunc(offers, func(o core.PlacementOffer) bool { return o.Name == name }); i >= 0 {
 			offered.Resources = offers[i].Resources
 		}
@@ -310,10 +331,22 @@ func schedulerOf(op *cliv1.OperatorConfig, offers []core.PlacementOffer, claims 
 	for _, id := range slices.Sorted(maps.Keys(shared)) {
 		resources = append(resources, schedule.Resource{ID: id, Capacity: shared[id]})
 	}
+	for _, id := range slices.Sorted(maps.Keys(counted)) {
+		resources = append(resources, schedule.Resource{ID: id, Capacity: counted[id], Devices: true})
+	}
+	hostPool, err := hostPoolOf(pools)
+	if err != nil {
+		return app.Scheduler{}, err
+	}
 	demand.Host = hostResource
-	if d := op.GetPlacements()[operator.DefaultPlacement]; d.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_LOCAL {
+	switch d := op.GetPlacements()[operator.DefaultPlacement]; {
+	case hostPool != nil:
+		// A host job takes a slot, and the GPUs it asks for, of the local placement that declares
+		// this machine's GPUs, so that it never shares one with a docker job there.
+		demand.Host, demand.HostPool = schedule.PlacementOf(hostPool.name), &hostPool.counted
+	case d.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_LOCAL:
 		demand.Host = schedule.PlacementOf(operator.DefaultPlacement)
-	} else {
+	default:
 		resources = append(resources, schedule.Resource{ID: hostResource, Capacity: 1})
 	}
 	return app.Scheduler{Resources: resources, Policy: newPolicy(), Demand: demand}, nil

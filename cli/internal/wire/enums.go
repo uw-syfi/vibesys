@@ -251,6 +251,34 @@ func ToCutCause(field string, c cliv1.CutCause) (core.CutCause, error) {
 	return "", invalid("%s: %s is not a cut cause", field, c)
 }
 
+var grantSources = []struct {
+	domain core.GrantSource
+	wire   cliv1.GrantSource
+}{
+	{core.GrantByCLI, cliv1.GrantSource_GRANT_SOURCE_CLI},
+	{core.GrantByCluster, cliv1.GrantSource_GRANT_SOURCE_SLURM},
+}
+
+// GrantSource returns the contract's value for who chose a grant's devices.
+func GrantSource(s core.GrantSource) cliv1.GrantSource {
+	for _, p := range grantSources {
+		if p.domain == s {
+			return p.wire
+		}
+	}
+	return cliv1.GrantSource_GRANT_SOURCE_UNSPECIFIED
+}
+
+// ToGrantSource returns the domain source for the contract's value, or invalid_input naming field.
+func ToGrantSource(field string, s cliv1.GrantSource) (core.GrantSource, error) {
+	for _, p := range grantSources {
+		if p.wire == s {
+			return p.domain, nil
+		}
+	}
+	return "", invalid("%s: %s is not who chose a grant's devices", field, s)
+}
+
 var resourceKinds = []struct {
 	domain core.ResourceKind
 	wire   cliv1.ResourceKind

@@ -3,12 +3,15 @@ package gpu_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
+	"reflect"
 	"sync"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
+	"github.com/uw-syfi/vibesys/cli/internal/resource/devicestest"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/gpu"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/resourcetest"
 )
@@ -119,5 +122,72 @@ func TestOffersCountTheDevicesASelectionNames(t *testing.T) {
 		if err != nil || len(offers) != 1 || offers[0].Count != tc.want || offers[0].Model != core.ModelA100 {
 			t.Errorf("%s: %v, %v", tc.devices, offers, err)
 		}
+	}
+}
+
+func TestNVIDIADevicesPassTheContract(t *testing.T) {
+	for _, runtime := range []string{"", "nvidia"} {
+		for _, size := range []int{1, 2, 8, core.MaxPoolSize} {
+			t.Run(fmt.Sprintf("size %d, runtime %q", size, runtime), func(t *testing.T) {
+				devicestest.Run(t, func(t *testing.T) devicestest.Subject {
+					n, err := core.ParseGPUCount(uint32(size), "test")
+					if err != nil {
+						t.Fatal(err)
+					}
+					d, err := gpu.NewDevices(gpu.DevicesConfig{Machine: "host-a", Size: n, Runtime: runtime})
+					if err != nil {
+						t.Fatal(err)
+					}
+					return devicestest.Subject{Devices: d, Kind: core.ResourceGPU}
+				})
+			})
+		}
+	}
+}
+
+// What docker is given is pinned exactly: the numbers, for the engine to write as the --gpus value
+// "device=2,3" with its quotes, and for a runtime the variable; and what a host process is told.
+func TestNVIDIADevicesGiveTheGroupByNumber(t *testing.T) {
+	size, _ := core.ParseGPUCount(8, "test")
+	group, err := core.ParseDeviceGroup([]uint32{2, 3}, size, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := gpu.NewDevices(gpu.DevicesConfig{Machine: "host-a", Size: size})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id, n := d.Pool(); id != "gpu:host-a" || n != size {
+		t.Errorf("Pool = %q, %d", id, n.Int())
+	}
+	got, err := d.Container(group)
+	if err != nil || !reflect.DeepEqual(got, resource.Attachment{GPUs: resource.GPUs{NVIDIA: "2,3"}}) {
+		t.Errorf("Container = %+v, %v: want the numbers 2 and 3 and no variable (the container numbers its devices from 0)", got, err)
+	}
+	vars, err := d.Process(group)
+	if want := map[string]string{"CUDA_VISIBLE_DEVICES": "2,3", "CUDA_DEVICE_ORDER": "PCI_BUS_ID"}; err != nil || !maps.Equal(vars, want) {
+		t.Errorf("Process = %v, %v, want %v", vars, err, want)
+	}
+	viaRuntime, _ := gpu.NewDevices(gpu.DevicesConfig{Machine: "host-a", Size: size, Runtime: "nvidia"})
+	got, err = viaRuntime.Container(group)
+	want := resource.Attachment{GPUs: resource.GPUs{NVIDIA: "2,3", Runtime: "nvidia"}, GPUEnv: map[string]string{"NVIDIA_VISIBLE_DEVICES": "2,3"}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("Container with a runtime = %+v, %v, want %+v", got, err, want)
+	}
+}
+
+// A pool's resource claims nothing and attaches nothing of its own: what a job gets depends on its group.
+func TestAPoolOfGPUsClaimsAndAttachesNothingItself(t *testing.T) {
+	size, _ := core.ParseGPUCount(4, "test")
+	g, err := gpu.New(gpu.Config{Pool: size, Machine: "host-a", Facts: someGPU()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := g.Attach(t.Context())
+	if len(g.Claims()) != 0 || err != nil || !reflect.DeepEqual(a, resource.Attachment{}) {
+		t.Errorf("Claims = %v, Attach = %+v, %v", g.Claims(), a, err)
+	}
+	if _, err := gpu.New(gpu.Config{Pool: size, Devices: "all", Machine: "host-a", Facts: someGPU()}); err == nil {
+		t.Error("a pool with a --gpus value was accepted")
 	}
 }

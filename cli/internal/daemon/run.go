@@ -38,7 +38,9 @@ type Runtime struct {
 	Supervisors  supervisor.Supervisors
 	Environments environment.Environments
 	// Placements are the placements a docker job can run on (app.Config.Placements).
-	Placements      []core.PlacementOffer
+	Placements []core.PlacementOffer
+	// HostPool is the size of the GPU pool host jobs draw from (app.Config.HostPool).
+	HostPool        core.GPUCount
 	PlacementReader *app.PlacementReader
 	Branches        gitrepo.Branches
 	// Repositories resolves a caller's directory to the repository its store is keyed by.
@@ -159,6 +161,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		Stores:        cfg.Runtime.Stores,
 		Environments:  cfg.Runtime.Environments,
 		Placements:    cfg.Runtime.Placements,
+		HostPool:      cfg.Runtime.HostPool,
 		Supervisors:   cfg.Runtime.Supervisors,
 		Branches:      cfg.Runtime.Branches,
 		Repositories:  cfg.Runtime.Repositories,
