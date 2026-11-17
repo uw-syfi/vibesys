@@ -157,7 +157,10 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
   running checks when capacity is short.
   `vibesys-cli jobs` says under each queued job why it waits; a queued job with a reason is
   waiting its turn, not stuck. Give each brief a budget in samples and jobs, and look at
-  `vibesys-cli jobs` before you fund more.
+  `vibesys-cli jobs` before you fund more. A long queue is not a reason to stop work: keep workers
+  implementing and committing the next ideas while their jobs wait, so the best candidate is ready
+  when a slot opens, and say why when you leave a slot idle
+  ([reading the queue](../measure/references/jobs.md#reading-the-queue)).
 - Run fully autonomously and never block on a question to the user, unless the user asked to be
   consulted. Decide, write the decision into the plan, keep going, and report it in the next
   report so the user can reverse it.

@@ -60,7 +60,11 @@ Any run that drives load, including a short sanity or tuning run, is a `vibesys-
 which image; on a task with `[candidate]` the harness command runs beside the candidate's server,
 and on another task `--service` and `--probe` start a server). Do not run benchmarks or servers in your own shell (unit tests and the in-process
 microbenchmarks of Work step 2 are the exception), and do not queue more jobs than your
-budget allows.
+budget allows. While a job is queued, do not poll or stop: wait in the background and go on to your
+next step. A job runs the commit it was submitted with and the CLI cannot change it. When a newer
+commit of yours makes your own queued job's result useless, cancel that job and submit the newer
+commit, or, on a placement with a standing allocation, submit it into the allocation. Leave other
+agents' jobs alone ([reading the queue](../measure/references/jobs.md#reading-the-queue)).
 
 ## Never
 

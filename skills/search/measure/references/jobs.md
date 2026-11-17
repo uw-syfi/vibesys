@@ -25,6 +25,28 @@ GPUs of gpu:local, 2 free, held by ..."); `vibesys-cli placement capacity <place
 GPUs and which jobs hold the others, and a job asking for fewer GPUs starts sooner. Report a
 refusal as the CLI printed it.
 
+## Reading the queue
+
+Before you submit more work or cancel anything, look at `vibesys-cli jobs --state queued,running`
+and `vibesys-cli placement capacity <placement>`. Match each reason to an action:
+
+| What `jobs` says | What it means | Do |
+| --- | --- | --- |
+| `waiting for N GPUs of <pool>, M free, held by ...` | The pool is busy | Wait, or resubmit at fewer GPUs if the command can run on fewer. The holders are other agents' work: never cancel them. |
+| `behind <job>, which waits for ...` | An earlier job has the turn | Wait. A waiting job keeps its turn. |
+| A measure needs the placement alone | It starts when the running jobs finish, then nothing else starts beside it | Wait. Do not queue more checks or commands behind it than you need. |
+| A wait ends with a reason (exit 4) | The job can never run | Fix the request (a count larger than any pool, a placement that lacks a resource). Report the refusal as printed. |
+
+If most of the pool is free while jobs queue, look for an oversized request (every job asking for
+all GPUs). A long queue is not a reason to stop working: keep implementing and committing the next
+ideas, so the best candidate is ready when a slot opens. A queued job runs the commit it was
+submitted with and the CLI cannot change it, so it never picks up later work. On a placement where
+jobs wait for hours, hold a standing allocation (`vibesys:allocations`) and submit the newest commit
+into it when it is ready: the slot is held and the commit is chosen at submit time. Without an
+allocation, when a newer commit of yours makes your own queued job's result useless, cancel that job
+and submit the newer commit; it takes a new turn at the back. If the older result is still wanted,
+leave it and queue both.
+
 ## States
 
 `queued`, `running`, `succeeded`, `failed`, `cancelled`, `lost`. `vibesys-cli jobs` filters by

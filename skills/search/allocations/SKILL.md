@@ -18,7 +18,9 @@ path of the vibesys-cli to use`. Pass the context flags your brief names (`--run
 
 - Yes: the placement queues (a cluster), jobs wait for hours, and many jobs are ahead of you.
   Compare the waits in `vibesys-cli placement capacity <placement> --json` (`recent_waits`) with how
-  long a job runs: if a wait is several times a job's length, pay it once.
+  long a job runs: if a wait is several times a job's length, pay it once. While it is held, keep
+  implementing: the commit is chosen when you submit into it, so the newest one runs when you are
+  ready.
 - No: a `local` placement. A request there only reserves one of its job slots and never ends, so it
   is harmless but gains nothing; skip it unless a run should keep a slot from other runs. No work
   in sight: hold nothing and let it lapse.
