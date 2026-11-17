@@ -1,6 +1,6 @@
 ---
 name: setup
-description: "Use when a session is about to make its first vibesys-cli call (vibesys:create-task and vibesys:optimize start here), when vibesys-cli is missing, fails or reports a version the skills do not support, or when the user asks to install, upgrade or check it. Finds vibesys-cli or installs it with the user's approval, upgrades it only to a release the skills support, checks its version against the range the skills declare, and exports its absolute path as VIBESYS_CLI for the session."
+description: "Use when a session is about to make its first vibesys-cli call (vibesys:create-task and vibesys:optimize start here), when vibesys-cli is missing, fails or reports a version the skills do not support, or when the user asks to install, upgrade or check it. Finds vibesys-cli or installs it with the user's approval, upgrades it only to a release the skills support, checks its version against the range the skills declare, and exports its absolute path as VIBESYS_CLI for the session. Also says how to set up the placement file (cli.toml) that tells the CLI how many GPUs each place has, when the user asks or a task is refused for a missing GPU."
 ---
 
 # Set up
@@ -83,6 +83,15 @@ Upgrade only when the user asked for it, or approved it after a `too-old` check.
 4. If the upgrade or install says the binary's directory is not writable, ask the user whether to
    install `C` into a directory they own ([Install](#install)) and switch `VIBESYS_CLI` to it.
 5. Check the version again. If it is not `ok`, report and stop.
+
+## Placements
+
+The CLI runs jobs only where the operator config (`~/.config/vibesys/cli.toml`) says: its
+placements, and how many GPUs each has. With no file there is no GPU, and a task that needs one is
+refused. Read [placements.md](references/placements.md) when the user asks to set up their GPUs or a
+cluster, when a task is refused for a resource no placement gives, or when a job is refused for its
+`--gpus`. The file belongs to the user: propose its text and write it only when they ask or approve,
+back up the existing file first, and never change it to get past a refusal while optimizing.
 
 ## Hand off
 

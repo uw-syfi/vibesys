@@ -20,7 +20,10 @@ another job. A queued job is therefore not stuck: `vibesys-cli jobs` prints unde
 for instance that it needs the placement alone and which jobs hold it, or which earlier job it is
 behind. A waiting job keeps its turn, and a wait on a job that can never run ends with why (exit
 4). Read the reason before you resubmit or cancel; the jobs that hold the placement are other
-agents' work. Report a refusal as the CLI printed it.
+agents' work. A job that waits for GPUs says how many it wants and how many are free ("waiting for 4
+GPUs of gpu:local, 2 free, held by ..."); `vibesys-cli placement capacity <placement>` shows the free
+GPUs and which jobs hold the others, and a job asking for fewer GPUs starts sooner. Report a
+refusal as the CLI printed it.
 
 ## States
 

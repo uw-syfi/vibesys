@@ -50,7 +50,13 @@ you stop), so a miss costs one worker pass. Fill the Bold fields in
    claim more than that headroom; if the part's time is unmeasured, say "unattributed" and make the
    first step a measurement. Bound the whole system too: the most the task's fixed resources allow
    end to end, including whatever drives the load. Say which resource sets that ceiling and where
-   the current result sits under it. A part's headroom is real only below that ceiling. When your
+   the current result sits under it. On a task with accelerators, count them: the devices a measure
+   sees (the GPU model and count in the environment fingerprint of a saved result, and
+   `vibesys-cli task card <task>`) against the devices the candidate's server and benchmark
+   actually use (its launch command and config: tensor, data or expert parallel degree, replicas,
+   `CUDA_VISIBLE_DEVICES`). A measure holds the whole node, so devices the candidate leaves idle are
+   headroom: when the task's rules allow the parallelism, a first-class idea, with a measurement
+   of per-device use as its first step. A part's headroom is real only below that ceiling. When your
    ceiling for an objective differs from the one `vibesys-cli bound list` shows, declare yours with
    `bound declare` and say how you derived it; the earlier one stays in the history.
 3. **Claim early.** As soon as you chose an idea, put it in a workstream, the line of work its
