@@ -17,7 +17,8 @@ import {FIXTURE_SCREENS, openFixture} from './journey.js';
 test('run cards keep their contents uncovered when hovered or focused', async ({page}) => {
   await openFixture(page);
   const cards = page.getByRole('button', {name: /^Open run /});
-  expect(await cards.count()).toBeGreaterThan(0);
+  // The cards render after the Runs heading. A bare count() does not retry, so wait for them.
+  await expect(cards.first()).toBeVisible();
   for (const card of await cards.all()) {
     await card.hover();
     await expect(card).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
