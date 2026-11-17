@@ -45,15 +45,10 @@ set; export it as the absolute path of the vibesys-cli to use`.
    gain over your parent.
 4. With the verdict in hand, build the next step on it, or stop.
 
-On a multi-accelerator machine, do not assume a measured number used every device. A measure
-holds the whole node, but the candidate's server uses only the devices it was told to, so devices
-it leaves idle are headroom. When your change touches how the server launches, places or shards
-work, or the claim is about throughput, confirm per-device use under load before you trust the
-number: a harness command job that samples
-`nvidia-smi --query-gpu=index,utilization.gpu,memory.used --format=csv` (`rocm-smi` on AMD) during
-the load, and say in the handoff how many devices were busy. Idle devices are a finding, not
-noise; report them even when the task's rules stop you from using them. Check and command jobs you
-run while developing take `--gpus N`: ask for the fewest GPUs the step needs (`vibesys:measure`).
+GPUs: stay inside the task's GPU budget. When your change touches how the server launches,
+places or shards work, or claims a throughput gain, check per-device use under load and report how
+many budgeted devices were busy ([GPUs](../measure/references/gpus.md)). Your own check and
+command jobs take `--gpus N`: the fewest the step needs.
 
 Any run that drives load, including a short sanity or tuning run, is a `vibesys-cli submit command
 <sha> --image harness -- <argv...>` job on a committed `wip` checkpoint (`vibesys:measure` says

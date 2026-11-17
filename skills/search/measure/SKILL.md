@@ -45,12 +45,9 @@ whose `--wrap '<profiler>'` starts the candidate's server under the profiler:
 your plan, so the number is read against that idea, and `--no-plan` says it tests none, as the
 baseline and a re-measure of the head do. A measure from a run that gives neither is refused,
 naming both flags; give both and it is refused too. `--plan` also links a check or a command job.
-GPUs: where the operator config gives a placement a pool of GPUs, a check or command of a task that
-needs GPUs must say how many it takes with `--gpus N`; there is no default. Ask for the fewest the
-command can run on (the model's weights and cache in memory, the parallel degree its launch
-needs), since fewer GPUs per job lets more jobs run at once. Run `vibesys-cli jobs` first and read
-the counts earlier jobs asked for and the devices they ran on. A measure takes the whole node and
-refuses `--gpus`; a refusal names the sizes the placement allows, so read it and do not guess.
+GPUs: a check or command of a GPU task says `--gpus N` (the fewest the step needs; there is no
+default), and a measure takes the whole node. The task's GPU budget, how to check per-device use,
+and what to report are in [gpus.md](references/gpus.md).
 Useful flags: `--note "<text>"` says why you ran it (notes are for readers; they change no result), and
 `--service` with `--probe` runs the command against a service the CLI starts and stops (not
 beside a candidate's server, which the CLI already starts).
