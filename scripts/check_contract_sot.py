@@ -33,6 +33,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from scripts.ast_identity import node_identity
+from scripts.repo_files import tracked_files
 from vs_project.api import Git, GitCommandError
 from vs_sim.api import OsProcesses
 
@@ -175,22 +176,21 @@ class ContractGateError(ValueError):
 def sources(root: Path) -> tuple[Source, ...]:
     """Discover source and consumer modules, including tests and TYPE_CHECKING."""
     result = []
-    for directory in ROOTS:
-        for path in sorted((root / directory).rglob("*.py")):
-            relative = path.relative_to(root)
-            if SKIP.intersection(relative.parts):
-                continue
-            parts = list(relative.with_suffix("").parts)
-            if "src" in parts:
-                parts = parts[parts.index("src") + 1 :]
-            package_file = parts[-1] == "__init__"
-            if package_file:
-                parts.pop()
-            module = ".".join(parts)
-            package = module if package_file else module.rpartition(".")[0]
-            result.append(
-                Source(str(relative), module, package, ast.parse(path.read_text(), str(relative)))
-            )
+    for path in tracked_files(root, suffixes=(".py",), under=ROOTS):
+        relative = path.relative_to(root)
+        if SKIP.intersection(relative.parts):
+            continue
+        parts = list(relative.with_suffix("").parts)
+        if "src" in parts:
+            parts = parts[parts.index("src") + 1 :]
+        package_file = parts[-1] == "__init__"
+        if package_file:
+            parts.pop()
+        module = ".".join(parts)
+        package = module if package_file else module.rpartition(".")[0]
+        result.append(
+            Source(str(relative), module, package, ast.parse(path.read_text(), str(relative)))
+        )
     return tuple(result)
 
 
