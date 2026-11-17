@@ -3,11 +3,13 @@ package environment
 import (
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/envcodec"
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
 
 // maxTimeoutSeconds is the largest limit the job environment states (its rule): a longer limit is
@@ -22,6 +24,21 @@ func TimeoutSeconds(limit time.Duration) uint32 {
 	}
 	seconds := (limit + time.Second - 1) / time.Second
 	return uint32(min(seconds, maxTimeoutSeconds))
+}
+
+// NoteGPUs says in the job environment which GPUs of a pool the job was given, in the words every
+// vendor shares (VIBESYS_GPUS, VIBESYS_GPU_DEVICES), so that a command can read how many it has and
+// which. A job given none leaves both unset.
+func NoteGPUs(job *cliv1.JobEnvironment, grant *core.Grant) {
+	if grant == nil {
+		return
+	}
+	job.Gpus = uint32(grant.Devices.Len())
+	numbers := make([]string, 0, grant.Devices.Len())
+	for _, d := range grant.Devices.Devices() {
+		numbers = append(numbers, strconv.Itoa(int(d)))
+	}
+	job.GpuDevices = strings.Join(numbers, ",")
 }
 
 // JobVariables are the variables a command of a job is started with, for the job environment the

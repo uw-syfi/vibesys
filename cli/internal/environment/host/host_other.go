@@ -11,6 +11,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/resource"
 )
 
 // DefaultProbePause is how long Run waits between two readiness probes of a service.
@@ -22,6 +23,8 @@ type Config struct {
 	Timers     clock.Timers
 	ProbePause time.Duration
 	Grace      time.Duration
+	Devices    resource.Devices
+	GPUs       *core.Grant
 }
 
 // Environment is the host environment, which this operating system cannot provide.

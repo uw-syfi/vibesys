@@ -173,3 +173,23 @@ type Grant struct {
 	Whole  bool
 	Source GrantSource
 }
+
+// CheckFor refuses a grant that cannot be the grant of a job with this spec: one that names a
+// device twice or none, a counted grant of a job that asked for another number of GPUs or for none,
+// and a grant of the whole pool to a job that asked for a count or does not hold every device of
+// it. It fails with a *Failure of kind FailureInvalidInput naming the disagreement.
+func (g Grant) CheckFor(spec JobSpec) error {
+	switch {
+	case g.Source == GrantByCLI && g.Devices.Len() == 0:
+		return failf(FailureInvalidInput, "gpus: a grant the CLI chose names its devices, and this names none")
+	case g.Whole && spec.GPUs.IsSet():
+		return failf(FailureInvalidInput, "gpus: the job asked for %d GPUs, and was given the whole pool", spec.GPUs.Int())
+	case g.Whole && g.Source == GrantByCLI && g.Devices.Len() != g.Size.Int():
+		return failf(FailureInvalidInput, "gpus: the whole pool of %d has %d devices in this grant", g.Size.Int(), g.Devices.Len())
+	case !g.Whole && !spec.GPUs.IsSet():
+		return failf(FailureInvalidInput, "gpus: the job asked for no count of GPUs, and was given %d of a pool", g.Devices.Len())
+	case !g.Whole && g.Source == GrantByCLI && g.Devices.Len() != spec.GPUs.Int():
+		return failf(FailureInvalidInput, "gpus: the job asked for %d GPUs, and was given %d", spec.GPUs.Int(), g.Devices.Len())
+	}
+	return nil
+}

@@ -232,3 +232,62 @@ func TestAPoolMustBeTheMachinesGPUs(t *testing.T) {
 		}
 	}
 }
+
+// A grant is the grant of a job only when it is what the job asked for: a counted job gets as many
+// devices as its count, a job that took the pool gets every device of it, and a job that asked for
+// no count is given the whole pool or nothing. The move to running records it, for no other move,
+// and the move back to the queue forgets it.
+func TestAGrantIsHeldToTheJobsSpecAndRecordedWithItsStart(t *testing.T) {
+	size := gpuCount(t, 8)
+	group := func(devices ...uint32) core.DeviceGroup {
+		g, err := core.ParseDeviceGroup(devices, size, "test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return g
+	}
+	grant := func(whole bool, devices ...uint32) *core.Grant {
+		return &core.Grant{Pool: "gpu:local", Size: size, Devices: group(devices...), Whole: whole, Source: core.GrantByCLI}
+	}
+	whole := grant(true, 0, 1, 2, 3, 4, 5, 6, 7)
+	cases := []struct {
+		name  string
+		asked core.GPUCount
+		grant *core.Grant
+		ok    bool
+	}{
+		{"as many as asked", gpuCount(t, 2), grant(false, 3, 4), true},
+		{"fewer than asked", gpuCount(t, 3), grant(false, 3, 4), false},
+		{"more than asked", gpuCount(t, 1), grant(false, 3, 4), false},
+		{"a count of a job that asked none", core.GPUCount{}, grant(false, 3, 4), false},
+		{"the whole pool of a job that asked none", core.GPUCount{}, whole, true},
+		{"the whole pool of a job that asked a count", gpuCount(t, 8), whole, false},
+		{"a whole grant short of devices", core.GPUCount{}, grant(true, 0, 1), false},
+		{"no devices", gpuCount(t, 1), grant(false), false},
+	}
+	for _, c := range cases {
+		for _, kind := range jobKinds {
+			job := newJob(kind, core.JobQueued)
+			job.Spec.GPUs = c.asked
+			fp := hostEnv
+			moved, err := job.Apply(core.Transition{Job: job.ID, From: core.JobQueued, To: core.JobRunning, At: at(1), Environment: &fp, GPUs: c.grant})
+			if (err == nil) != c.ok {
+				t.Fatalf("%s (%s job): %v, want it accepted = %v", c.name, kind, err, c.ok)
+			}
+			if err != nil {
+				continue
+			}
+			if moved.GPUs == nil || !moved.GPUs.Devices.Equal(c.grant.Devices) || moved.GPUs.Whole != c.grant.Whole {
+				t.Fatalf("%s (%s job): the job holds %+v, want the grant recorded", c.name, kind, moved.GPUs)
+			}
+			// The grant is the running job's alone: nothing else moves it, and a cut attempt forgets it.
+			if _, err := moved.Apply(core.Transition{Job: job.ID, From: core.JobRunning, To: core.JobCancelled, At: at(2), GPUs: c.grant}); err == nil {
+				t.Errorf("%s: a grant was accepted with a move to cancelled", c.name)
+			}
+			back, err := moved.Apply(core.Transition{Job: job.ID, From: core.JobRunning, To: core.JobQueued, At: at(2), Cut: core.CutBeforeStart{By: core.CutRebooted}})
+			if err != nil || back.GPUs != nil {
+				t.Errorf("%s: after the attempt was cut off the job holds %+v, %v", c.name, back.GPUs, err)
+			}
+		}
+	}
+}

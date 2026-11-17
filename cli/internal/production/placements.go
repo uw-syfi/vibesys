@@ -114,8 +114,16 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk Clocks, dir r
 	names := slices.Sorted(maps.Keys(op.GetPlacements()))
 	// Zero is the default grace: the environments take it from environment.DefaultGrace.
 	grace := seconds(op.GetStopGraceSeconds(), 0)
+	pools, err := poolsOf(op)
+	if err != nil {
+		return machines{}, fmt.Errorf("the operator config %s: %w", operator.Path(p.Getenv, p.Home), err)
+	}
+	hostPool, err := hostPoolOf(pools)
+	if err != nil {
+		return machines{}, err
+	}
 	for _, name := range names {
-		provider, side, err := p.placement(clk, dir, containerKey, runs, builds, local, name, op.GetPlacements()[name], grace)
+		provider, side, err := p.placement(clk, dir, containerKey, runs, builds, local, name, op.GetPlacements()[name], grace, pools[name])
 		if err != nil {
 			return machines{}, fmt.Errorf("the operator config %s, placements.%s: %w", operator.Path(p.Getenv, p.Home), name, err)
 		}
@@ -131,9 +139,15 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk Clocks, dir r
 		out.offers = append(out.offers, provider.Offer())
 		out.claims[name] = provider.Claims()
 	}
-	onHost := hostenv.New(hostenv.Config{Backend: local, Timers: clk, Grace: grace})
+	var hostDevices resource.Devices
+	if hostPool != nil {
+		hostDevices = hostPool.devices
+	}
 	out.environments = environment.Kinds{
-		core.EnvironmentHost: func(environment.Target) (environment.Environment, error) { return onHost, nil },
+		// A host job is given the GPUs of the machine's pool as variables, which nothing enforces.
+		core.EnvironmentHost: func(t environment.Target) (environment.Environment, error) {
+			return hostenv.New(hostenv.Config{Backend: local, Timers: clk, Grace: grace, Devices: hostDevices, GPUs: t.GPUs}), nil
+		},
 		core.EnvironmentDocker: func(t environment.Target) (environment.Environment, error) {
 			provider, ok := providers[t.Placement]
 			if !ok {
@@ -209,7 +223,7 @@ func (e engineBuilds) of(host string) *docker.Builds {
 }
 
 // placement makes the docker environments of one placement.
-func (p Process) placement(clk Clocks, dir runtimedir.Dir, containerKey string, runs docker.Runs, builds engineBuilds, local *cpu.Backend, name string, pl *cliv1.Placement, grace time.Duration) (*docker.Provider, *clusterSide, error) {
+func (p Process) placement(clk Clocks, dir runtimedir.Dir, containerKey string, runs docker.Runs, builds engineBuilds, local *cpu.Backend, name string, pl *cliv1.Placement, grace time.Duration, pool *pooled) (*docker.Provider, *clusterSide, error) {
 	scope := scopeOf(dir.Path(), name)
 	var source docker.Source = docker.TaskSource{Tasks: gitwork.Tasks{}}
 	if p.Outside.Source != nil {
@@ -281,7 +295,11 @@ func (p Process) placement(clk Clocks, dir runtimedir.Dir, containerKey string, 
 			Builders: slurm.Buildx{Shell: engineCfg.Shell, Timers: clk, Name: slurm.BuilderName(scope)},
 		}
 	}
-	if cfg.Resources, err = resources(pl.GetResources(), shell, where, where, clk, &amd.GPUs{Shell: shell, Timers: clk}); err != nil {
+	var counted core.GPUCount
+	if pool != nil {
+		counted, cfg.Devices = pool.pool.Size, pool.devices
+	}
+	if cfg.Resources, err = resources(pl.GetResources(), shell, where, where, clk, &amd.GPUs{Shell: shell, Timers: clk}, counted); err != nil {
 		return nil, nil, err
 	}
 	provider, err := docker.New(cfg)
@@ -395,7 +413,7 @@ func (p Process) apptainerPlacement(clk Clocks, cfg docker.Config, scope string,
 	// gives a measure of [slurm] exclusive the whole node. So they are claimed per placement, named
 	// by the placement and the cluster's login node: a measure holds its own placement's GPUs alone,
 	// and the jobs of the cluster's other placements run beside it, in allocations of their own.
-	if cfg.Resources, err = resources(pl.GetResources(), ssh, ssh.Host, cfg.Placement+"@"+ssh.Host, clk, facts); err != nil {
+	if cfg.Resources, err = resources(pl.GetResources(), ssh, ssh.Host, cfg.Placement+"@"+ssh.Host, clk, facts, core.GPUCount{}); err != nil {
 		return nil, nil, err
 	}
 	provider, err := docker.New(cfg)
@@ -423,19 +441,24 @@ func (p Process) localDocker(clk Clocks) (interface {
 
 // resources are the resources of a placement, each made by its own package from its section. where
 // names the machine the placement reaches, and gpus whose GPUs a job of it gets, which names their
-// claim. The AMD GPUs' facts are read by amdFacts.
-func resources(r *cliv1.Resources, shell remote.Shell, where, gpus string, clk Clocks, amdFacts rocm.Facts) ([]resource.Resource, error) {
+// claim. The AMD GPUs' facts are read by amdFacts. A pool is the number of GPUs the daemon hands out
+// by number, zero for GPUs every job gets whole.
+func resources(r *cliv1.Resources, shell remote.Shell, where, gpus string, clk Clocks, amdFacts rocm.Facts, pool core.GPUCount) ([]resource.Resource, error) {
 	var out []resource.Resource
 	if r.GetRocm() != nil {
-		res, err := rocm.New(rocm.Config{Machine: gpus, Facts: amdFacts})
+		res, err := rocm.New(rocm.Config{Machine: gpus, Facts: amdFacts, Pool: pool})
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, res)
 	}
 	if g := r.GetGpu(); g != nil {
-		// Every job is given all of the machine's GPUs until jobs are given GPUs of a pool.
-		res, err := gpu.New(gpu.Config{Devices: "all", Runtime: g.GetRuntime(), Machine: gpus, Facts: &nvidia.GPUs{Shell: shell, Timers: clk}})
+		cfg := gpu.Config{Devices: "all", Runtime: g.GetRuntime(), Machine: gpus, Facts: &nvidia.GPUs{Shell: shell, Timers: clk}}
+		if pool.IsSet() {
+			// Each job is given the devices of its group (NVIDIADevices), by number.
+			cfg.Devices, cfg.Pool = "", pool
+		}
+		res, err := gpu.New(cfg)
 		if err != nil {
 			return nil, err
 		}

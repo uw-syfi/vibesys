@@ -73,6 +73,12 @@ message Launch {
   // that is ready later does not fit the time left (its preparation, such as an image build, took
   // it), and does not enter. Unset: no bound, as for an allocation with no end.
   google.protobuf.Timestamp allocation_enter_by = 8;
+  // The GPUs of a pool the daemon gave the job when it started it, which the job's environment
+  // passes to its commands: in a container the devices it was given, on the host the variables that
+  // name them. The daemon records the same grant on the job (Job.gpus) before any command starts.
+  // Unset for a job that was given none, and for a job whose placement has no pool, which gets
+  // what it always got.
+  GpuGrant gpus = 9;
 }
 
 // PlanCommand is one command of a plan, with its argument vector as the task wrote it and its

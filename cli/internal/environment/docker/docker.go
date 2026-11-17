@@ -61,6 +61,12 @@ type Config struct {
 	// refused, and so is a task for an accelerator without GPUs. For a task of two images, the GPUs
 	// go to the candidate's container alone.
 	Resources []resource.Resource
+	// Devices, when set, says how a job is given a group of the GPUs of the pool of this placement
+	// (a placement whose GPUs are counted and handed out by number). The GPU resource of its kind
+	// then gives a container nothing but what is the same for every group (its check), and the
+	// container gets the devices of the group the job was given (Target.GPUs): a job that was given
+	// none gets none of that resource. Nil for a placement whose containers all get the same GPUs.
+	Devices resource.Devices
 
 	// Candidates reads what builds a candidate's image, for a task of two images. Nil builds none.
 	Candidates CandidateSource
@@ -123,6 +129,9 @@ func New(cfg Config) (*Provider, error) {
 			return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("docker: the placement %q has a resource that is missing, or two of one kind", cfg.Placement)}
 		}
 		seen[r.Kind()] = true
+	}
+	if cfg.Devices != nil && !seen[cfg.Devices.Kind()] {
+		return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("docker: the placement %q gives devices of a pool of the %s resource, and has no such resource", cfg.Placement, cfg.Devices.Kind())}
 	}
 	if cfg.Machine == nil {
 		cfg.Machine = Shared{As: cfg.User}

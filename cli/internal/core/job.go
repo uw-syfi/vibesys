@@ -412,6 +412,10 @@ type Transition struct {
 	At   time.Time
 	// Environment is set on the move to running.
 	Environment *Fingerprint
+	// GPUs, set only on the move to running, is the GPUs of a pool the job was given: recorded
+	// with the start, before any of the job's commands runs, so that a restart finds what the job
+	// holds. Nil for a job that was given none.
+	GPUs *Grant
 	// Key, set only on the move to running of a check or measure job, is the key the job runs
 	// under from then on: that of the environment it pinned. Empty keeps the key it was queued
 	// under.

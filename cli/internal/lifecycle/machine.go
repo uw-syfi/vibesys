@@ -98,6 +98,11 @@ type entry struct {
 	// none. It is a value, not a pointer, so that a copy of the State shares nothing with it.
 	placed   schedule.Option
 	isPlaced bool
+	// grant is the GPUs of a pool the job was given: chosen when the machine started it, or as its
+	// store records them for a job a restart found, and nil for a job that was given none. It is
+	// held with the placed option, and the devices of a pool are held by those jobs that hold the
+	// machine, and by a parked one, whose grant is recorded already.
+	grant *core.Grant
 	// wait is why the scheduler did not start the job at the last step, when it is queued or parked
 	// and did not start, and refused says its claims can never be granted.
 	wait    schedule.WaitReason
@@ -131,6 +136,10 @@ type Work struct {
 	// them. The machine does not start it until the allocation machine has decided where it runs
 	// (AllocReleased): in an allocation, which holds its capacity, or as a job with no allocation.
 	Allocated bool
+	// Granted is the GPUs of a pool the job's store records it was given when it started, nil for
+	// a job that was given none and for one that is queued. A job the machine finds running holds
+	// these devices, and no other job is given one of them.
+	Granted *core.Grant
 }
 
 func (w Work) told() bool { return len(w.Options) > 0 || w.Kind != "" }
@@ -553,6 +562,10 @@ type LaunchRequest struct {
 	Allocation string
 	// AllocationEnterBy is AllocReleased.EnterBy of the job's allocation.
 	AllocationEnterBy time.Time
+	// GPUs are the GPUs of a pool the machine chose for the job, nil when its claims name none. The
+	// shell writes them into the job's supervisor's launch and into the move to running, in that
+	// order, before any command of the job starts.
+	GPUs *core.Grant
 }
 
 // Adopt asks the shell to attach to the job's supervisor, start it if it is still parked, and
@@ -956,7 +969,12 @@ func (s *State) place(e Recovered, kept entry, phase Phase) {
 			kept.work = f.Work
 		}
 	}
-	kept.phase, kept.waiting, kept.holds, kept.parked, kept.placed, kept.isPlaced = phase, false, false, false, schedule.Option{}, false
+	kept.phase, kept.waiting, kept.holds, kept.parked, kept.placed, kept.isPlaced, kept.grant = phase, false, false, false, schedule.Option{}, false, nil
+	if f, ok := e.Finding.(JobIn); ok {
+		// The store's word on the GPUs a job holds is the only one: a job it has running holds the
+		// devices it recorded, whatever the machine chose before it was restarted.
+		kept.grant = f.Work.Granted
+	}
 	// No retry is owed to a job placed afresh, so one refused a lease tries again in its turn.
 	kept.leased = nil
 	if phase != PhaseInDoubt {
@@ -1094,7 +1112,7 @@ func (s *State) discarded(e Discarded) []Request {
 	if i < 0 || s.entries[i].phase != PhaseDiscarding {
 		return nil
 	}
-	s.entries[i].phase, s.entries[i].placed, s.entries[i].isPlaced = PhaseQueued, schedule.Option{}, false
+	s.entries[i].phase, s.entries[i].placed, s.entries[i].isPlaced, s.entries[i].grant = PhaseQueued, schedule.Option{}, false, nil
 	if s.entries[i].cancelAsked {
 		return s.cancelQueuedJob(e.Ref, e.At)
 	}
@@ -1159,7 +1177,7 @@ func (s *State) leaseRefused(e LeaseRefused) []Request {
 	if cur.cancelAsked {
 		return s.settle(e.Ref, cancelQueued(e.Ref.Job, cur.cancelReason, e.At))
 	}
-	cur.phase, cur.placed, cur.isPlaced = PhaseQueued, schedule.Option{}, false
+	cur.phase, cur.placed, cur.isPlaced, cur.grant = PhaseQueued, schedule.Option{}, false, nil
 	cur.leased = &schedule.LeasedOut{Resource: e.Resource, Holder: e.Holder, Detail: e.Detail}
 	return s.awaitRetry(i)
 }
@@ -1361,12 +1379,20 @@ func (s *State) schedule() []Request {
 		return reqs
 	}
 	st := schedule.State{Resources: s.resources(), Recent: s.recent}
+	held := s.heldDevices()
 	for _, e := range s.entries {
 		switch {
 		case e.holdsMachine():
 			st.Holdings = append(st.Holdings, schedule.Holding{ID: idOf(e.ref), Claims: s.heldClaims(e), Run: e.work.Run})
 		case e.parked:
-			st.Waiting = append(st.Waiting, s.candidate(e, true))
+			c := s.candidate(e, true)
+			if devices := s.deviceClaims(c.Options); e.grant != nil && len(c.Options) == 1 && len(devices) > 0 {
+				// The devices a parked job's store records are the job's already: they are held
+				// while it waits for its place, and what it waits for is the rest of its claims.
+				st.Holdings = append(st.Holdings, schedule.Holding{ID: devicesIDOf(e.ref), Claims: devices, Run: e.work.Run})
+				c.Options = []schedule.Option{{Placement: c.Options[0].Placement, Claims: s.withoutDevices(c.Options[0].Claims)}}
+			}
+			st.Waiting = append(st.Waiting, c)
 		case e.phase == PhaseQueued && !s.storeBlocked(e.ref.Store) && !e.heldForAllocation():
 			st.Waiting = append(st.Waiting, s.candidate(e, false))
 		}
@@ -1395,6 +1421,18 @@ func (s *State) schedule() []Request {
 		switch d := d.(type) {
 		case schedule.Start:
 			placed := d.Option
+			if cur.parked {
+				// Its devices were held all along; it holds the rest of its claims now.
+				placed.Claims = append(slices.Clone(placed.Claims), s.deviceClaims([]schedule.Option{{Claims: s.heldClaimsOfParked(*cur)}})...)
+			} else if grant, why := s.choose(placed, held); why != "" {
+				// Step counted the devices free, so none of this happens while the grants and the
+				// claims agree; a job that cannot be given its devices waits instead of sharing one.
+				cur.wait, cur.waits = schedule.WaitReason{Kind: core.WaitFull, Resource: schedule.ResourceID(why)}, true
+				continue
+			} else if grant != nil {
+				cur.grant = grant
+				held[grant.Pool] = append(held[grant.Pool], grant.Devices)
+			}
 			cur.placed, cur.isPlaced = placed, true
 			s.recent = schedule.Remember(s.recent, schedule.Grant{Run: cur.work.Run, Claims: placed.Claims})
 			if cur.parked {
@@ -1402,7 +1440,7 @@ func (s *State) schedule() []Request {
 				continue
 			}
 			cur.phase = PhaseLaunching
-			reqs = append(reqs, LaunchRequest{Ref: cur.ref, Placement: placed.Placement, Leases: s.leasesOf(*cur), Allocation: cur.allocRefOf(), AllocationEnterBy: cur.allocEnterByOf()})
+			reqs = append(reqs, LaunchRequest{Ref: cur.ref, Placement: placed.Placement, Leases: s.leasesOf(*cur), Allocation: cur.allocRefOf(), AllocationEnterBy: cur.allocEnterByOf(), GPUs: cur.grant})
 		case schedule.Wait:
 			cur.wait, cur.waits = d.Reason, true
 		case schedule.Refuse:
@@ -1410,6 +1448,84 @@ func (s *State) schedule() []Request {
 		}
 	}
 	return reqs
+}
+
+// devicesIDOf names the holding of the devices of a parked job's pool.
+func devicesIDOf(ref Ref) schedule.ID { return schedule.ID("devices:" + ref.String()) }
+
+// deviceResources are the resources whose units are numbered devices, by id, with their sizes.
+func (s *State) deviceResources() map[schedule.ResourceID]int {
+	out := map[schedule.ResourceID]int{}
+	for _, r := range s.resources() {
+		if r.Devices {
+			out[r.ID] = r.Capacity
+		}
+	}
+	return out
+}
+
+// deviceClaims are the claims of the options on a resource of devices.
+func (s *State) deviceClaims(options []schedule.Option) []schedule.Claim {
+	pools := s.deviceResources()
+	var out []schedule.Claim
+	for _, o := range options {
+		for _, c := range o.Claims {
+			if _, ok := pools[c.Resource]; ok {
+				out = append(out, c)
+			}
+		}
+	}
+	return out
+}
+
+// withoutDevices is the claims that are not of a resource of devices.
+func (s *State) withoutDevices(claims []schedule.Claim) []schedule.Claim {
+	pools := s.deviceResources()
+	return slices.DeleteFunc(slices.Clone(claims), func(c schedule.Claim) bool { _, ok := pools[c.Resource]; return ok })
+}
+
+// heldClaimsOfParked is the claims of the one option a parked job's work has.
+func (s *State) heldClaimsOfParked(e entry) []schedule.Claim {
+	if options := s.optionsOf(e); len(options) == 1 {
+		return options[0].Claims
+	}
+	return nil
+}
+
+// heldDevices are the devices of each pool that the jobs that hold the machine, and the parked
+// ones, were given: the groups a new job's devices are chosen around.
+func (s *State) heldDevices() map[core.PoolID][]core.DeviceGroup {
+	out := map[core.PoolID][]core.DeviceGroup{}
+	for _, e := range s.entries {
+		if e.grant != nil && (e.holdsMachine() || e.parked) {
+			out[e.grant.Pool] = append(out[e.grant.Pool], e.grant.Devices)
+		}
+	}
+	return out
+}
+
+// choose is the grant of the GPUs of a pool for a job the scheduler started on the option, from the
+// devices no one holds: nil when the option claims no pool. A job gets as many devices as it
+// claims, and the whole pool when it claims it alone. When the devices cannot be chosen, which
+// the scheduler's counts rule out, it returns the pool's id instead, as the reason.
+func (s *State) choose(o schedule.Option, held map[core.PoolID][]core.DeviceGroup) (*core.Grant, string) {
+	claims := s.deviceClaims([]schedule.Option{o})
+	if len(claims) == 0 {
+		return nil, ""
+	}
+	c := claims[0]
+	size := s.deviceResources()[c.Resource]
+	pool := core.PoolID(c.Resource)
+	n, err := core.ParseGPUCount(uint32(max(c.Amount, 1)), string(c.Resource))
+	count, err2 := core.ParseGPUCount(uint32(size), string(c.Resource))
+	if err != nil || err2 != nil {
+		return nil, string(c.Resource)
+	}
+	devices, ok := core.TakeDevices(count, held[pool], n)
+	if !ok {
+		return nil, string(c.Resource)
+	}
+	return &core.Grant{Pool: pool, Size: count, Devices: devices, Whole: c.Exclusive, Source: core.GrantByCLI}, ""
 }
 
 // resources are what jobs claim. A state made without a Scheduling, the zero State included, runs
@@ -1428,6 +1544,10 @@ func (s *State) Used() map[schedule.ResourceID]int {
 	for _, e := range s.entries {
 		if e.holdsMachine() {
 			for _, c := range s.heldClaims(e) {
+				out[c.Resource] += max(c.Amount, 1)
+			}
+		} else if e.parked && e.grant != nil {
+			for _, c := range s.deviceClaims(s.optionsOf(e)) {
 				out[c.Resource] += max(c.Amount, 1)
 			}
 		}
@@ -1464,7 +1584,14 @@ func (s *State) leasesOf(e entry) []schedule.ResourceID {
 // not told, anywhere, holding every resource for itself alone.
 func (s *State) optionsOf(e entry) []schedule.Option {
 	if e.inAlloc {
-		return []schedule.Option{{Placement: e.allocPlacement}}
+		// The slot is the allocation's, and the GPUs are the job's.
+		o := schedule.Option{Placement: e.allocPlacement}
+		for _, w := range e.work.Options {
+			if w.Placement == e.allocPlacement {
+				o.Claims = s.deviceClaims([]schedule.Option{w})
+			}
+		}
+		return []schedule.Option{o}
 	}
 	if e.work.told() {
 		return e.work.Options

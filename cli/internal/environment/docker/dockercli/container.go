@@ -67,10 +67,14 @@ func runArgs(spec docker.ContainerSpec) []string {
 		// The kernel driver's devices, and the group that may open them; ROCm's runtime is the
 		// image's own.
 		args = append(args, "--device", "/dev/kfd", "--device", "/dev/dri", "--group-add", "video")
-	case g.Devices == "":
+	case g.Devices == "" && g.NVIDIA == "":
 	case g.Runtime != "":
 		// The runtime reads the devices from a variable the GPU resource sets in Env.
 		args = append(args, "--runtime", g.Runtime)
+	case g.NVIDIA != "":
+		// Docker reads the value as CSV, in which "device=2,3" is two fields: a list of devices is
+		// quoted, and the quotes are part of the value.
+		args = append(args, "--gpus", `"device=`+g.NVIDIA+`"`)
 	default:
 		args = append(args, "--gpus", g.Devices)
 	}

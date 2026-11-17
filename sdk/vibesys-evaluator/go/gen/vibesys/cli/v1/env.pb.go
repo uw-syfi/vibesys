@@ -223,7 +223,16 @@ type JobEnvironment struct {
 	TimeoutSeconds uint32 `protobuf:"varint,4,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
 	// The names of the read-only data sets the job may read, each a name in the operator's
 	// configuration.
-	Mounts        []string `protobuf:"bytes,5,rep,name=mounts,proto3" json:"mounts,omitempty"`
+	Mounts []string `protobuf:"bytes,5,rep,name=mounts,proto3" json:"mounts,omitempty"`
+	// How many GPUs of the machine's pool the job was given, whatever their vendor. Zero (not set)
+	// when the job was given none from a pool.
+	Gpus uint32 `protobuf:"varint,6,opt,name=gpus,proto3" json:"gpus,omitempty"`
+	// The numbers of those GPUs in the pool, which are the numbers the vendor's own variable takes
+	// (CUDA_VISIBLE_DEVICES, ROCR_VISIBLE_DEVICES), in ascending order and separated by commas, such
+	// as "2,3". Inside a container the vendor's runtime may number the devices it passes from zero,
+	// so a program that reads the vendor's variable reads that and not this one; this one says which
+	// GPUs of the machine they are.
+	GpuDevices    string `protobuf:"bytes,7,opt,name=gpu_devices,json=gpuDevices,proto3" json:"gpu_devices,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -291,6 +300,20 @@ func (x *JobEnvironment) GetMounts() []string {
 		return x.Mounts
 	}
 	return nil
+}
+
+func (x *JobEnvironment) GetGpus() uint32 {
+	if x != nil {
+		return x.Gpus
+	}
+	return 0
+}
+
+func (x *JobEnvironment) GetGpuDevices() string {
+	if x != nil {
+		return x.GpuDevices
+	}
+	return ""
 }
 
 // KubernetesEnvironment is what a job that needs a Kubernetes cluster is given: the cluster's
@@ -464,14 +487,17 @@ const file_vibesys_cli_v1_env_proto_rawDesc = "" +
 	"\x0fOperatorContext\x12;\n" +
 	"\tplacement\x18\x01 \x01(\tB\x1d\xbaH\x05r\x03(\x80\x02\xa2\xbb\x18\x11VIBESYS_PLACEMENTR\tplacement\"J\n" +
 	"\x10SkillEnvironment\x126\n" +
-	"\x03cli\x18\x01 \x01(\tB$\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\vVIBESYS_CLIR\x03cli\"\xa8\x03\n" +
+	"\x03cli\x18\x01 \x01(\tB$\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\vVIBESYS_CLIR\x03cli\"\xb8\x04\n" +
 	"\x0eJobEnvironment\x12O\n" +
 	"\tartifacts\x18\x01 \x01(\tB1\xbaH\x15r\x13(\x80 2\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\x15VIBESYS_ARTIFACTS_DIRR\tartifacts\x12C\n" +
 	"\x05cache\x18\x02 \x01(\tB-\xbaH\x15r\x13(\x80 2\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\x11VIBESYS_CACHE_DIRR\x05cache\x12V\n" +
 	"\vservice_url\x18\x03 \x01(\tB5\xbaH\x1br\x19(\x80\x102\x14^(https?://[^\\s]+)?$\xa2\xbb\x18\x13VIBESYS_SERVICE_URLR\n" +
 	"serviceUrl\x12R\n" +
 	"\x0ftimeout_seconds\x18\x04 \x01(\rB)\xbaH\a*\x05\x18\x80\xe7\x84\x0f\xa2\xbb\x18\x1bVIBESYS_JOB_TIMEOUT_SECONDSR\x0etimeoutSeconds\x12T\n" +
-	"\x06mounts\x18\x05 \x03(\tB<\xbaH'\x92\x01$\x10@\x18\x01\"\x1er\x1c2\x1a^[a-z0-9][a-z0-9_-]{0,62}$\xa2\xbb\x18\x0eVIBESYS_MOUNTSR\x06mounts\"\x86\x02\n" +
+	"\x06mounts\x18\x05 \x03(\tB<\xbaH'\x92\x01$\x10@\x18\x01\"\x1er\x1c2\x1a^[a-z0-9][a-z0-9_-]{0,62}$\xa2\xbb\x18\x0eVIBESYS_MOUNTSR\x06mounts\x12+\n" +
+	"\x04gpus\x18\x06 \x01(\rB\x17\xbaH\x04*\x02\x18@\xa2\xbb\x18\fVIBESYS_GPUSR\x04gpus\x12a\n" +
+	"\vgpu_devices\x18\a \x01(\tB@\xbaH&r$2\"^([0-9]{1,2}(,[0-9]{1,2}){0,63})?$\xa2\xbb\x18\x13VIBESYS_GPU_DEVICESR\n" +
+	"gpuDevices\"\x86\x02\n" +
 	"\x15KubernetesEnvironment\x12F\n" +
 	"\n" +
 	"kubeconfig\x18\x01 \x01(\tB&\xbaH\x15r\x13(\x80 2\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\n" +

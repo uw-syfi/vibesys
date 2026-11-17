@@ -171,7 +171,7 @@ func (a *App) admittedOf(ref lifecycle.Ref, job core.Job) lifecycle.Admitted {
 // demand says of the job in the environment it runs in, and the run that submitted it first, whose
 // use of the machine it counts as.
 func (a *App) workOf(job core.Job) lifecycle.Work {
-	w := lifecycle.Work{Options: a.cfg.Scheduler.Demand.Options(job), Kind: job.Spec.Settings.Kind(), Allocated: job.Spec.Allocation != ""}
+	w := lifecycle.Work{Options: a.cfg.Scheduler.Demand.Options(job), Kind: job.Spec.Settings.Kind(), Allocated: job.Spec.Allocation != "", Granted: job.GPUs}
 	if len(job.Submitters) > 0 {
 		w.Run = job.Submitters[0].Run
 	}

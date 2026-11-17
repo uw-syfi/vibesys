@@ -93,7 +93,7 @@ var rules = map[string][]string{
 	// The fake machine's world for the contract suite. Only tests reach it.
 	"internal/environment/fakeenv/fakeworld": {"internal/environment/envtest", "internal/environment/fakeenv"},
 	"internal/environment/envtest":           {"internal/clock", "internal/core", "internal/environment"},
-	"internal/environment/host":              {"gen/", "internal/backend", "internal/clock", "internal/core", "internal/environment"},
+	"internal/environment/host":              {"gen/", "internal/backend", "internal/clock", "internal/core", "internal/environment", "internal/resource"},
 
 	// The docker environment decides what to run and how it ends; an engine is the only thing that
 	// talks to Docker. The real engine drives the docker program, the fake keeps a daemon in
@@ -250,7 +250,7 @@ var testRules = map[string][]string{
 	"internal/environment/localalloc": {"internal/environment/allocatortest", "internal/environment/fakeslots"},
 	// The core's records are checked against the contract's rules for them.
 	"internal/alloc":            {"gen/", "internal/wire"},
-	"internal/environment/host": {"internal/backend/cpu", "internal/environment/envtest", "internal/environment/fakeenv"},
+	"internal/environment/host": {"internal/backend/cpu", "internal/environment/envtest", "internal/environment/fakeenv", "internal/resource/gpu"},
 	"internal/environment/slurm": {
 		"internal/backend/cpu", "internal/environment", "internal/environment/docker/dockerfake",
 		"internal/environment/envtest", "internal/environment/fakeenv/fakeworld",

@@ -32,6 +32,10 @@ type Target struct {
 	EnterBy time.Time
 	// AllocationAny says the job was submitted to any allocation of its run.
 	AllocationAny bool
+	// GPUs are the GPUs of a pool the daemon gave the job, which its environment passes to its
+	// commands: a container engine the devices of the group, the host the variables that name
+	// them. Nil for a job that was given none, whose commands get the environment they always did.
+	GPUs *core.Grant
 }
 
 // Environments hands out the Environment of a kind for a target. The daemon asks it for a job's

@@ -195,3 +195,35 @@ func FuzzDecodeLaunchPlan(f *testing.F) {
 		}
 	})
 }
+
+// A launch carries the GPUs of a pool the daemon gave the job through bytes and back, held to the
+// job's spec as a transition is: a grant that is not the job's is refused.
+func TestALaunchCarriesTheGPUsOfItsJob(t *testing.T) {
+	size, err := core.ParseGPUCount(8, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	group, err := core.ParseDeviceGroup([]uint32{2, 3}, size, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := launchWith(newRand(24), nil)
+	l.Spec.GPUs, _ = core.ParseGPUCount(2, "test")
+	l.GPUs = &core.Grant{Pool: "gpu:local", Size: size, Devices: group, Source: core.GrantByCLI}
+	data, err := proto.Marshal(wire.Launch(l))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var msg cliv1.Launch
+	if err := proto.Unmarshal(data, &msg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := wire.ToLaunch(&msg)
+	if err != nil || !reflect.DeepEqual(got, l) {
+		t.Fatalf("launch came back as %+v, %v, want %+v", got.GPUs, err, l.GPUs)
+	}
+	l.Spec.GPUs, _ = core.ParseGPUCount(3, "test")
+	if _, err := wire.ToLaunch(wire.Launch(l)); err == nil || !strings.Contains(err.Error(), "asked for 3 GPUs") {
+		t.Errorf("a grant of 2 devices to a job that asked for 3: %v", err)
+	}
+}

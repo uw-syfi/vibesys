@@ -20,6 +20,11 @@ func TestGPUsAndTheNetworkArePassedByTheirFlagsNeverByCDI(t *testing.T) {
 		{docker.GPUs{Devices: "all"}, "", []string{"--gpus", "all"}, []string{"--runtime", "--device"}},
 		{docker.GPUs{Devices: "device=0", Runtime: "nvidia"}, "host", []string{"--runtime", "nvidia", "--network", "host"}, []string{"--gpus", "--device"}},
 		{docker.GPUs{}, "kind", []string{"--network", "kind"}, []string{"--gpus", "--runtime"}},
+		// A list of devices is one CSV value for docker, which needs the quotes around it: without
+		// them docker reads "device=0" and a field "1".
+		{docker.GPUs{NVIDIA: "2,3"}, "", []string{"--gpus", `"device=2,3"`}, []string{"--runtime", "--device"}},
+		{docker.GPUs{NVIDIA: "5"}, "", []string{"--gpus", `"device=5"`}, []string{"--runtime", "--device"}},
+		{docker.GPUs{NVIDIA: "0,1", Runtime: "nvidia"}, "", []string{"--runtime", "nvidia"}, []string{"--gpus", "--device"}},
 	}
 	for _, c := range cases {
 		spec := base
