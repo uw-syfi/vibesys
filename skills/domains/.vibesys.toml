@@ -3,6 +3,10 @@ path = "serving-systems"
 domains = ["llm-serving"]
 
 [[rule]]
+path = "serving-studio"
+domains = ["llm-serving"]
+
+[[rule]]
 path = "microservice-optimization"
 domains = ["microservices"]
 

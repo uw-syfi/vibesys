@@ -20,6 +20,8 @@ Task: .vibesys/tasks/<task>/ (read OBJECTIVE.md).
 Plan: <n>      Budget: <at most this many measure jobs, samples and command jobs>
 Load these skills first: <the matching vibesys skill>, vibesys:commit, vibesys:measure, and
 <domain skills>.
+Tool variables: <each variable a domain skill's setup check selected, with its value, such as
+  SERVINGSTUDIO_API=<endpoint>; export them before you use that skill. Omit the line when none>
 Rules:
 - Never edit anything under .vibesys/, the task's checker or its benchmark.
 - No stub, special case or shortcut that makes a check pass or a number rise without the

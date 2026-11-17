@@ -22,7 +22,9 @@ names; they usually say which profiler fits. Details are in
 
 ## Work
 
-1. Decide what evidence would answer the question, and the cheapest way to capture it.
+1. Decide what evidence would answer the question, and the cheapest way to capture it. A
+   simulator a domain skill offers (such as `serving-studio`) answers some questions with no job;
+   its answer is simulated, so label it so, with the residual of its reproduction of the head.
 2. Build in the checkout if the task needs it. Edit no tracked file, except as step 4 allows. Scratch output, traces and
    reports go in the scratch directory your brief names, not in the checkout.
 3. Capture on the workload the benchmark uses, or one close enough to say so. A capture that

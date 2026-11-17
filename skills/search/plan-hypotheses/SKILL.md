@@ -57,6 +57,10 @@ you stop), so a miss costs one worker pass. Fill the Bold fields in
    headroom. A part's headroom is real only below that ceiling. When your
    ceiling for an objective differs from the one `vibesys-cli bound list` shows, declare yours with
    `bound declare` and say how you derived it; the earlier one stays in the history.
+   When your brief names a domain skill that simulates the system (such as `serving-studio` for
+   LLM serving) and it models this task, use it here: reproduce the head first, then take time
+   shares and what-if bounds from it, and freeze its prediction for your idea in the plan body.
+   A simulated number is evidence for the plan, never a measurement.
 3. **Claim early.** As soon as you chose an idea, put it in a workstream, the line of work its
    mechanism belongs to (`vibesys-cli workstream list`, such as "KV cache layout"): join the one
    that fits, or start one with a short name, `vibesys-cli workstream start "<name>"`, which

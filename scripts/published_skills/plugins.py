@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 PLUGIN_SKILLS: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
         "vibesys": ("./search",),
-        "vibesys-llm-serving": ("./domains/serving-systems",),
+        "vibesys-llm-serving": ("./domains/serving-systems", "./domains/serving-studio"),
         # Tokio is cross-cutting: dial9-tokio is listed here and in vibesys-database on purpose.
         "vibesys-microservices": (
             "./domains/microservice-optimization",

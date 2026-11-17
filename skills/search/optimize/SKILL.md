@@ -54,6 +54,11 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
 3. From `vibesys.input.toml`, check that the domain skills the task needs are available, per
    [domain-plugins.md](references/domain-plugins.md). If one is not available, stop as it says
    (install commands, or in a run the orchestrator started a `final` report); do not plan without it.
+   A domain skill that needs a tool of its own says how to check it (the `serving-studio`
+   simulator: its Setup section). Check it once here; if it is missing, go on without it, say so
+   in your first report, and never install it during the run. If it answers, name its
+   variables (`SERVINGSTUDIO_API`, `SERVINGSTUDIO_SIM`) with their values in every planner and
+   profiler brief.
 4. Create or resume the optimization (`vibesys:state`). A new one first needs a base that passes
    its check: run `vibesys-cli submit check <base> --wait` (with `--gpus N` for a task that needs
    GPUs, as `vibesys:measure` says; a pass is saved and later measures reuse
@@ -90,8 +95,10 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    its title is the hypothesis a measurement can falsify, and its status says where the idea stands.
    Dedupe, check each against the rules in `OBJECTIVE.md` before funding it, check that chosen
    plans touch disjoint files, and write each decision as a plan comment, then set the status
-   (`vibesys:state`). A plan whose title is not something a measurement can show true or false
-   goes back to its planner, or is rewritten as such a claim in a comment before a worker starts.
+   (`vibesys:state`). When plans carry a simulated prediction, fund by it, discounted by the
+   residual its simulator showed on the head; a what-if bound caps a gain and predicts none. A
+   plan whose title is not something a measurement can show true or false goes back to its
+   planner, or is rewritten as such a claim in a comment before a worker starts.
    Plans are grouped in workstreams, the lines of work the planners named (`vibesys-cli workstream
    list`). When you pause or close a line, say so where it lives: `vibesys-cli workstream edit <n>
    --status paused|closed --note "<one line of why>"`, and `--status active` when it resumes.
@@ -104,9 +111,11 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    names neither `--plan <n>` nor `--no-plan`. Say `--no-plan` only for the baseline and for
    re-measuring the head, which test no idea. Combine parked or won plans with
    combine-candidates, and use profile-revision when a question needs evidence. Record outcomes
-   and lessons as plan comments, link every other job to its plan too (`--plan`), and close the
-   plan with its gain or its reason: `won` when promoted, `parked` or `rejected` when a
-   measurement settles it, set when it happens and not at the end.
+   and lessons as plan comments (a plan with a simulated prediction also gets predicted against
+   measured value and the miss, as the domain skill's outcome block says), link every other job
+   to its plan too (`--plan`), and close the plan with its gain or its reason: `won` when
+   promoted, `parked` or `rejected` when a measurement settles it, set when it happens and not
+   at the end.
 5. Keep slots busy; when you leave one idle, state the reason in your next report.
 6. After every profile or promotion that moves the bottleneck, re-triage the parked and rejected
    plans: reopen any whose reason no longer holds (time, size, an old profile, a gain that was

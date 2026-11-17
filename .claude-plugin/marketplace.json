@@ -9,7 +9,7 @@
       "name": "vibesys",
       "source": "./skills",
       "description": "Resumable, measurement-driven optimization loop with parallel hypotheses, measurements and independent judging; the domain skills are in the vibesys-llm-serving, vibesys-database, vibesys-microservices, vibesys-cli-tools and vibesys-kernels-<backend> plugins.",
-      "version": "0.13.0",
+      "version": "0.14.0",
       "strict": false,
       "skills": [
         "./search/allocations",
@@ -31,10 +31,11 @@
     {
       "name": "vibesys-llm-serving",
       "source": "./skills",
-      "description": "Domain skills for optimizing LLM serving systems, for use with the vibesys optimization loop.",
-      "version": "0.2.1",
+      "description": "Domain skills for optimizing LLM serving systems, including predictions from the ServingStudio simulator, for use with the vibesys optimization loop.",
+      "version": "0.3.0",
       "strict": false,
       "skills": [
+        "./domains/serving-studio",
         "./domains/serving-systems"
       ]
     },
