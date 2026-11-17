@@ -21,12 +21,21 @@ the user did not tell you or the machine did not show: no guessed host name, par
 ## What to find out first
 
 1. The GPUs: `nvidia-smi -L` (NVIDIA) or `rocm-smi --showid` (AMD). Note the count and the model.
+   A pool is all of the machine's GPUs: `count` must equal the number the machine reports, and the
+   CLI refuses a different number. If the user wants to keep some GPUs out, or the GPUs are of
+   mixed types, say that this is not supported yet and ask what they want.
 2. For Docker: `docker info --format '{{json .Runtimes}}'` should list `nvidia`. If it does not, a
    container cannot get a GPU until the NVIDIA container toolkit is installed; tell the user, and do
    not install it for them. A machine with no container runtime runs jobs on the host (below).
-3. `"$VIBESYS_CLI" daemon status` says whether jobs are queued or running. Check it before a restart.
+3. `"$VIBESYS_CLI" daemon status`. Its first line is this user's daemon: `not running` (exit 4) is
+   normal before the first start, and otherwise it counts the queued and running jobs, which you
+   check before a restart. The lines after it describe other daemons on the machine; ignore them.
 
 ## The file (version 0.2)
+
+The file does not choose between Docker and the host. A job runs in a container when its task has a
+`Dockerfile`, and on the host when the task has none or the job passes `--env host`; either way it
+draws from the same pool of GPUs.
 
 A file starts with `version = "0.2"`, the only version read. A file of the earlier shape is
 refused, naming each old key and what to write instead. Each placement has a `kind`, and a GPU
@@ -125,10 +134,18 @@ Ask the user for each fact; never invent one.
 
 ## Check that it worked
 
-1. `"$VIBESYS_CLI" daemon restart`. A refusal names the key it did not accept; fix that key.
-2. In a repository with a task that needs `gpu`, commit, then submit a job that prints what it sees:
-   `"$VIBESYS_CLI" submit command <sha> --image harness --gpus 1 --wait -- sh -c 'echo $VIBESYS_GPU_DEVICES; nvidia-smi -L'`
-   (`rocm-smi --showid` on AMD; add `--env host` on a machine with no container runtime). It must
-   show one GPU, and `jobs` must show the device it ran on.
-3. Say which placements you configured and what that job showed. Without a task to run it on, say
-   the check is still to do.
+1. `"$VIBESYS_CLI" daemon restart`. A refusal names the key it did not accept; fix that key. A
+   restart that succeeds means the file was accepted, `count` included.
+2. `"$VIBESYS_CLI" placement capacity <placement>` must say `N of N free` for the GPUs you declared.
+   This needs no task.
+3. Look for a task that needs GPUs: `ls .vibesys/tasks` in the user's repository. If there is one,
+   commit any pending change to it (a job runs a commit), then submit a job that prints what it
+   sees:
+   `"$VIBESYS_CLI" submit command <sha> --task <name> --image harness --gpus 1 --wait -- sh -c 'echo $VIBESYS_GPU_DEVICES; nvidia-smi -L'`
+   (`rocm-smi --showid` on AMD). `--task` is always needed (or set `VIBESYS_TASK`), even with one
+   task. `--image harness` runs the command in the task's own environment. Add `--env host` when
+   the task has no `Dockerfile` or the machine has no container runtime. `--wait` prints the job's
+   state, not its output: read the output with `"$VIBESYS_CLI" logs <job>`, which must show one GPU,
+   and `"$VIBESYS_CLI" jobs --task <name>` must show the device it ran on.
+4. Say which placements you configured and what you saw. If there is no task, say the job check is
+   still to do.

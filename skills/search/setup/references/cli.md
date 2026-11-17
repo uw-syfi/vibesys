@@ -1,13 +1,16 @@
 # The vibesys-cli binary
 
+Paths in this file are relative to the `setup` skill's directory (the one that holds its `SKILL.md`). If you cannot tell which harness
+file fits (you run under a wrapper or an SDK), use `references/harness/claude-code.md`.
+
 Select one working build of `vibesys-cli`, check that the skills support its version, and export its absolute path
 as `VIBESYS_CLI` for this session and every command you delegate. Never edit shell profiles.
 
-The skills support the versions compatible with the minimum in `../assets/min-cli-version`, by
+The skills support the versions compatible with the minimum in `assets/min-cli-version`, by
 caret rules: from 1.0 on, the same major version and at least the minimum; before 1.0, the same
 minor version and at least the minimum. A pre-release (`0.1.0-rc.2`) is older than its release.
-Never do this arithmetic yourself: `../scripts/cli_version.sh` (POSIX sh, needs curl or wget only
-to list releases) does it. Script paths: read `harness/<harness>.md` for the harness
+Never do this arithmetic yourself: `scripts/cli_version.sh` (POSIX sh, needs curl or wget only
+to list releases) does it. Script paths: read `references/harness/<harness>.md` for the harness
 you are running in. Below, `cli_version.sh` stands for that path, always run with `sh`.
 
 ## Check the version
@@ -79,6 +82,9 @@ Upgrade only when the user asked for it, or approved it after a `too-old` check.
 5. Check the version again. If it is not `ok`, report and stop.
 
 ## Hand off
+
+Each shell call can start fresh: export `VIBESYS_CLI` again in every command, or in the
+harness's persistent shell if it has one, and never in a shell profile.
 
 Reuse the selected `VIBESYS_CLI` for the rest of the session and pass its absolute path to every
 subagent and background command. Tell the user which path and version you selected, and the
