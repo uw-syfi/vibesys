@@ -9,6 +9,26 @@ workload. The workload is the v4 benchmark of the SGLang multi-turn task (PR
 throughput saturates, the disallowed-engine-code rule, and the candidate
 contract.
 
+## Tasks
+
+- `default`: the original task for the legacy `vibesys` app (task schema 0.1): the
+  multi-turn workload above, `total_token_throughput` and `p95_ttft_turn2plus_ms`, a
+  launcher inside the benchmark.
+- `load-ramp`: the optimization campaign's workload and gate, for `vibesys-cli` (task
+  schema 0.2, a task of two images). The candidate's server runs in the image
+  `Dockerfile.rocm` builds; the task image runs `benchmark/run.py` (a C16 then C96 load
+  ramp, benchmark version 6) and `accuracy_checker/checker.py` (engine scan, 13 probes,
+  teacher-forced top-1 through `/v1/score` and greedy replies against a transformers
+  reference that `accuracy_checker/make_reference.py` generates) against it. Objectives `peak_goodput_tok_s` (max) and
+  `p95_ttft_turn2plus_ms_at_ref` (min). See its `OBJECTIVE.md`. Run it with this directory
+  as the project's root and a placement that provides the four APUs and the checkpoint as
+  the mount `qwen3-5-397b-a17b-mxfp4`:
+
+  ```bash
+  vibesys-cli submit check HEAD --task load-ramp
+  vibesys-cli submit measure HEAD --task load-ramp
+  ```
+
 ## Run
 
 ```bash
@@ -43,6 +63,8 @@ D=examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke
 uv run pytest $D/.vibesys/tasks/default/benchmark/test_run.py -q --no-cov -p no:tach
 uv run pytest $D/.vibesys/tasks/default/accuracy_checker/test_checker.py -q --no-cov -p no:tach
 uv run vibesys validate $D
+L=$D/.vibesys/tasks/load-ramp
+uv run pytest $L/benchmark $L/accuracy_checker -q --no-cov -p no:tach
 ```
 
 Before the first real run, generate `.vibesys/tasks/default/reference/pins.json` once on the cluster
@@ -54,7 +76,8 @@ The seed (`server.py`, `model.py`, `mxfp4.py`, `weights.py`) is a plain PyTorch
 implementation written from the reference modeling code: static caches, one
 request at a time, layers split across the GPUs, experts kept in MXFP4 and
 dequantized per call, a per-token Python loop for the DeltaNet rule. It matches
-the transformers reference on a tiny random model on CPU (`seed_tests/`).
+the transformers reference on a tiny random model on CPU (`seed_tests/`), and
+serves `/v1/score` (teacher-forced logprobs) for the `load-ramp` task's gate.
 Loading the real checkpoint, the 4-GPU split, and its speed on ROCm have not
 been run. Expect the first measurement to be very slow; the accuracy gate is
 the first thing to confirm on the cluster.

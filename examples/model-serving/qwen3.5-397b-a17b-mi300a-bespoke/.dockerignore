@@ -1,0 +1,4 @@
+# The build context of Dockerfile.rocm (the candidate's image for the load-ramp task) is the project
+# root; the image needs none of its files. The engine runs from the checkout, so editing it does not
+# rebuild the image.
+*

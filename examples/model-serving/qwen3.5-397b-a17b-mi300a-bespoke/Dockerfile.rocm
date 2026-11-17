@@ -1,0 +1,36 @@
+# The candidate's image for the load-ramp task, which vibesys-cli builds from the candidate's commit
+# (task schema 0.2, [candidate] in .vibesys/tasks/load-ramp/vibesys.input.toml) and runs
+# `python3 server.py ...` in, from the checkout's root, with the node's four MI300A APUs. It is part
+# of the candidate, as the engine is: a candidate may change it, within OBJECTIVE.md's rules.
+#
+# It is the engine-free ROCm image of examples/model-serving/images/rocm-mi30x-engine-free: the
+# SGLang ROCm 7.0 release image for gfx942 (torch, triton, AITER and the ROCm compilers), pinned by
+# digest, with every serving engine removed, so the server cannot import one. The verification
+# below fails the build if an engine still imports, a kept package does not, or torch is not a
+# ROCm build. Model weights are never baked in: the operator mounts the checkpoint read-only.
+FROM lmsysorg/sglang:v0.5.18-rocm700-mi30x@sha256:534fcdaad29d4a05d650891a4cf42023315dfccac6160b03d0c96db9cefa6ad8
+
+RUN set -eux; \
+    for pkg in sglang sgl-kernel sglang-kernel sglang-router sgl-router \
+               vllm tensorrt_llm tensorrt-llm; do \
+        pip uninstall -y "$pkg" || true; \
+    done; \
+    rm -rf /sgl-workspace/sglang /sgl-workspace/sgl-kernel /sgl-workspace/vllm; \
+    SP="$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"; \
+    rm -rf "$SP"/sglang* "$SP"/sgl_kernel* "$SP"/sgl_router* "$SP"/sglang_router* \
+           "$SP"/vllm* "$SP"/tensorrt_llm* \
+           "$SP"/__editable__*sglang* "$SP"/__editable__*vllm* "$SP"/__editable__*tensorrt* \
+           "$SP"/*sglang*.egg-link "$SP"/*sglang*.pth "$SP"/*vllm*.egg-link "$SP"/*vllm*.pth; \
+    for bin in sglang sglang-router sgl-router vllm trtllm-serve trtllm-build trtllm-bench; do \
+        rm -f "/usr/local/bin/$bin" "/opt/venv/bin/$bin"; \
+    done; \
+    pip cache purge || true; \
+    python3 -c "import importlib.util as u, torch; \
+gone = [m for m in ('sglang', 'sgl_kernel', 'vllm', 'tensorrt_llm') if u.find_spec(m)]; \
+assert not gone, f'engines still importable: {gone}'; \
+[__import__(m) for m in ('triton', 'aiter', 'transformers', 'safetensors', 'aiohttp', 'numpy')]; \
+assert torch.version.hip, 'torch is not a ROCm build'"
+
+# A job runs as the invoking user, whose HOME may not exist, in an image whose files may be
+# read-only: caches (Triton, Hugging Face modules, compiled kernels) go under /tmp.
+ENV PYTHONUNBUFFERED=1 HOME=/tmp HF_HUB_OFFLINE=1 HF_MODULES_CACHE=/tmp/hf-modules
