@@ -1002,7 +1002,10 @@ function cut(text: string, chars: number): string {
   // broken glyph) before the ellipsis.
   const codePoints = [...text];
   if (codePoints.length <= chars) return text;
-  return `${codePoints.slice(0, Math.max(0, chars - 1)).join('').trimEnd()}…`;
+  return `${codePoints
+    .slice(0, Math.max(0, chars - 1))
+    .join('')
+    .trimEnd()}…`;
 }
 
 /**
