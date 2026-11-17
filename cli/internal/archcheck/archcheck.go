@@ -72,6 +72,7 @@ var rules = map[string][]string{
 	// reads a machine with), never another kind; only production names a concrete kind.
 	"internal/resource":              {"internal/core"},
 	"internal/resource/resourcetest": {"internal/core", "internal/resource"},
+	"internal/resource/devicestest":  {"internal/core", "internal/resource"},
 	"internal/resource/fakeresource": {"internal/core", "internal/resource"},
 	"internal/resource/gpu":          {"internal/core", "internal/resource"},
 	"internal/resource/rocm":         {"internal/core", "internal/resource"},
@@ -256,8 +257,8 @@ var testRules = map[string][]string{
 	},
 	"internal/environment/docker/machine": {"internal/environment/docker/dockerfake", "internal/environment/envtest"},
 	"internal/remote":                     {"internal/environment/envtest"},
-	"internal/resource/gpu":               {"internal/resource/resourcetest"},
-	"internal/resource/rocm":              {"internal/resource/resourcetest"},
+	"internal/resource/gpu":               {"internal/resource/resourcetest", "internal/resource/devicestest"},
+	"internal/resource/rocm":              {"internal/resource/resourcetest", "internal/resource/devicestest"},
 	"internal/environment/apptainer": {
 		"internal/backend/amd", "internal/environment/allocatortest", "internal/environment/apptainer/clusterfake",
 		"internal/environment/docker/dockerfake", "internal/environment/docker/dockertest", "internal/environment/envtest",
@@ -268,7 +269,7 @@ var testRules = map[string][]string{
 	"internal/environment/apptainer/localsif":   {"internal/environment/envtest"},
 	"internal/resource/mounts":                  {"internal/resource/resourcetest"},
 	"internal/resource/kubernetes":              {"internal/resource/resourcetest"},
-	"internal/resource/fakeresource":            {"internal/resource/resourcetest"},
+	"internal/resource/fakeresource":            {"internal/resource/resourcetest", "internal/resource/devicestest"},
 	"internal/environment/docker": {
 		"internal/resource/fakeresource",
 		"internal/backend/cpu", "internal/clock", "internal/environment/docker/dockerfake",

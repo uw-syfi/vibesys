@@ -61,6 +61,10 @@ type Config struct {
 	Machine string
 	// Facts reads the GPUs for the fingerprint.
 	Facts Facts
+	// Pool, when set, makes the GPUs 0 to Pool-1 a pool whose devices jobs are given by number
+	// (AMDDevices, which the scheduler counts): the resource then claims nothing itself, and
+	// attaches the check only.
+	Pool core.GPUCount
 }
 
 var machine = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.@-]*$`)
@@ -86,6 +90,9 @@ func (*ROCm) Kind() core.ResourceKind { return core.ResourceROCm }
 
 // Claims implements resource.Resource: the GPUs of the machine.
 func (r *ROCm) Claims() []core.Claim {
+	if r.cfg.Pool.IsSet() {
+		return nil // the pool is counted by its size (Devices), not claimed one job at a time
+	}
 	return []core.Claim{{Resource: string(core.ResourceROCm) + ":" + r.cfg.Machine, Amount: 1}}
 }
 
@@ -119,6 +126,10 @@ func (r *ROCm) Attach(ctx context.Context) (resource.Attachment, error) {
 	if err := ctx.Err(); err != nil {
 		return resource.Attachment{}, err
 	}
+	if r.cfg.Pool.IsSet() {
+		// The GPUs a job gets depend on its group (AMDDevices); the check is the same for all.
+		return resource.Attachment{Check: append([]string(nil), Check...)}, nil
+	}
 	return resource.Attachment{GPUs: resource.GPUs{ROCm: true}, Check: append([]string(nil), Check...)}, nil
 }
 
@@ -138,6 +149,12 @@ func (r *ROCm) Offers(ctx context.Context) ([]core.Accelerator, error) {
 	offer, err := core.ParseAccelerator(core.VendorAMD, facts["amd_gpu_model"], facts["amd_gpu_count"])
 	if err != nil {
 		return nil, err
+	}
+	if r.cfg.Pool.IsSet() {
+		if uint32(r.cfg.Pool.Int()) > offer.Count {
+			return nil, fmt.Errorf("the pool has %d GPUs, and the machine %d", r.cfg.Pool.Int(), offer.Count)
+		}
+		offer.Count = uint32(r.cfg.Pool.Int())
 	}
 	return []core.Accelerator{offer}, nil
 }

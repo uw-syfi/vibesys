@@ -28,8 +28,13 @@ type Facts interface {
 
 // Config configures New.
 type Config struct {
-	// Devices is a docker --gpus value, such as "all" or "device=0,1". It is required.
+	// Devices is a docker --gpus value, such as "all" or "device=0,1". It is required unless the
+	// GPUs are a pool.
 	Devices string
+	// Pool, when set, makes the machine's GPUs 0 to Pool-1 a pool whose devices jobs are given by
+	// number (NVIDIADevices, which the scheduler counts): the resource then claims nothing and
+	// attaches nothing itself, and Devices is empty.
+	Pool core.GPUCount
 	// Runtime, when set, is the container runtime that passes the devices, with the devices in
 	// EnvVisibleDevices, instead of --gpus.
 	Runtime string
@@ -53,7 +58,9 @@ var _ resource.Resource = (*GPU)(nil)
 // New returns the resource, or a core.FailureInvalidInput naming the setting that is wrong.
 func New(cfg Config) (*GPU, error) {
 	switch {
-	case !devices.MatchString(cfg.Devices):
+	case cfg.Pool.IsSet() && cfg.Devices != "":
+		return nil, invalid("devices: %q is set for GPUs that are a pool, whose devices jobs are given by number", cfg.Devices)
+	case !cfg.Pool.IsSet() && !devices.MatchString(cfg.Devices):
 		return nil, invalid("devices: %q is not a --gpus value", cfg.Devices)
 	case !runtime.MatchString(cfg.Runtime):
 		return nil, invalid("runtime: %q is not a runtime name", cfg.Runtime)
@@ -68,8 +75,11 @@ func New(cfg Config) (*GPU, error) {
 // Kind implements resource.Resource.
 func (*GPU) Kind() core.ResourceKind { return core.ResourceGPU }
 
-// Claims implements resource.Resource: the devices of the machine.
+// Claims implements resource.Resource: the devices of the machine, or nothing for a pool.
 func (g *GPU) Claims() []core.Claim {
+	if g.cfg.Pool.IsSet() {
+		return nil // the pool is counted by its size (Devices), not claimed one job at a time
+	}
 	return []core.Claim{{Resource: string(core.ResourceGPU) + ":" + g.cfg.Machine + "/" + g.cfg.Devices, Amount: 1}}
 }
 
@@ -99,6 +109,9 @@ func (g *GPU) Attach(ctx context.Context) (resource.Attachment, error) {
 	if err := ctx.Err(); err != nil {
 		return resource.Attachment{}, err
 	}
+	if g.cfg.Pool.IsSet() {
+		return resource.Attachment{}, nil // what a job is given depends on its group (NVIDIADevices)
+	}
 	a := resource.Attachment{GPUs: resource.GPUs{Devices: g.cfg.Devices, Runtime: g.cfg.Runtime}}
 	if g.cfg.Runtime != "" {
 		// The runtime's own hook passes the devices the variable names; CDI is not used.
@@ -124,6 +137,13 @@ func (r *GPU) Offers(ctx context.Context) ([]core.Accelerator, error) {
 	offer, err := core.ParseAccelerator(core.VendorNVIDIA, facts["gpu_model"], facts["gpu_count"])
 	if err != nil {
 		return nil, err
+	}
+	if r.cfg.Pool.IsSet() {
+		if uint32(r.cfg.Pool.Int()) > offer.Count {
+			return nil, fmt.Errorf("the pool has %d GPUs, and the machine %d", r.cfg.Pool.Int(), offer.Count)
+		}
+		offer.Count = uint32(r.cfg.Pool.Int())
+		return []core.Accelerator{offer}, nil
 	}
 	selected, err := selectedDevices(r.cfg.Devices, r.cfg.Runtime != "", offer.Count)
 	if err != nil {

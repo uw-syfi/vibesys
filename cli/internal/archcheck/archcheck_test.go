@@ -218,7 +218,7 @@ func TestSupportPackagesAreImportedByTestsOnly(t *testing.T) {
 		"internal/environment/fakeenv", "internal/supervisor/suptest", "internal/daemon/daemontest",
 		"internal/store/storetest", "internal/environment/envtest", "internal/backend/backendtest",
 		"internal/environment/fakeenv/fakeworld", "internal/environment/docker/dockerfake",
-		"internal/environment/docker/dockertest", "internal/resource/resourcetest", "internal/resource/fakeresource",
+		"internal/environment/docker/dockertest", "internal/resource/resourcetest", "internal/resource/devicestest", "internal/resource/fakeresource",
 		"internal/environment/apptainer/clusterfake", "internal/proctable",
 	}
 	var productDirs []string

@@ -77,18 +77,26 @@ type Mount struct {
 
 // GPUs says which GPUs a container gets, and how.
 type GPUs struct {
-	// Devices is a docker --gpus value, such as "all" or "device=0,1", of NVIDIA GPUs. Empty passes
-	// no NVIDIA GPU.
+	// Devices is a docker --gpus value, such as "all", of NVIDIA GPUs. Empty passes no NVIDIA GPU.
+	// It is the value as it is written for a container that gets every GPU of the machine; a
+	// container that gets some of them has NVIDIA.
 	Devices string
+	// NVIDIA lists the numbers of the NVIDIA GPUs the container gets, such as "2,3", in the
+	// numbering of NVIDIA_VISIBLE_DEVICES: the docker environment turns them into the --gpus value
+	// "device=2,3", with the quotes docker needs around a list, or, with Runtime, the runtime's
+	// variable names them. Empty passes none by number. It is never set with Devices.
+	NVIDIA string
 	// Runtime, when set, is the container runtime that passes the devices instead of --gpus.
 	Runtime string
 	// ROCm passes the machine's AMD GPUs through the ROCm kernel driver: its devices and the group
-	// that may use them under docker, --rocm under Apptainer. It is never set with Devices.
+	// that may use them under docker, --rocm under Apptainer. It is never set with Devices. Which
+	// of them the container uses is up to the variables in GPUEnv: the driver's devices are all
+	// passed, so the container is not confined to them.
 	ROCm bool
 }
 
 // Given reports whether the container gets GPUs of either kind.
-func (g GPUs) Given() bool { return g.Devices != "" || g.ROCm }
+func (g GPUs) Given() bool { return g.Devices != "" || g.NVIDIA != "" || g.ROCm }
 
 var (
 	factName    = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
@@ -96,6 +104,7 @@ var (
 	networkName = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9_.-]*)?$`)
 	gpuValue    = regexp.MustCompile(`^[A-Za-z0-9=,:._/+-]*$`)
 	runtimeName = regexp.MustCompile(`^[a-z0-9._-]*$`)
+	deviceList  = regexp.MustCompile(`^[0-9]{1,2}(,[0-9]{1,2})*$`)
 )
 
 // FactName says whether name is a fact name a resource may report: lower-case letters, digits and
@@ -147,10 +156,14 @@ func (a Attachment) Validate() error {
 		return invalid("%q is not a --gpus value", a.GPUs.Devices)
 	case !runtimeName.MatchString(a.GPUs.Runtime):
 		return invalid("%q is not a container runtime name", a.GPUs.Runtime)
-	case a.GPUs.Runtime != "" && a.GPUs.Devices == "":
+	case a.GPUs.Runtime != "" && !a.GPUs.Given():
 		return invalid("the runtime %q is for GPUs, and no GPU is given", a.GPUs.Runtime)
-	case a.GPUs.ROCm && a.GPUs.Devices != "":
-		return invalid("the GPUs are passed both as AMD GPUs and with the --gpus value %q", a.GPUs.Devices)
+	case a.GPUs.ROCm && (a.GPUs.Devices != "" || a.GPUs.NVIDIA != ""):
+		return invalid("the GPUs are passed both through the ROCm driver and by number")
+	case a.GPUs.Devices != "" && a.GPUs.NVIDIA != "":
+		return invalid("the GPUs are passed both with the --gpus value %q and by number", a.GPUs.Devices)
+	case a.GPUs.NVIDIA != "" && !deviceList.MatchString(a.GPUs.NVIDIA):
+		return invalid("%q is not a list of GPU numbers such as 2,3", a.GPUs.NVIDIA)
 	}
 	return nil
 }
