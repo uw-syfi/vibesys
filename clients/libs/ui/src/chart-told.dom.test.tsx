@@ -159,6 +159,29 @@ describe('Chart points that open nothing', () => {
     });
     expect(root.querySelector('.vs-chart-tip-text')).toBeNull();
   });
+
+  test('cuts the hover label on a whole character, never half of an astral one', async () => {
+    const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    const hover = async (lead: string): Promise<string | null> => {
+      const root = await mount(
+        <Chart label="c" points={[{id: 'p', x: 1, y: 2, tip: {lead, detail: ''}}]} />,
+      );
+      const point = root.querySelector('circle.vs-chart-point')?.parentElement;
+      await act(async () => {
+        point?.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
+      });
+      return root.querySelector('.vs-chart-tip-text')?.textContent ?? null;
+    };
+    // A plain lead far longer than any plausible room finds the room in characters: the tip ends
+    // in an ellipsis, so the shown text's length is exactly the room it was cut to.
+    const plain = await hover('x'.repeat(300));
+    expect(plain).not.toBeNull();
+    const chars = (plain as string).length;
+    // An emoji placed so its surrogate pair straddles the cut index must be kept whole, not
+    // halved into a lone surrogate (a broken glyph) before the ellipsis.
+    const straddling = await hover(`${'x'.repeat(chars - 2)}😀${'y'.repeat(10)}`);
+    expect(LONE_SURROGATE.test(straddling ?? '')).toBe(false);
+  });
 });
 
 describe('ParetoChart with a frontier it is told', () => {

@@ -182,7 +182,7 @@ describe('figures', () => {
       fc.property(fc.string({maxLength: 80}), fc.integer({min: 1, max: 60}), (text, limit) => {
         const out = clip(text, limit);
         expect([...out].length).toBeLessThanOrEqual(Math.max(limit, 1));
-        if (text.length <= limit) expect(out).toBe(text);
+        if ([...text].length <= limit) expect(out).toBe(text);
         else expect(out.endsWith('…')).toBe(true);
       }),
       {seed: 35},
@@ -200,12 +200,19 @@ describe('figures', () => {
         const out = clip(text, limit);
         expect(LONE_SURROGATE.test(out)).toBe(false);
         expect([...out].length).toBeLessThanOrEqual(Math.max(limit, 1));
-        if (text.length > limit) expect(out.endsWith('…')).toBe(true);
+        if ([...text].length > limit) expect(out.endsWith('…')).toBe(true);
       }),
       {seed: 37},
     );
     // The reported case: an emoji straddling the cut index is kept as a whole pair, not halved
     // into a lone surrogate (the output may still hold the emoji's valid pair).
     expect(LONE_SURROGATE.test(clip(`${'x'.repeat(46)}😀${'y'.repeat(10)}`, 48))).toBe(false);
+  });
+
+  it('leaves text exactly at the limit whole, counting astral characters as one each', () => {
+    // Two astral characters are one code point each but two UTF-16 units: a guard that compares
+    // `text.length` (UTF-16 units) against the limit adds an unneeded ellipsis here.
+    const text = '😀😀';
+    expect(clip(text, 2)).toBe(text);
   });
 });

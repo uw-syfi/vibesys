@@ -35,10 +35,13 @@ export function formatDollars(usd: number): string {
 
 /** At most `limit` characters, the end cut with an ellipsis. */
 export function clip(text: string, limit: number): string {
-  if (text.length <= limit) return text;
-  // Cut on a code-point boundary: `slice` counts UTF-16 units, so it could split an astral
-  // character's surrogate pair and leave a lone surrogate (a broken glyph) before the ellipsis.
-  const kept = [...text]
+  // Count and cut on code-point boundaries throughout: `text.length` and `slice` both count
+  // UTF-16 units, so either could split an astral character's surrogate pair, the guard adding
+  // an unneeded ellipsis to text that already fits and the cut leaving a lone surrogate (a
+  // broken glyph) before it.
+  const codePoints = [...text];
+  if (codePoints.length <= limit) return text;
+  const kept = codePoints
     .slice(0, Math.max(0, limit - 1))
     .join('')
     .trimEnd();
