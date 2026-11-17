@@ -71,23 +71,25 @@ const (
 //   - An image build asks for CPUs and memory only, and builds in a BuildKit builder of its own
 //     whose container is confined to the CPUs and memory Slurm gave it (Docker's own builder
 //     runs in the daemon, outside Slurm's cgroups, and cannot be confined).
-//   - A container whose commands are not measured, a check, asks for SharedGres (Gres when it is
-//     empty) and its share of CPUs and memory, so it can run beside other work on the node: with
-//     a GPU split into Slurm shards, a shard of it.
-//   - A measured container, a benchmark sample, asks for the GPUs and, when Exclusive, the whole
+//   - A container whose commands are not measured, a check or a command, asks for the GPUs the job
+//     asked for (--gpus N of the node's GPUs, all of them when it asked for no count) and its
+//     share of CPUs and memory, so it can run beside other work on the node.
+//   - A measured container, a benchmark sample, asks for every GPU of the node and the whole
 //     node, so nothing else runs while it is timed.
 //
 // Every container is confined to the CPUs of its allocation with docker run --cpuset-cpus, read
-// from the allocation itself.
+// from the allocation itself, and gets the GPUs the allocation was given: docker runs outside
+// Slurm's cgroups, so the GPUs Slurm assigned (SLURM_STEP_GPUS, else SLURM_JOB_GPUS) are passed to
+// it by number, which is the only thing that keeps the container to them. A step that is told
+// none of them passes the GPUs the container was configured with.
 type Allocator struct {
 	Partition string
-	// Gres is what a measured container asks for: the whole GPU.
-	Gres string
-	// SharedGres is what an unmeasured container asks for, such as "shard:1" of a GPU that Slurm
-	// shares; empty means Gres.
-	SharedGres string
-	// Exclusive gives a measured container the whole node.
-	Exclusive bool
+	// GPUs is how many GPUs a node has, which the placement's GPU table declares: zero when the
+	// allocations ask for none. An allocation asks for them by count, gpu:<n>.
+	GPUs int
+	// GresType is the type of the cluster's GPU resource, when its partition names or mixes types:
+	// the allocation then asks for gpu:<type>:<n>.
+	GresType string
 	// CPUs is how many CPUs a build or an unmeasured container asks for; zero means DefaultCPUs.
 	CPUs int
 	// Memory, when set, is the memory (a Slurm size, such as "32G") a build or an unmeasured
@@ -126,7 +128,7 @@ func (a Allocator) Allocate(x dockercli.Allocation, argv []string) []string {
 	if gres := a.gres(x); gres != "" {
 		out = append(out, "--gres="+gres)
 	}
-	if x.Measured && a.Exclusive {
+	if x.Measured {
 		out = append(out, "--exclusive")
 	} else {
 		cpus := a.CPUs
@@ -149,15 +151,21 @@ func (a Allocator) Allocate(x dockercli.Allocation, argv []string) []string {
 	return append(append(out, "sh", "-c", confineScript, "vs-run", argv[0], argv[1]), argv[2:]...)
 }
 
-// gres is what the allocation asks for of the node's generic resources: nothing for a build.
+// gres is what the allocation asks for of the node's generic resources: nothing for a build, and
+// otherwise the GPUs: as many as the job asked for when its container is not measured and the node
+// has more, and every GPU of the node else.
 func (a Allocator) gres(x dockercli.Allocation) string {
-	switch {
-	case x.Build:
+	if x.Build || a.GPUs <= 0 {
 		return ""
-	case !x.Measured && a.SharedGres != "":
-		return a.SharedGres
 	}
-	return a.Gres
+	n := a.GPUs
+	if !x.Measured && x.GPUs > 0 && x.GPUs < a.GPUs {
+		n = x.GPUs
+	}
+	if a.GresType != "" {
+		return fmt.Sprintf("gpu:%s:%d", a.GresType, n)
+	}
+	return fmt.Sprintf("gpu:%d", n)
 }
 
 func (a Allocator) builder() string {
@@ -171,10 +179,23 @@ func (a Allocator) builder() string {
 const allowedCPUs = `sed -n 's/^Cpus_allowed_list:[[:space:]]*//p' /proc/self/status`
 
 // confineScript runs "$1 $2 --cpuset-cpus=<the step's CPUs> ${@:3}": the docker subcommand,
-// confined to the allocation's CPUs. exec keeps the process the one srun started, so its stdin,
-// signals and exit status are docker's.
+// confined to the allocation's CPUs, and, when Slurm says which GPUs the step was given, to those:
+// the value "all" of a --gpus flag is replaced by "device=<the GPUs>", quoted as docker needs a
+// list. exec keeps the process the one srun started, so its stdin, signals and exit status are
+// docker's.
 const confineScript = `cpus=$(` + allowedCPUs + `)
 program=$1; sub=$2; shift 2
+gpus=${SLURM_STEP_GPUS:-$SLURM_JOB_GPUS}
+if [ -n "$gpus" ]; then
+  first=1; previous=
+  for arg in "$@"; do
+    [ "$first" = 1 ] && { set --; first=0; }
+    now=$arg
+    [ "$previous" = --gpus ] && [ "$arg" = all ] && arg="\"device=$gpus\""
+    previous=$now
+    set -- "$@" "$arg"
+  done
+fi
 exec "$program" "$sub" --cpuset-cpus="$cpus" "$@"`
 
 // buildScript builds with "$3 buildx build --builder $1 --load ${@:4}" in a builder whose

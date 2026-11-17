@@ -67,6 +67,12 @@ type Config struct {
 	// container gets the devices of the group the job was given (Target.GPUs): a job that was given
 	// none gets none of that resource. Nil for a placement whose containers all get the same GPUs.
 	Devices resource.Devices
+	// AssignDevices says the pool of Devices is not counted by the daemon's scheduler, because the
+	// cluster behind this placement gives each job an allocation of its own (so Target.GPUs is
+	// never set), and the environment chooses the job's group itself: the devices of a node a job
+	// holds alone, as many as it asked for, the lowest block of them. Only for a cluster that does
+	// not keep the devices of its allocations apart.
+	AssignDevices bool
 
 	// Candidates reads what builds a candidate's image, for a task of two images. Nil builds none.
 	Candidates CandidateSource

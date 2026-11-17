@@ -229,8 +229,10 @@ message GpuPool {
     lte: 64
   }];
   // The GPU type of a Slurm cluster's GRES, such as a100: an allocation then asks for
-  // gpu:<gres_type>:<n> instead of gpu:<n>. Only for the slurm and apptainer kinds, when a
-  // partition mixes types or names them.
+  // gpu:<gres_type>:<n> instead of gpu:<n>. Only for the slurm and apptainer kinds. For the
+  // apptainer kind it also says the cluster has a GPU resource to ask in: without it, no allocation
+  // asks for GPUs, every allocation holds a whole node, and the CLI names the job's devices inside
+  // it by variable.
   string gres_type = 2 [(buf.validate.field).string.pattern = "^([A-Za-z0-9_.-]+)?$"];
   // When set, the container runtime that passes NVIDIA GPUs instead of --gpus, with the devices in
   // the runtime's variable. Only for [resources.gpu].

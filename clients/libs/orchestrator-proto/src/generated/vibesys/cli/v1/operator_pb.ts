@@ -457,8 +457,10 @@ export type GpuPool = Message<"vibesys.cli.v1.GpuPool"> & {
 
   /**
    * The GPU type of a Slurm cluster's GRES, such as a100: an allocation then asks for
-   * gpu:<gres_type>:<n> instead of gpu:<n>. Only for the slurm and apptainer kinds, when a
-   * partition mixes types or names them.
+   * gpu:<gres_type>:<n> instead of gpu:<n>. Only for the slurm and apptainer kinds. For the
+   * apptainer kind it also says the cluster has a GPU resource to ask in: without it, no allocation
+   * asks for GPUs, every allocation holds a whole node, and the CLI names the job's devices inside
+   * it by variable.
    *
    * @generated from field: string gres_type = 2;
    */

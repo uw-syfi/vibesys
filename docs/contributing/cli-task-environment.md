@@ -474,10 +474,12 @@ when the container runs. The wait is bounded by `queue_timeout_seconds`.
 The ssh host must be the node that Docker runs on: the CLI inspects images,
 starts processes in the container and removes it by running `docker` there.
 That fits a single-node Slurm partition such as the DGX Spark, or a partition
-pinned to one node with `srun_arguments`. GPUs are passed as `--gpus all`, not
-the GPUs Slurm allocated: on a node with one GPU, such as the Spark, "all" is
-the allocated GPU; on a node with several, a check that is not exclusive could
-see a GPU allocated to another job (see "What is not done").
+pinned to one node with `srun_arguments`. A container is passed the GPUs Slurm
+assigned to its step (`SLURM_STEP_GPUS`, else `SLURM_JOB_GPUS`) by number, in
+place of `--gpus all`, because Docker runs outside Slurm's cgroups and only the
+device list keeps it to them; a step that is told none passes what the container
+was configured with. This is not verified on a cluster with several GPUs per
+node (see "What is not done").
 
 ### An allocation asks for what its command needs
 
@@ -489,8 +491,16 @@ it runs:
 | Command | Asks for | Confined by |
 | --- | --- | --- |
 | Image build | `cpus` and `memory`; no GRES, not exclusive | a BuildKit builder of its own whose container is limited to the allocation's CPUs and `memory` |
-| Check (accuracy) | the node's GPUs (`gpu[:<gres_type>]:<count>`), `cpus` and `memory`; not exclusive | `docker run --cpuset-cpus` with the allocation's CPUs |
-| Benchmark sample | the node's GPUs and the whole node (`--exclusive`) | the same, which is then every CPU |
+| Check or command | as many GPUs as the job asked for (`--gpus N`; all of the node's when it asked for no count), `gpu[:<gres_type>]:<N>`, with `cpus` and `memory`; not exclusive | `docker run --cpuset-cpus` with the allocation's CPUs, and the GPUs Slurm assigned |
+| Benchmark sample | every GPU of the node (`gpu[:<gres_type>]:<count>`) and the whole node (`--exclusive`) | the same, which is then every CPU |
+
+An `apptainer` placement asks the same only when its GPU table has a `gres_type`, which says the
+cluster has a GPU resource to ask in. A cluster with none (its `scontrol show config` has no
+`GresTypes`, and `srun --gres=gpu:2` is refused) leaves `gres_type` out: Slurm then cannot keep two
+allocations off one GPU, so every allocation of the placement is a whole node (`--exclusive`), and
+the job's devices are chosen by the CLI inside it: as many as the job asked for, the lowest block of
+them, named in `ROCR_VISIBLE_DEVICES` (and `VIBESYS_GPUS`, `VIBESYS_GPU_DEVICES`). The ROCm runtime
+honours the variable and nothing enforces it: the container is given the driver's devices whole.
 
 The core marks an execution `Measured` when it is a benchmark sample, the docker
 environment passes that to the engine, and only the Slurm allocator reads it. A
@@ -829,8 +839,10 @@ later; until then the check covers 1.0 and every later schema.
   The node's GPUs are passed with `--rocm`,
   and whether a step on a partition that isolates GPUs gets the job's GPUs
   without `--gres` on the step is not verified.
-- Passing exactly the GPUs Slurm allocated on a node with several, instead of
-  `--gpus all`, under `slurm`.
+- Passing exactly the GPUs Slurm allocated on a node with several is written
+  and unit-tested (the step's variables are read in the allocation's shell), and
+  has not been run on such a cluster, nor have the `--gres` an allocation asks
+  for per job.
 - A build's log is kept only when the build fails (its last lines are in the
   error); a successful build's output is discarded, so its duration is not in
   the job's log.

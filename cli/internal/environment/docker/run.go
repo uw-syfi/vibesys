@@ -370,7 +370,7 @@ func (r *run) containerSpec(b *box, id string, img Image, as role, url string) (
 		// The job's commands are told which GPUs of the pool they are, beside the vendor's own
 		// variables; a container that is given none, such as the task's beside a candidate's
 		// server, is told nothing of them.
-		environment.NoteGPUs(job, r.e.target.GPUs)
+		environment.NoteGPUs(job, r.grantOf())
 	}
 	jobVariables, err := environment.JobVariables(job)
 	if err != nil {
@@ -400,17 +400,18 @@ func (r *run) containerSpec(b *box, id string, img Image, as role, url string) (
 		env[k] = given.Env[k]
 	}
 	cs := ContainerSpec{
-		Name:     b.name,
-		Image:    img.ID,
-		Labels:   runLabels(p.cfg.Scope, id),
-		User:     user,
-		Dir:      r.x.Checkout.Dir,
-		Mounts:   mounts,
-		Env:      env,
-		GPUs:     gpus,
-		Network:  given.Network,
-		Limit:    r.x.Timeout,
-		Measured: r.x.Measured,
+		Name:      b.name,
+		Image:     img.ID,
+		Labels:    runLabels(p.cfg.Scope, id),
+		User:      user,
+		Dir:       r.x.Checkout.Dir,
+		Mounts:    mounts,
+		Env:       env,
+		GPUs:      gpus,
+		Network:   given.Network,
+		Limit:     r.x.Timeout,
+		Measured:  r.x.Measured,
+		AskedGPUs: r.e.target.AskedGPUs.Int(),
 	}
 	// A job that runs inside a standing allocation names it on its first container, which the
 	// placement's engine reads (Config.AllocationLabel) to run the container inside it.
@@ -444,7 +445,7 @@ func (r *run) attachments(as role) (resource.Attachment, error) {
 		if devices := r.e.p.cfg.Devices; devices != nil && devices.Kind() == res.Kind() {
 			// The GPUs of a pool: the job's group, which its grant names. A job given none gets
 			// none of this resource.
-			grant := r.e.target.GPUs
+			grant := r.grantOf()
 			if grant == nil {
 				continue
 			}
@@ -470,6 +471,29 @@ func (r *run) attachments(as role) (resource.Attachment, error) {
 		all = append(all, a)
 	}
 	return resource.Combine(all)
+}
+
+// grantOf is the GPUs of a pool the run's job is given: those the daemon gave it, or, for a pool the
+// daemon does not count (Config.AssignDevices), the group the environment chooses: as many devices
+// as the job asked for, the whole pool when it asked for none, from a node it holds alone.
+func (r *run) grantOf() *core.Grant {
+	if g := r.e.target.GPUs; g != nil {
+		return g
+	}
+	devices := r.e.p.cfg.Devices
+	if devices == nil || !r.e.p.cfg.AssignDevices {
+		return nil
+	}
+	id, size := devices.Pool()
+	asked := r.e.target.AskedGPUs
+	if !asked.IsSet() || asked.Int() > size.Int() {
+		asked = size
+	}
+	group, ok := core.TakeDevices(size, nil, asked)
+	if !ok {
+		return nil
+	}
+	return &core.Grant{Pool: id, Size: size, Devices: group, Whole: asked == size, Source: core.GrantByCLI}
 }
 
 // devicesOf is what the container gets of the group of a pool that the job's grant names, by the

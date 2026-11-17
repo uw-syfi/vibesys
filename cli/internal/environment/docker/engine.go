@@ -169,6 +169,9 @@ type ContainerSpec struct {
 	// Measured says the container's commands are timed: an engine that places the container in
 	// an allocation gives it the whole machine, and an unmeasured container only its share.
 	Measured bool
+	// AskedGPUs is how many GPUs the job asked for (--gpus), zero when it asked for none. An engine
+	// that asks its cluster for an allocation sizes the GPUs of an unmeasured container's by it.
+	AskedGPUs int
 	// Log, when set, is the run's output, where an engine that waits while it starts the container,
 	// as for a cluster's queue, says why in whole lines (environment.Environment.Run). It writes
 	// nothing there otherwise, and nothing once Start has returned.

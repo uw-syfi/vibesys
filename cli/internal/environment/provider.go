@@ -36,6 +36,9 @@ type Target struct {
 	// commands: a container engine the devices of the group, the host the variables that name
 	// them. Nil for a job that was given none, whose commands get the environment they always did.
 	GPUs *core.Grant
+	// AskedGPUs is how many GPUs the job asked for (--gpus), zero when it asked for none. A
+	// placement that asks its cluster for GPUs per job sizes its allocations by it.
+	AskedGPUs core.GPUCount
 }
 
 // Environments hands out the Environment of a kind for a target. The daemon asks it for a job's

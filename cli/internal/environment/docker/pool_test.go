@@ -113,3 +113,40 @@ func TestAJobWithNoGrantGetsNoGPUsAndAGrantOfAnotherPoolIsRefused(t *testing.T) 
 		t.Errorf("containers left: %+v", left)
 	}
 }
+
+// A pool the daemon does not count, a cluster's, is assigned by the environment from the job's
+// count: as many devices as it asked for, the lowest block of them, and every device of the node
+// for a job that asked for none; and the count reaches the engine to size the job's allocation.
+func TestAJobOfAClusterWhoseGPUsAreNotCountedIsAssignedItsDevices(t *testing.T) {
+	for _, tc := range []struct {
+		asked int
+		want  string
+		whole bool
+	}{{2, "0,1", false}, {3, "0,1,2", false}, {8, "0,1,2,3,4,5,6,7", true}, {0, "0,1,2,3,4,5,6,7", true}, {9, "0,1,2,3,4,5,6,7", true}} {
+		devices := newDevices(t)
+		s := newScene(t, options{configure: func(c *docker.Config) {
+			withPool(devices)(c)
+			c.AssignDevices = true
+		}})
+		var asked core.GPUCount
+		if tc.asked > 0 {
+			var err error
+			if asked, err = core.ParseGPUCount(uint32(tc.asked), "test"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var err error
+		s.env, err = s.r.provider.Environment(environment.Target{Repository: "/repo", Commit: "0123456789abcdef0123456789abcdef01234567", Task: "task", AskedGPUs: asked})
+		if err != nil {
+			t.Fatal(err)
+		}
+		keptContainer(s)
+		if a, _ := s.run("print", "x"); a == nil {
+			t.Fatal("no attempt")
+		}
+		spec := onlyContainer(t, s.daemon)
+		if spec.GPUs.NVIDIA != tc.want || spec.Env["VIBESYS_GPU_DEVICES"] != tc.want || spec.AskedGPUs != tc.asked {
+			t.Errorf("asked %d: the container is given %+v with the variables %v and the count %d, want the devices %s and the count %d", tc.asked, spec.GPUs, spec.Env, spec.AskedGPUs, tc.want, tc.asked)
+		}
+	}
+}

@@ -60,6 +60,9 @@ type Allocation struct {
 	// Measured says the container's commands are timed, so the allocation must hold the whole
 	// machine; an unmeasured container or a build needs only a share of it.
 	Measured bool
+	// GPUs is how many GPUs the job asked for, zero when it asked for none: an allocation that
+	// does not hold the whole node asks its cluster for that many.
+	GPUs int
 }
 
 // Engine is a docker.Engine over the docker program. Create it with New. It is safe for

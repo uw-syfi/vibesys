@@ -271,12 +271,12 @@ func (p Process) placement(clk Clocks, dir runtimedir.Dir, containerKey string, 
 	}
 	s := pl.GetSlurm()
 	if s != nil {
-		gres, err := gresOf(name, pl)
+		gpus, err := operator.PoolOf(name, pl)
 		if err != nil {
 			return nil, nil, err
 		}
 		engineCfg.Allocator = slurm.Allocator{
-			Partition: s.GetPartition(), Gres: gres, Exclusive: true, CPUs: int(s.GetCpus()),
+			Partition: s.GetPartition(), GPUs: gpus.Size.Int(), GresType: gpus.GresType, CPUs: int(s.GetCpus()),
 			Memory: s.GetMemory(), Arguments: s.GetSrunArguments(), Builder: slurm.BuilderName(scope),
 		}
 		engineCfg.StartTimeout = seconds(s.GetQueueTimeoutSeconds(), slurm.DefaultQueueTimeout)
@@ -304,21 +304,6 @@ func (p Process) placement(clk Clocks, dir runtimedir.Dir, containerKey string, 
 	}
 	provider, err := docker.New(cfg)
 	return provider, nil, err
-}
-
-// gresOf is what an allocation of the placement asks of a node's GPUs: every GPU of its pool,
-// gpu:<count> or gpu:<gres_type>:<count>, or nothing for a placement whose GPUs are no pool. Every
-// allocation that asks for GPUs asks for the whole pool, and a measured container's holds its whole
-// node.
-func gresOf(name string, pl *cliv1.Placement) (string, error) {
-	pool, err := operator.PoolOf(name, pl)
-	if err != nil || !pool.Size.IsSet() {
-		return "", err
-	}
-	if pool.GresType != "" {
-		return fmt.Sprintf("gpu:%s:%d", pool.GresType, pool.Size.Int()), nil
-	}
-	return fmt.Sprintf("gpu:%d", pool.Size.Int()), nil
 }
 
 // isolated says whether the placement keeps a measure apart from its other jobs by itself
@@ -383,12 +368,12 @@ func (p Process) apptainerPlacement(clk Clocks, cfg docker.Config, scope string,
 	if pl.GetResources().GetRocm() != nil {
 		scripts = map[string]string{gpuScript: amd.Script}
 	}
-	gres, err := gresOf(cfg.Placement, pl)
+	gpus, err := operator.PoolOf(cfg.Placement, pl)
 	if err != nil {
 		return nil, nil, err
 	}
 	sizing := apptainer.Sizing{
-		Partition: s.GetPartition(), Gres: gres, Exclusive: true,
+		Partition: s.GetPartition(), GPUs: gpus.Size.Int(), GresType: gpus.GresType,
 		CPUs: int(s.GetCpus()), Memory: s.GetMemory(), Arguments: a.GetSubmitArguments(),
 	}
 	eng, err := apptainer.New(apptainer.Config{
@@ -413,6 +398,18 @@ func (p Process) apptainerPlacement(clk Clocks, cfg docker.Config, scope string,
 	// gives a measure of [slurm] exclusive the whole node. So they are claimed per placement, named
 	// by the placement and the cluster's login node: a measure holds its own placement's GPUs alone,
 	// and the jobs of the cluster's other placements run beside it, in allocations of their own.
+	if gpus.Size.IsSet() && gpus.GresType == "" && gpus.Vendor == core.VendorAMD {
+		// No GPU resource to ask the cluster for: each job's allocation is a whole node (Sizing),
+		// and the environment hands the job the devices it asked for of it, by variable.
+		machine := cfg.Placement + "@" + ssh.Host
+		devices, err := rocm.NewDevices(rocm.DevicesConfig{Machine: machine, Size: gpus.Size})
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", gpus.Key, err)
+		}
+		cfg.Devices, cfg.AssignDevices = devices, true
+	}
+	// The GPUs of a cluster's placement are no pool the daemon counts: its resource claims them as
+	// one whole, and gives the container the check, and the driver's devices a job's group names.
 	if cfg.Resources, err = resources(pl.GetResources(), ssh, ssh.Host, cfg.Placement+"@"+ssh.Host, clk, facts, core.GPUCount{}); err != nil {
 		return nil, nil, err
 	}

@@ -840,8 +840,10 @@ type GpuPool struct {
 	// that gives GPUs needs it, since its allocations ask for GPUs by count.
 	Count *uint32 `protobuf:"varint,1,opt,name=count,proto3,oneof" json:"count,omitempty"`
 	// The GPU type of a Slurm cluster's GRES, such as a100: an allocation then asks for
-	// gpu:<gres_type>:<n> instead of gpu:<n>. Only for the slurm and apptainer kinds, when a
-	// partition mixes types or names them.
+	// gpu:<gres_type>:<n> instead of gpu:<n>. Only for the slurm and apptainer kinds. For the
+	// apptainer kind it also says the cluster has a GPU resource to ask in: without it, no allocation
+	// asks for GPUs, every allocation holds a whole node, and the CLI names the job's devices inside
+	// it by variable.
 	GresType string `protobuf:"bytes,2,opt,name=gres_type,json=gresType,proto3" json:"gres_type,omitempty"`
 	// When set, the container runtime that passes NVIDIA GPUs instead of --gpus, with the devices in
 	// the runtime's variable. Only for [resources.gpu].

@@ -339,7 +339,7 @@ func (s *Supervisor) executePlan(plan flow.Plan) lifecycle.Verdict {
 func (s *Supervisor) target() environment.Target {
 	l := s.cfg.Launch
 	return environment.Target{Repository: l.Repository, Commit: l.Spec.Commit, Task: l.Task, Placement: l.Spec.Placement, Allocation: l.Allocation,
-		EnterBy: l.AllocationEnterBy, AllocationAny: l.Spec.Allocation == core.AllocationAny, GPUs: l.GPUs}
+		EnterBy: l.AllocationEnterBy, AllocationAny: l.Spec.Allocation == core.AllocationAny, GPUs: l.GPUs, AskedGPUs: l.Spec.GPUs}
 }
 
 func commandEnded(a core.Attempt) lifecycle.Outcome {
