@@ -997,7 +997,15 @@ interface Told extends ChartTip {
 
 /** `text` in at most `chars` characters, the end cut with an ellipsis when it does not fit. */
 function cut(text: string, chars: number): string {
-  return text.length <= chars ? text : `${text.slice(0, Math.max(0, chars - 1)).trimEnd()}…`;
+  // Count and cut on code-point boundaries: `text.length` and `slice` both count UTF-16 units,
+  // so either could split an astral character's surrogate pair and leave a lone surrogate (a
+  // broken glyph) before the ellipsis.
+  const codePoints = [...text];
+  if (codePoints.length <= chars) return text;
+  return `${codePoints
+    .slice(0, Math.max(0, chars - 1))
+    .join('')
+    .trimEnd()}…`;
 }
 
 /**
