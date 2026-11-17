@@ -204,6 +204,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 			}),
 			Environments:    wired.Environments,
 			Placements:      wired.Placements,
+			HostPool:        wired.HostPool,
 			PlacementReader: app.NewPlacementReader(wired.probes, clk, clk, app.DefaultCallTimeout),
 			Branches:        gitrepo.System{},
 			Repositories:    gitrepo.System{},
@@ -234,7 +235,10 @@ const hostResource schedule.ResourceID = "host"
 type Wired struct {
 	Environments environment.Environments
 	// Placements are the placements a docker job can run on.
-	Placements  []core.PlacementOffer
+	Placements []core.PlacementOffer
+	// HostPool is the size of the GPU pool of this machine that host jobs draw from, unset when
+	// the config declares none.
+	HostPool    core.GPUCount
 	Scheduler   app.Scheduler
 	Allocations app.Allocations
 	// Capacities measure the placements whose capacity is a cluster's.
@@ -272,7 +276,7 @@ func (p Process) Wire(op *cliv1.OperatorConfig, clk Clocks, dir runtimedir.Dir, 
 		return Wired{}, err
 	}
 	return Wired{
-		Environments: machines.environments, Placements: machines.offers, Scheduler: scheduler, Allocations: allocations,
+		Environments: machines.environments, Placements: machines.offers, HostPool: machines.hostPool, Scheduler: scheduler, Allocations: allocations,
 		Capacities: capacitiesOf(machines.clusters), claims: machines.claims, probes: machines.probes,
 		ProcessesLeft: machines.processesLeft,
 	}, nil

@@ -44,6 +44,8 @@ import (
 type machines struct {
 	environments environment.Environments
 	offers       []core.PlacementOffer
+	// hostPool is the size of the pool host jobs take their GPUs from, unset when there is none.
+	hostPool core.GPUCount
 	// claims are what the resources of each placement claim for a job that runs on it.
 	claims map[string][]core.Claim
 	probes map[string]app.Placement
@@ -136,12 +138,19 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk Clocks, dir r
 			return machines{}, fmt.Errorf("the operator config %s, placements.%s: %w", operator.Path(p.Getenv, p.Home), name, err)
 		}
 		out.probes[name] = probe
-		out.offers = append(out.offers, provider.Offer())
+		offer := provider.Offer()
+		declared, err := operator.PoolOf(name, op.GetPlacements()[name])
+		if err != nil {
+			return machines{}, fmt.Errorf("the operator config %s: %w", operator.Path(p.Getenv, p.Home), err)
+		}
+		offer.Pool = declared.Size
+		out.offers = append(out.offers, offer)
 		out.claims[name] = provider.Claims()
 	}
 	var hostDevices resource.Devices
 	if hostPool != nil {
 		hostDevices = hostPool.devices
+		out.hostPool = hostPool.pool.Size
 	}
 	out.environments = environment.Kinds{
 		// A host job is given the GPUs of the machine's pool as variables, which nothing enforces.

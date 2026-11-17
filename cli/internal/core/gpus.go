@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/bits"
 	"slices"
+	"strings"
 )
 
 // MaxPoolSize is the most GPUs one pool has, and so the most one job asks for.
@@ -190,6 +191,77 @@ func (g Grant) CheckFor(spec JobSpec) error {
 		return failf(FailureInvalidInput, "gpus: the job asked for no count of GPUs, and was given %d of a pool", g.Devices.Len())
 	case !g.Whole && g.Source == GrantByCLI && g.Devices.Len() != spec.GPUs.Int():
 		return failf(FailureInvalidInput, "gpus: the job asked for %d GPUs, and was given %d", spec.GPUs.Int(), g.Devices.Len())
+	}
+	return nil
+}
+
+// GPUPlace is a place a job may run, as the GPUs it asks for are checked against: a placement of
+// the operator config by its name, or this machine for a host job. Pool is the size of its pool of
+// GPUs, and unset for a place that has none.
+type GPUPlace struct {
+	Name string
+	Pool GPUCount
+}
+
+// GPUAsk is a submission's GPU count and what it is checked against.
+type GPUAsk struct {
+	Kind JobKind
+	// Task names the task, for the refusal that says it needs GPUs.
+	Task string
+	// Asked is --gpus; unset when the submission gave none.
+	Asked GPUCount
+	// NeedsKnown says the task was read, so that Needs is what it needs of a placement. A host
+	// command in the task's image reads none, and then no refusal rests on what the task needs.
+	NeedsKnown bool
+	Needs      []ResourceKind
+	// Where are the places the job may run: the placements that give what its task needs, or the
+	// one it is restricted to, and this machine for a host job.
+	Where []GPUPlace
+}
+
+// CheckGPUAsk refuses a submission whose GPU count cannot be honoured, before it is queued. A job
+// runs where a pool of GPUs is when one of its places has one; it fails with a *Failure of kind
+// FailureInvalidInput that names --gpus and the sizes the places allow:
+//
+//   - a measure takes the whole pool, so it asks for no count;
+//   - a job whose task needs GPUs and that runs where a pool is must say how many it takes;
+//   - a count needs a place with a pool, and the pool must have that many;
+//   - a task that needs no GPU takes no count.
+func CheckGPUAsk(in GPUAsk) error {
+	var pools []GPUPlace
+	for _, p := range in.Where {
+		if p.Pool.IsSet() {
+			pools = append(pools, p)
+		}
+	}
+	sizes := func() string {
+		parts := make([]string, len(pools))
+		for i, p := range pools {
+			parts[i] = fmt.Sprintf("%s has %d: %s", p.Name, p.Pool.Int(), AllowedGPUCounts(p.Pool))
+		}
+		return strings.Join(parts, "; ")
+	}
+	needsGPU := slices.Contains(in.Needs, ResourceGPU) || slices.Contains(in.Needs, ResourceROCm)
+	switch {
+	case in.Kind == JobMeasure && in.Asked.IsSet():
+		return failf(FailureInvalidInput, "--gpus: a measure takes the whole node; leave --gpus out")
+	case in.Kind == JobMeasure:
+		return nil
+	case !in.Asked.IsSet():
+		if in.NeedsKnown && needsGPU && len(pools) > 0 {
+			return failf(FailureInvalidInput, "task %q needs GPUs: say how many with --gpus N (%s)", in.Task, sizes())
+		}
+		return nil
+	case in.NeedsKnown && !needsGPU:
+		return failf(FailureInvalidInput, "--gpus: task %q needs no GPU", in.Task)
+	case len(pools) == 0:
+		names := make([]string, len(in.Where))
+		for i, p := range in.Where {
+			names[i] = p.Name
+		}
+		return failf(FailureInvalidInput, "--gpus: no place this job may run on (%s) has a GPU pool: declare resources.gpu.count of its placement in the operator config, or leave --gpus out", strings.Join(names, ", "))
+	case !slices.ContainsFunc(pools, func(p GPUPlace) bool { return in.Asked.n <= p.Pool.n }):
+		return failf(FailureInvalidInput, "--gpus %d: no placement this job may run on has %d GPUs (%s)", in.Asked.Int(), in.Asked.Int(), sizes())
 	}
 	return nil
 }

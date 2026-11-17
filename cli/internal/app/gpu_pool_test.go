@@ -3,6 +3,7 @@ package app_test
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -18,6 +19,10 @@ import (
 func poolRig(t *testing.T) (*world, *sync.Mutex, *[]lifecycle.Launch) {
 	t.Helper()
 	w := newWorld(t)
+	var err error
+	if w.hostPool, err = core.ParseGPUCount(8, "test"); err != nil {
+		t.Fatal(err)
+	}
 	pool := &schedule.Pool{Resource: "gpu:local", Size: 8, Kind: core.ResourceGPU}
 	w.scheduler = app.Scheduler{
 		Resources: []schedule.Resource{{ID: schedule.PlacementOf("local"), Capacity: 8}, {ID: "gpu:local", Capacity: 8, Devices: true}},
@@ -137,5 +142,31 @@ func TestJobsGetDisjointGPUsOfThePoolAndAFreshDaemonKeepsThemHeld(t *testing.T) 
 	w.gates.Release("g3")
 	for _, id := range []core.JobID{first.ID, second.ID, big.ID, small.ID} {
 		awaitState(t, b, id, core.JobSucceeded)
+	}
+}
+
+// A count the pool cannot give, or one on a measure, is refused when the job is submitted, and
+// nothing is queued: the refusal names --gpus, and the sizes the pool allows.
+func TestSubmitRefusesAGPUCountThePoolCannotGive(t *testing.T) {
+	w, _, _ := poolRig(t)
+	w.withTask(passes, scores)
+	a := w.newApp()
+	ask := func(spec core.JobSpec, n int) error {
+		var err error
+		if spec.GPUs, err = core.ParseGPUCount(uint32(n), "test"); err != nil {
+			t.Fatal(err)
+		}
+		_, err = a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: spec, NoPlan: noPlan(spec)})
+		return err
+	}
+	if err := ask(command("exit", "0"), 9); err == nil || !strings.Contains(err.Error(), "--gpus 9") || !strings.Contains(err.Error(), "1 to 8") {
+		t.Errorf("9 GPUs of a pool of 8: %v, want a refusal that names the flag and the sizes", err)
+	}
+	if err := ask(flowSpec(core.MeasureSettings{}), 2); err == nil || !strings.Contains(err.Error(), "--gpus: a measure takes the whole node") {
+		t.Errorf("a measure of 2 GPUs: %v, want a refusal that names the flag", err)
+	}
+	jobs, err := a.Jobs(ctxFor(t), scope, core.JobFilter{})
+	if err != nil || len(jobs) != 0 {
+		t.Errorf("after the refusals: %d jobs, %v; want none queued", len(jobs), err)
 	}
 }

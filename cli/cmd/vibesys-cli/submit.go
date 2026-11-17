@@ -49,6 +49,7 @@ func submitFlow(ctx context.Context, d deps, kind string, args []string) int {
 		wait    = fs.Bool("wait", false, "block until the job is final, then exit as `wait` does")
 		samples = fs.Uint("samples", 0, "measure: how many benchmark samples are needed (default: the task's)")
 		recheck = fs.Bool("recheck", false, "measure: run the check again even when a saved pass exists")
+		gpus    = fs.Uint("gpus", 0, gpusUsage)
 	)
 	positional, err := parse(fs, flagArgs)
 	if err != nil {
@@ -79,6 +80,13 @@ func submitFlow(ctx context.Context, d deps, kind string, args []string) int {
 	if err == nil {
 		err = refuseHostPlacement(fs, *env)
 	}
+	var count *uint32
+	if err == nil {
+		count, err = gpuCount(fs, *gpus)
+	}
+	if err == nil && kind == "measure" && count != nil {
+		err = usagef("--gpus: a measure takes the whole node; leave --gpus out")
+	}
 	if err != nil {
 		return fail(d, asJSON, err)
 	}
@@ -90,7 +98,7 @@ func submitFlow(ctx context.Context, d deps, kind string, args []string) int {
 	if err != nil {
 		return fail(d, asJSON, err)
 	}
-	spec := &cliv1.JobSpec{Commit: commit, Environment: envKind, Placement: c.placement, Allocation: c.alloc}
+	spec := &cliv1.JobSpec{Commit: commit, Environment: envKind, Placement: c.placement, Allocation: c.alloc, Gpus: count}
 	if kind == "check" {
 		spec.Settings = &cliv1.JobSpec_Check{Check: &cliv1.CheckSettings{}}
 	} else {
@@ -115,6 +123,7 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 		noCache = fs.Bool("no-cache", false, "run a new job even when a matching one exists")
 		plan    = fs.Uint("plan", 0, "the number of a plan to link the job to")
 		wait    = fs.Bool("wait", false, "block until the job is final, then exit as `wait` does")
+		gpus    = fs.Uint("gpus", 0, gpusUsage)
 	)
 	positional, err := parse(fs, flagArgs)
 	if err != nil {
@@ -144,6 +153,10 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 	kind, err := environmentKind(*env)
 	if err == nil {
 		err = refuseHostPlacement(fs, *env)
+	}
+	var count *uint32
+	if err == nil {
+		count, err = gpuCount(fs, *gpus)
 	}
 	if err == nil && imageKind == cliv1.CommandImage_COMMAND_IMAGE_CANDIDATE && *env == "host" {
 		err = usagef("--image candidate: the candidate's image runs in docker, so not with --env host")
@@ -187,11 +200,30 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 	return send(ctx, d, asJSON, *wait, &cliv1.SubmitRequest{
 		Context: callCtx,
 		Spec: &cliv1.JobSpec{
-			Commit: commit, Environment: kind, Placement: c.placement, Allocation: c.alloc,
+			Commit: commit, Environment: kind, Placement: c.placement, Allocation: c.alloc, Gpus: count,
 			Settings: &cliv1.JobSpec_Command{Command: settings},
 		},
 		NoCache: *noCache, Note: *note, Plan: uint32(*plan),
 	})
+}
+
+// gpusUsage is the help of --gpus.
+const gpusUsage = "check and command: how many GPUs of the placement's pool the job takes, the fewest the command can run on; required for a task that needs GPUs where a placement declares a pool (see `jobs` for what earlier jobs took); a measure takes the whole node and refuses it"
+
+// gpuCount reads --gpus: nil when it was not given, and otherwise a number of GPUs. An explicit 0
+// is a mistake and not "none", as for --plan. How many a job may take is for the daemon to say: it
+// knows the pools of the placements the job may run on, and names the sizes.
+func gpuCount(fs *flag.FlagSet, n uint) (*uint32, error) {
+	var given bool
+	fs.Visit(func(f *flag.Flag) { given = given || f.Name == "gpus" })
+	switch {
+	case !given:
+		return nil, nil
+	case n < 1 || n > math.MaxUint32:
+		return nil, usagef("--gpus: %d is not a number of GPUs", n)
+	}
+	out := uint32(n)
+	return &out, nil
 }
 
 // commandImage reads --image, which names one of the two images a command runs in.

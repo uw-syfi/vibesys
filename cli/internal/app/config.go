@@ -72,6 +72,10 @@ type Config struct {
 	// is the scheduler's choice when it starts (Scheduler.Demand). Empty leaves a job's restriction
 	// as it is.
 	Placements []core.PlacementOffer
+	// HostPool is the size of the GPU pool of this machine that host jobs draw from; unset when
+	// there is none. A submission's GPU count is checked against it and against the Pool of the
+	// placements it may run on (core.CheckGPUAsk).
+	HostPool core.GPUCount
 
 	// Allocations is how the daemon keeps standing allocations; the zero value keeps none.
 	Allocations Allocations

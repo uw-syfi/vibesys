@@ -209,6 +209,8 @@ func TestInvalidArgumentsAreRefusedBeforeTheDaemon(t *testing.T) {
 		{"command with plan 0", withTask("submit", "command", "--image", "harness", "HEAD", "--plan", "0", "--", "true"), "--plan"},
 		{"command on the host with a placement", withTask("submit", "command", "--image", "harness", "HEAD", "--env", "host", "--placement", "local", "--", "true"), "--placement"},
 		{"check on the host with a placement", withTask("submit", "check", "HEAD", "--placement=local", "--env", "host"), "--placement"},
+		{"command with gpus 0", withTask("submit", "command", "--image", "harness", "HEAD", "--gpus", "0", "--", "true"), "--gpus"},
+		{"a measure with gpus names --gpus", withTask("submit", "measure", "HEAD", "--gpus", "2"), "--gpus: a measure takes the whole node"},
 		{"probe without service", withTask("submit", "command", "--image", "harness", "HEAD", "--probe", "ok", "--", "true"), "--probe"},
 		{"negative timeout", withTask("submit", "command", "--image", "harness", "HEAD", "--timeout=-1s", "--", "true"), "--timeout"},
 		{"bad flag", withTask("submit", "command", "--image", "harness", "HEAD", "--nope", "--", "true"), "nope"},

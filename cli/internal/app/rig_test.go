@@ -52,6 +52,8 @@ type world struct {
 	branches *gitrepo.FakeBranches
 	// scheduler is how the daemons share the machine; the zero value runs one job at a time.
 	scheduler app.Scheduler
+	// hostPool is the size of the GPU pool host jobs draw from; unset for a machine with none.
+	hostPool core.GPUCount
 	// leasing is how they share what they hold alone with other daemons; the zero value leases
 	// nothing.
 	leasing app.Leasing
@@ -140,6 +142,7 @@ func (w *world) tryNewApp() (*app.App, error) {
 		Tasks:        w.taskSource(),
 		Repositories: w.git,
 		Scheduler:    w.scheduler,
+		HostPool:     w.hostPool,
 		Leasing:      w.leasing,
 		Allocations:  w.allocations,
 		Logf:         func(format string, args ...any) { w.t.Logf("daemon: "+format, args...) },

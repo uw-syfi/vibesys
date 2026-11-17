@@ -291,3 +291,69 @@ func TestAGrantIsHeldToTheJobsSpecAndRecordedWithItsStart(t *testing.T) {
 		}
 	}
 }
+
+// A count is checked against the pools of the places the job may run on, for every kind of job, in
+// every combination of pools: a refusal always names --gpus, and the verdict is the one the rules
+// say. The rules are restated here from the outside, not copied from the code: a measure takes no
+// count; a count fits when some place has a pool of at least that size; a task that needs GPUs
+// must say how many when some place has a pool.
+func TestAGPUCountIsCheckedAgainstThePoolsOfThePlacesTheJobMayRunOn(t *testing.T) {
+	r := rand.New(rand.NewPCG(7, 11))
+	kinds := []core.JobKind{core.JobCheck, core.JobCommand, core.JobMeasure}
+	for range 20000 {
+		in := core.GPUAsk{Kind: kinds[r.IntN(len(kinds))], Task: "serve"}
+		maxPool := 0
+		for i := range 1 + r.IntN(3) {
+			place := core.GPUPlace{Name: string(rune('a' + i))}
+			if r.IntN(3) > 0 {
+				size := 1 + r.IntN(16)
+				place.Pool = gpuCount(t, size)
+				maxPool = max(maxPool, size)
+			}
+			in.Where = append(in.Where, place)
+		}
+		asked := 0
+		if r.IntN(3) > 0 {
+			asked = 1 + r.IntN(20)
+			in.Asked = gpuCount(t, asked)
+		}
+		in.NeedsKnown = r.IntN(4) > 0
+		if r.IntN(2) == 0 {
+			in.Needs = []core.ResourceKind{core.ResourceGPU}
+		}
+		needsGPU := len(in.Needs) > 0
+		var want bool // refused
+		switch {
+		case in.Kind == core.JobMeasure:
+			want = asked > 0
+		case asked == 0:
+			want = in.NeedsKnown && needsGPU && maxPool > 0
+		default:
+			want = (in.NeedsKnown && !needsGPU) || asked > maxPool
+		}
+		err := core.CheckGPUAsk(in)
+		if (err != nil) != want {
+			t.Fatalf("%+v: %v, refused = %v", in, err, want)
+		}
+		var f *core.Failure
+		if err != nil && (!errors.As(err, &f) || f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, "--gpus")) {
+			t.Fatalf("%+v: %v, want an invalid-input refusal that names --gpus", in, err)
+		}
+	}
+}
+
+// The refusals say the sizes the pools allow, so that a caller picks one without guessing.
+func TestARefusedGPUCountNamesThePlacementsAndTheirSizes(t *testing.T) {
+	in := core.GPUAsk{
+		Kind: core.JobCommand, Task: "serve", NeedsKnown: true, Needs: []core.ResourceKind{core.ResourceGPU},
+		Where: []core.GPUPlace{{Name: "local", Pool: gpuCount(t, 8)}, {Name: "box", Pool: gpuCount(t, 4)}},
+	}
+	err := core.CheckGPUAsk(in)
+	if err == nil || !strings.Contains(err.Error(), "--gpus N") || !strings.Contains(err.Error(), "local has 8: 1 to 8") || !strings.Contains(err.Error(), "box has 4: 1 to 4") {
+		t.Errorf("no count: %v", err)
+	}
+	in.Asked = gpuCount(t, 16)
+	if err := core.CheckGPUAsk(in); err == nil || !strings.Contains(err.Error(), "--gpus 16") || !strings.Contains(err.Error(), "box has 4: 1 to 4") {
+		t.Errorf("16 GPUs: %v", err)
+	}
+}
