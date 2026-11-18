@@ -93,7 +93,10 @@ conservative reading as the rule and raise the question in your plan or report.
     the loop asks a plan for one. A mechanism whose ceiling is below the noise
     floor cannot be shown alone: bundle it with related mechanisms into one
     candidate above the floor (name each part, and check each with a steadier
-    proxy such as instruction or syscall counts), or drop it.
+    proxy such as instruction or syscall counts), or drop it. If your
+    instructions allow only one mechanism per experiment, do not run a sub-noise
+    mechanism alone: record it with its estimated bound as a candidate for a
+    later bundle.
 11. Make the smallest real implementation change. Prefer a change a reviewer can
     read and verify in one sitting.
 12. Rebuild through the task-provided commands, not a private build. Build
@@ -172,5 +175,5 @@ reaches a threshold needs a threshold that fits (often 1%), which the operator
 sets; a planner states the honest bound and never inflates it to keep a run
 alive. This skill does not name a fix for any particular program: a technique
 that helps one workload can do nothing, or harm, for another, and the profile
-decides. Where the task states a rule that differs from this guidance, follow the
-task.
+decides. Where the task, or the instructions of your role in the loop, state a
+rule that differs from this guidance, follow that rule.
