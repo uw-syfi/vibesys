@@ -29,7 +29,10 @@ domain skill was found for it.
 A skill is installed when it appears among the skills your harness offers you, by its plugin
 name (`vibesys-kernels-cuda:kernel-performance`) or, where the harness has no plugin prefix, its
 bare name. It is also available when the user or the operator's instructions name a directory
-that holds it (such as a vibesys checkout's `skills/domains/<skill>/SKILL.md`): then point every
+that holds it (such as a vibesys checkout's `skills/domains/<skill>/SKILL.md`; the skills of the
+two vendored packs sit one folder further down: `dial9-tokio/skills/<skill>/SKILL.md`, and
+`dial9-tokio/dial9-rank-bottlenecks/SKILL.md` for the workflow skill, and
+`neuron-agentic-development/skills/<skill>/SKILL.md`): then point every
 brief at that file by its absolute path instead of the plugin name, so a fix to the skill reaches
 the next subagent. Otherwise do not search the filesystem for it.
 

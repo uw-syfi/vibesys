@@ -730,6 +730,40 @@ def test_create_task_names_every_domain_a_task_can_declare(domain: DomainName) -
     assert f"`{domain.value}`" in task_format.read_text(encoding="utf-8")
 
 
+_NAMED_BY_PATH_DOCS = (
+    Path("skills") / "search" / "optimize" / "references" / "domain-plugins.md",
+    Path("orchestrator") / "README.md",
+)
+
+
+@pytest.mark.parametrize("doc", _NAMED_BY_PATH_DOCS, ids=str)
+def test_docs_that_name_a_domain_skill_by_path_give_the_path_of_a_vendored_pack_skill(
+    doc: Path,
+) -> None:
+    """A managed run names a domain skill by its absolute path, so the docs must give a real one.
+
+    The docs say a skill is `skills/domains/<skill>/SKILL.md`, which is wrong for the skills of a
+    vendored pack: they sit below the pack's folder.
+    """
+    domains = PROJECT_ROOT / "skills" / "domains"
+    nested = [
+        path.parent.relative_to(domains)
+        for path in domains.rglob("SKILL.md")
+        if "repos" not in path.parts and len(path.parent.relative_to(domains).parts) > 1
+    ]
+    text = (PROJECT_ROOT / doc).read_text(encoding="utf-8")
+
+    assert nested
+    for skill in nested:
+        pack, *below = skill.parts
+        pattern = (
+            f"{pack}/skills/<skill>/SKILL.md"
+            if below[0] == "skills" and len(below) == 2
+            else f"{skill.as_posix()}/SKILL.md"
+        )
+        assert pattern in text, f"{doc} does not give the path {pattern} of {skill}"
+
+
 _DIAL9_RANK_SKILL = "dial9-rank-bottlenecks"
 _DIAL9_TOOLKIT_FILES = ("trace_parser.js", "trace_analysis.js", "decode.js", "diagnose_setup.js")
 _SKILL_DIR_COMMAND = re.compile(r"<this skill's directory>/(\S+)")
