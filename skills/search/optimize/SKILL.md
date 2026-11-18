@@ -234,6 +234,7 @@ and commit SHAs allowed here:
 
 1. Each promotion since the last report has a judge pass, and `vibesys-cli promote` printed it.
 2. The headline number is the `value` from `vibesys-cli result`.
-3. No plan is marked `chosen` without a live agent.
+3. No plan is marked `chosen` without a live agent building it. A plan whose only funded step
+   is a feasibility profile stays `open` while the profiler runs, and its comment says so.
 4. Idle slots have a stated reason.
 5. Every claimed gain cites a `vibesys-cli compare` verdict.

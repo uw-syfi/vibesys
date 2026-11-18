@@ -30,7 +30,8 @@ names; they usually say which profiler fits. Details are in
 3. Capture on the workload the benchmark uses, or one close enough to say so. A capture that
    drives load is a `vibesys-cli submit command <rev> --image harness [--gpus N] -- <argv...>` job
    (`vibesys:measure`; `--wrap '<profiler>'` profiles the candidate's server), and
-   its output is read with `vibesys-cli logs <job>`. A capture script of your own can travel as
+   its output is read with `vibesys-cli logs <job>`, unless your brief names another route to
+   the hardware (`vibesys:measure`, Jobs: its numbers are exploratory). A capture script of your own can travel as
    the job's argv (`-- python3 -c "<script>"`), so it needs no commit.
 4. If the program cannot show what the question needs (it serves no profiler, its binaries carry
    no symbols, it has no hook to time), say so and stop, unless your brief names an

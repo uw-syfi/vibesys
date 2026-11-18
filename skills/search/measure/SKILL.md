@@ -6,7 +6,8 @@ description: "Use when you must measure a commit for a vibesys optimization, com
 # Measure
 
 A number is a job that `vibesys-cli` ran from a clean checkout of one commit and saved. Never
-report a number that `vibesys-cli` did not print. The CLI decides what a check, a sample, a verdict
+report a number that `vibesys-cli` did not print as a measurement (an exploratory number is
+labeled as one: Jobs). The CLI decides what a check, a sample, a verdict
 and a promotion are; this skill says how to use it and how to read what comes back. The lead
 installs and checks the CLI (`vibesys:setup`).
 
@@ -68,7 +69,10 @@ together and the numbers stay clean: a measure job runs alone on its machine (it
 placement alone, or, where each job gets a whole node of its own, its node), while checks and
 command jobs may share a placement up to its `max_jobs`. Do not start a benchmark, a profiler
 or a server in your own shell. Unit tests and in-process microbenchmarks that finish in seconds
-are checks, not load: run them in your worktree.
+are checks, not load: run them in your worktree. The one other exception is a route to a GPU
+that the task's `OBJECTIVE.md` or your brief names for work outside the CLI (an `srun` command,
+say): use exactly that route, within its limits, for trials and captures. What it prints is
+exploratory: label it as yours, never as the task's metric or a measurement.
 
 ## Wait
 
