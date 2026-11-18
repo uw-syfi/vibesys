@@ -720,6 +720,16 @@ def test_cli_tool_archetype_citations_name_a_numbered_archetype() -> None:
     assert cited <= set(numbered)
 
 
+@pytest.mark.parametrize("domain", list(DomainName))
+def test_create_task_names_every_domain_a_task_can_declare(domain: DomainName) -> None:
+    """A task author is told every `[agent] domain` value, since `optimize` loads skills by it."""
+    task_format = (
+        PROJECT_ROOT / "skills" / "search" / "create-task" / "references" / "task-format.md"
+    )
+
+    assert f"`{domain.value}`" in task_format.read_text(encoding="utf-8")
+
+
 _DIAL9_RANK_SKILL = "dial9-rank-bottlenecks"
 _DIAL9_TOOLKIT_FILES = ("trace_parser.js", "trace_analysis.js", "decode.js", "diagnose_setup.js")
 _SKILL_DIR_COMMAND = re.compile(r"<this skill's directory>/(\S+)")
