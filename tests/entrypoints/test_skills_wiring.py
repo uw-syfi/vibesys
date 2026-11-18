@@ -706,6 +706,20 @@ def test_selected_cli_tool_skill_materializes_every_file_and_every_link(tmp_path
             assert link.is_file(), f"{markdown.relative_to(installed)} links to missing {link}"
 
 
+def test_cli_tool_archetype_citations_name_a_numbered_archetype() -> None:
+    """The mixed-workload examples cite archetypes by number, so each number heads a section."""
+    text = (
+        PROJECT_ROOT / "skills" / "domains" / _CLI_SKILL / "references" / "workload-archetypes.md"
+    ).read_text(encoding="utf-8")
+    numbered = [int(n) for n in re.findall(r"^## (\d+)\. ", text, flags=re.MULTILINE)]
+    mixed = text.split("## Mixed workloads", 1)[1]
+    cited = {int(n) for n in re.findall(r"\b\d+\b", mixed)}
+
+    assert cited
+    assert numbered == list(range(1, len(numbered) + 1))
+    assert cited <= set(numbered)
+
+
 _DIAL9_RANK_SKILL = "dial9-rank-bottlenecks"
 _DIAL9_TOOLKIT_FILES = ("trace_parser.js", "trace_analysis.js", "decode.js", "diagnose_setup.js")
 _SKILL_DIR_COMMAND = re.compile(r"<this skill's directory>/(\S+)")
