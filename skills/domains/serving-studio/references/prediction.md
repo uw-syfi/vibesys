@@ -28,7 +28,8 @@ A what-if bound is not a prediction and is not frozen as one. Write it as a line
 plan's gain bound.
 
 When the skill stopped at Setup or step 1, the plan has no Prediction block; one line says why
-("no simulator: the catalog models this architecture only in FP8, the task runs BF16").
+("no simulator: the catalog models this architecture only in FP8, the task runs BF16"; "no
+simulator: launch overhead, which this idea removes, is not modeled").
 
 How to read one when deciding:
 

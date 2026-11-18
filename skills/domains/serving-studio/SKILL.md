@@ -69,6 +69,14 @@ own ([handoff.md](references/handoff.md)).
    - **None:** another architecture, another precision, or hardware of another vendor or kind.
      Stop the simulator work as Setup says. Porting a model or hardware costs far more than one
      plan: only a lead's handoff funds it, as a model-extension item.
+
+   A feature is modeled only when the preset shows it: a parameter or axis in its catalog entry,
+   or a report that breaks out its cost. One the entry does not name is `unknown`, not modeled;
+   a capture tag on another model's traces says nothing about this preset. Then ask the same of
+   the idea itself: when its mechanism is one the simulator does not model on any deployment
+   (host scheduling, launch overhead, a feature the preset lacks), the simulator cannot price
+   it. Skip steps 2 to 5 for that idea, and write why in the plan, with no Prediction block; a
+   share the simulator does report may still bound it (step 4).
 2. **Reproduce the head.** Simulate the configuration and the workload the benchmark measures
    (arrivals, prompt and output lengths, concurrency, acceptance rates as measured, not assumed),
    and compare with the measured value of the same revision: the mean of its measured samples,
