@@ -742,7 +742,10 @@ Because only the `vibesys` plugin is loaded, a domain plugin such as `vibesys-ke
 `optimize` skill accepts a domain skill that the operator's instructions name by absolute path, so
 name it in the run's `--brief`: the release carries every skill under
 `RELEASE/marketplace/skills/domains/<skill>/SKILL.md`, and a `--skills-directory` checkout carries them
-under `skills/domains/<skill>/SKILL.md`. The lead then points every brief at that file. Without it
+under `skills/domains/<skill>/SKILL.md`; the skills of the two vendored packs sit one folder further
+down, as `dial9-tokio/skills/<skill>/SKILL.md` (the workflow skill `dial9-rank-bottlenecks` is
+`dial9-tokio/dial9-rank-bottlenecks/SKILL.md`) and
+`neuron-agentic-development/skills/<skill>/SKILL.md`. The lead then points every brief at that file. Without it
 the lead finds no domain skill among its own and stops, as `domain-plugins.md` says.
 
 Each part is chosen, in order, from the host's configuration, then the release, then an error:
