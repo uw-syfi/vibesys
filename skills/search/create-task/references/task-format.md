@@ -28,7 +28,7 @@ version = "0.1"
 backends = ["cpu"]            # one backend; a "cuda" task needs the gpu resource
 
 [agent]
-domain = "generic"            # which domain skills fit; held as data
+domain = "generic"            # which domain skills fit; held as data (values below)
 
 [environment]                 # optional
 needs = ["kubernetes"]        # resources a job needs: any of gpu, kubernetes, mounts
@@ -61,6 +61,11 @@ metric = "requests_per_sec"       # the top-level field of that JSON file
 - Refused by the CLI: `[evaluator]`, `entrypoint` or `args` in a command section,
   `requires_accuracy = false`, more than one backend, `[environment.modal]`, and in docker
   `docker_in_docker = true` or an accelerator backend other than `cuda`.
+- `[agent] domain` is one of `llm-serving`, `microservices`, `database`, `kernel-writing`, `cli-tools`
+  or `generic`. `optimize` reads it to find the domain skills the run loads
+  ([domain-plugins](../../optimize/references/domain-plugins.md)), so set the one that fits the code
+  and keep `generic`, which loads none, for the rest: `cli-tools` for a locally built native
+  command-line program (with `backends = ["cpu"]`), `kernel-writing` for a compute kernel.
 - Accepted and not read by the CLI: `[agent]`, `[profile]`, `[profile_guided]`, `[resources]`,
   `[workspace]`, `[plan]`, `[[comparison]]`, and `[catalogue]` except `[catalogue.hardware]`.
 - `[catalogue.hardware]` (`accelerator`, `count`, `vendor`) is the task's hardware budget, which

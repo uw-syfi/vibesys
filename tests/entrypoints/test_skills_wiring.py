@@ -706,6 +706,30 @@ def test_selected_cli_tool_skill_materializes_every_file_and_every_link(tmp_path
             assert link.is_file(), f"{markdown.relative_to(installed)} links to missing {link}"
 
 
+def test_cli_tool_archetype_citations_name_a_numbered_archetype() -> None:
+    """The mixed-workload examples cite archetypes by number, so each number heads a section."""
+    text = (
+        PROJECT_ROOT / "skills" / "domains" / _CLI_SKILL / "references" / "workload-archetypes.md"
+    ).read_text(encoding="utf-8")
+    numbered = [int(n) for n in re.findall(r"^## (\d+)\. ", text, flags=re.MULTILINE)]
+    mixed = text.split("## Mixed workloads", 1)[1]
+    cited = {int(n) for n in re.findall(r"\b\d+\b", mixed)}
+
+    assert cited
+    assert numbered == list(range(1, len(numbered) + 1))
+    assert cited <= set(numbered)
+
+
+@pytest.mark.parametrize("domain", list(DomainName))
+def test_create_task_names_every_domain_a_task_can_declare(domain: DomainName) -> None:
+    """A task author is told every `[agent] domain` value, since `optimize` loads skills by it."""
+    task_format = (
+        PROJECT_ROOT / "skills" / "search" / "create-task" / "references" / "task-format.md"
+    )
+
+    assert f"`{domain.value}`" in task_format.read_text(encoding="utf-8")
+
+
 _NAMED_BY_PATH_DOCS = (
     Path("skills") / "search" / "optimize" / "references" / "domain-plugins.md",
     Path("orchestrator") / "README.md",
