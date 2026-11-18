@@ -93,7 +93,7 @@
       "name": "vibesys-kernels-rocm",
       "source": "./skills",
       "description": "Domain skills for correct and fast ROCm kernels, with rocprof analysis, for use with the vibesys optimization loop.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "strict": false,
       "skills": [
         "./domains/kernel-correctness",
@@ -122,7 +122,7 @@
       "name": "vibesys-cli-tools",
       "source": "./skills",
       "description": "Domain skill for optimizing locally built native command-line programs (text, filesystem, sorting and repository tools) without changing their behavior, for use with the vibesys optimization loop.",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "strict": false,
       "skills": [
         "./domains/cli-tool-optimization"

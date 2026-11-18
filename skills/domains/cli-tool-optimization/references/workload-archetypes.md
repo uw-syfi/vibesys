@@ -12,7 +12,7 @@ whole observable contract, use the task's commands, rely on the task's recorded
 measurement, and apply the [review checklist](review-checklist.md). The archetype
 changes the questions, not the discipline.
 
-## Streaming and text processing
+## 1. Streaming and text processing
 
 Examples: grep-like search, sed-like and awk-like editing, byte-copy and filter
 tools.
@@ -37,7 +37,7 @@ Questions to ask:
 Hazards: fast paths that assume ASCII or a simple pattern shape and silently
 change results in other locales or on rare patterns.
 
-## Filesystem traversal and metadata
+## 2. Filesystem traversal and metadata
 
 Examples: ls-like listers, find-like walkers, du-like summarizers.
 
@@ -62,7 +62,7 @@ Hazards: skipping metadata that some option or edge case still needs; ordering
 that changes with locale or filesystem; mishandling symlinks, loops and
 permission errors.
 
-## Sorting, aggregation, comparison and formatting
+## 3. Sorting, aggregation, comparison and formatting
 
 Examples: sort-like, uniq-like, wc-like, diff-like and cut-like tools.
 
@@ -82,7 +82,7 @@ Questions to ask:
 Hazards: changing comparison or stability semantics; changing behavior on equal
 keys, on invalid input, or under a different locale; memory growth on large input.
 
-## Process and pipeline orchestration
+## 4. Process and pipeline orchestration
 
 Examples: xargs-like and tee-like tools, wrappers and supervisors.
 
@@ -104,7 +104,7 @@ Hazards: changed batching that alters command lines or limits, lost error
 propagation, changed broken-pipe and signal behavior, ordering differences when
 work is made concurrent.
 
-## Stateful or repository-oriented tools
+## 5. Stateful or repository-oriented tools
 
 Examples: version-control tools, package and database clients, build tools; Git is
 one instance.
