@@ -23,7 +23,9 @@ Read the failed check's log (`vibesys-cli logs <job>`) and `OBJECTIVE.md`.
 1. Do not create the result branch yet, and do not measure the base. Choose the run id and the
    CLI context line as for any start. Create one plan, titled
    "bootstrap: the smallest correct implementation that passes the check", and comment the base
-   SHA and the failing check job.
+   SHA and the failing check job. When you keep a handoff ([handoff.md](handoff.md)), this plan
+   is its first item, the skeleton of its design that passes the check, and its brief carries the
+   `Handoff:` line.
 2. Dispatch one implement worker for it, with this in the brief: the pass criterion is
    `vibesys-cli submit check <sha> --wait` passing on a full commit (`Checks: pass`,
    `vibesys:commit`); the budget is check jobs only, no measure; the implementation is the

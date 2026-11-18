@@ -18,12 +18,15 @@ build and to say in advance what the build should show. The hardware still decid
 number is never the task's metric, never a measurement, and never a reason to promote.
 
 A planner uses this skill to back a plan with a frozen prediction, a profiler to answer a question
-with simulated evidence, and a lead to rank plans by predicted gain and to record how far each
-prediction missed. A worker does not need it.
+with simulated evidence, and a lead to rank plans by predicted gain, to record how far each
+prediction missed, and to explore designs for a handoff ([handoff.md](references/handoff.md)):
+the design and the ordered items workers build. An implement worker does not need it; one that
+extends the simulator for a handoff item does.
 
 ## Setup: once per host, never per agent
 
-You use what is installed; you install nothing. Two variables say what is:
+You use what is installed; you install nothing (a model-extension item of a handoff builds a
+clone of its own: [handoff.md](references/handoff.md)). Two variables say what is:
 
 - `SERVINGSTUDIO_API`: a ServingStudio public API endpoint. Unset means the hosted service, which
   covers only its published GPU presets.
@@ -39,9 +42,10 @@ git -C "$SERVINGSTUDIO_SIM" rev-parse HEAD   # only with a local checkout
 
 If neither answers, or step 1 finds no deployment to use, stop the simulator work, not the
 planning: say so in one line, plan from measurements as you would without this skill, and write
-no Prediction block. Installing ServingStudio, or adding a model or hardware to it, is host
-setup or simulator development that needs the user's approval and is never done in the middle
-of an optimization: [setup.md](references/setup.md).
+no Prediction block. Installing or upgrading the copy agents use is host setup that needs the
+user's approval and is never done in the middle of an optimization: [setup.md](references/setup.md).
+Adding a model or hardware is simulator development: only as a handoff item, in a copy of its
+own ([handoff.md](references/handoff.md)).
 
 ## Work
 
@@ -63,8 +67,8 @@ of an optimization: [setup.md](references/setup.md).
      numbers rank changes against each other only, and step 5 may freeze a relative change,
      never an absolute value. Name each difference in the plan.
    - **None:** another architecture, another precision, or hardware of another vendor or kind.
-     Stop the simulator work as Setup says. Porting a model or hardware is ServingStudio's own
-     development work and costs far more than one plan.
+     Stop the simulator work as Setup says. Porting a model or hardware costs far more than one
+     plan: only a lead's handoff funds it, as a model-extension item.
 2. **Reproduce the head.** Simulate the configuration and the workload the benchmark measures
    (arrivals, prompt and output lengths, concurrency, acceptance rates as measured, not assumed),
    and compare with the measured value of the same revision: the mean of its measured samples,

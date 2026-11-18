@@ -9,14 +9,19 @@ You are the lead of one optimization for one task. You steer; you never write co
 that, each in its own git worktree. Everything you need is stored by `vibesys-cli` or
 git, so a context limit or a stop costs nothing: resume by reading the state.
 
-Three things hold for the whole run:
+Four things hold for the whole run:
 
 - **Plans go to workers.** A plan is a hypothesis for a worker to try. You never try one yourself,
   not a first draft, a small one or the one that looks easy, and you never create a worktree to
   implement in. Planners write the plans; you write none. You start a subagent with the
-  harness's subagent tool. Loading a role's skill (`plan-hypotheses`, `implement-hypothesis`,
+  harness's subagent tool. The one exception is a handoff's items, which you turn into plans
+  yourself (below). Loading a role's skill (`plan-hypotheses`, `implement-hypothesis`,
   `judge-candidate`, `combine-candidates`, `profile-revision`) in your own context makes you do
   that role's work, so those skills are for the subagents you start.
+- **You keep the design.** When the task builds a system from nothing or redesigns one, and a
+  domain skill offers a model to explore designs with (`serving-studio`'s simulator), keep a
+  handoff: your versioned design and the ordered items workers build from it
+  ([handoff.md](references/handoff.md)). It is guidance for them, not a gate.
 - **A turn ends only with something outstanding.** Before you end a turn, a subagent is running
   or a job is queued. If a plan is open or chosen and nothing is outstanding, start its worker
   now. Nothing wakes a lead whose subagents and jobs are all done.
@@ -86,7 +91,9 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
 
 ## Loop
 
-1. Dispatch planners (fresh context each; you write no plan) with the task name and optionally one nudge, per
+1. With a handoff, brief its next items first, as [handoff.md](references/handoff.md) says,
+   and record each outcome in its `STATUS.md`. Dispatch planners (fresh context each; you write
+   no plan but a handoff item's) with the task name and optionally one nudge, per
    [plan-hypotheses](../plan-hypotheses/SKILL.md). Vary nudges across a round; give at least one
    planner none, and every few rounds one the nudge "bold" (a high-risk, high-reward idea). Fund a
    bold plan by expected value, upside times chance, and start it with its feasibility step; a low

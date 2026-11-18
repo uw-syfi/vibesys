@@ -39,7 +39,9 @@ you stop), so a miss costs one worker pass. Fill the Bold fields in
 
 1. Read `OBJECTIVE.md`; its rules bind every idea. Read the plan index first
    (`vibesys-cli plan list --json`) and open full plans only for plans near your idea
-   (`plan view <n>`). Then browse the saved results (`vibesys-cli result`, `show <sha>`, `jobs`,
+   (`plan view <n>`). When your brief names a handoff, read its newest version first: propose
+   what its items do not already cover, or a change to one of them that its evidence supports.
+   Then browse the saved results (`vibesys-cli result`, `show <sha>`, `jobs`,
    `logs <job>`) and the code. A profile an earlier agent kept lives in its plan's comments.
    Read the code of the revision you plan on (usually the result branch head) without checking it
    out: `git show <sha>:<path>`, `git grep <pattern> <sha>`, `git diff <a> <b>`. The checkout you
