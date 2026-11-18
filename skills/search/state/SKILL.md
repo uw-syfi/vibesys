@@ -51,6 +51,9 @@ All worktrees of the repository share one store per task, so any agent sees the 
   submodules empty: when the repository has any (`.gitmodules`), run
   `git -C <path> submodule update --init --recursive` after `git worktree add`, so the agent can
   read the submodule source (a framework's examples and docs) that the repository vendors.
+- Handoff: when the lead keeps one, `<parent>/<name>.worktrees/handoff/<task>/`, its versions and
+  `STATUS.md` (the handoff reference of `vibesys:optimize`). The lead writes it; everyone else
+  reads it. It is state: never delete it while the optimization lives.
 - Scratch: disposable machine output (profiles, raw logs). Any directory the lead names in the
   briefs; nothing depends on it.
 
@@ -69,7 +72,7 @@ Statuses: `open` (proposed, undecided), `chosen` (a worker is on it), `won` (pro
 | Writer | Writes |
 | --- | --- |
 | Planner | `plan create`, and `plan edit` of its own body and its gain bound (`--gain-bound`, the most the plan could gain as a share of the headline); its workstream (`--workstream <n>`, below) |
-| Lead | status (`plan edit <n> --status`, `plan close <n> --status s --comment ...`) and comments: the decision (chosen, rejected, deferred and why; duplicates; disjoint files), the worker brief text, the result (branch, commit, job ids, judge verdict, lessons), and on close the gain with its `compare` verdict or the reason |
+| Lead | `plan create` only for a handoff's items (`vibesys:optimize`); status (`plan edit <n> --status`, `plan close <n> --status s --comment ...`) and comments: the decision (chosen, rejected, deferred and why; duplicates; disjoint files), the worker brief text, the result (branch, commit, job ids, judge verdict, lessons), and on close the gain with its `compare` verdict or the reason |
 
 Workers and judges never write plans; they link jobs with `--plan <n>` and hand back evidence.
 Every measure is linked to the plan it tests (`submit measure <sha> --plan <n>`): that link ties

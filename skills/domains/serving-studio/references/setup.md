@@ -1,8 +1,9 @@
 # Setting up ServingStudio on a host
 
 Do this once per host, with the user's approval, before an optimization starts. An agent in the
-middle of an optimization never installs, builds or upgrades ServingStudio: a missing simulator
-is a fact to report, not a step to take.
+middle of an optimization never installs, builds or upgrades the copy agents use: a missing
+simulator is a fact to report, not a step to take. The one exception is a handoff's
+model-extension item ([handoff.md](handoff.md)), whose worker builds a clone of its own.
 
 ServingStudio publishes no Python package, container image or release tag. A commit is the only
 stable name for a revision, and [`../assets/pins.toml`](../assets/pins.toml) holds the ones this

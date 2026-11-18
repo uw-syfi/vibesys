@@ -34,8 +34,10 @@ Rules:
   full commit with `Checks: pass`; the branch name and `Plan: N` come from the brief); judge and
   profile workers edit nothing.
 - Finish every turn by measuring (within the budget), then delivering the handoff with the
-  harness's handoff tool (`post_handoff` in a run that has it) as your last act. A prose summary
-  is not a handoff; never end a turn without one.
+  harness's handoff tool (`post_handoff` in a run that has it; in a harness with no such tool,
+  your final message is the handoff) as your last act. A prose summary in an earlier message is
+  not a handoff; never end a turn without one. Copy every SHA you hand back from `git rev-parse`
+  output, never from memory.
 ```
 
 Domain skills: the skills [domain-plugins.md](domain-plugins.md) found for the task's
@@ -58,6 +60,9 @@ Specialize to: <what the task fixes, from OBJECTIVE.md: model, hardware, workloa
 First step: <the smallest change to the claim that you can finish, commit and measure in this
   turn>. Do it and measure it before anything larger.
 Parent: <base commit, or the candidate commit you build on and its measured value>
+Handoff: <only for a handoff item: the version directory and the item id. Read its README.md,
+  CONTRACT.md and the item before anything else. Its reference numbers are guidance: report what
+  you measured against them, and never change the workload or the contract to meet them>
 Measure: <whether you submit the measure yourself, or return `ready for measurement`>
 Hand back: claim, commit SHA, job ids and the compare output, what you learned, the next step
   you propose.
@@ -113,6 +118,29 @@ skills, chosen as for the common header, because they carry how to bound and pla
 
 ```
 Task: <task>      Nudge: <optional, one short phrase, or none>
+Handoff: <the newest version directory, when you keep one: read it first and propose what it
+  does not already cover; omit the line otherwise>
 CLI context: <as above, with --agent planner>
 Load vibesys:plan-hypotheses, vibesys:state and <domain skills>. Create only your own plan.
 ```
+
+## Tool extension
+
+An item that extends the model a handoff rests on ([handoff.md](handoff.md)). Use the implement
+brief, with these lines in place of Worktree, Branch, Base commit and Measure:
+
+```
+Tool: <the tool, and the pinned commit to start from>
+Work in: <a new directory beside the worktrees, for your own clone of the tool. Never change the
+  copy the run uses (its path is in Tool variables) and never this repository>
+Extend: <what the model lacks: a model, kernel rows on this hardware, a feature>
+Check: <a small case measured on the task's hardware that the extension must reproduce, and how
+  far it may miss>
+Upstream: <"no", unless the user's instructions say to send it upstream, and where>
+Hand back: the tool commit, the check's simulated and measured values, what it still does not
+  model.
+```
+
+GPU work for it (profiling kernels, the check's measurement) goes through
+`vibesys-cli submit command --plan <n>`, as for any job.
+

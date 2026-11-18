@@ -53,8 +53,9 @@ command jobs take `--gpus N`: the fewest the step needs.
 Any run that drives load, including a short sanity or tuning run, is a `vibesys-cli submit command
 <sha> --image harness -- <argv...>` job on a committed `wip` checkpoint (`vibesys:measure` says
 which image; on a task with `[candidate]` the harness command runs beside the candidate's server,
-and on another task `--service` and `--probe` start a server). Do not run benchmarks or servers in your own shell (unit tests and the in-process
-microbenchmarks of Work step 2 are the exception), and do not queue more jobs than your
+and on another task `--service` and `--probe` start a server). Do not run benchmarks or servers in your own shell (unit tests, the in-process
+microbenchmarks of Work step 2, and a route the task or brief names for work outside the CLI,
+as `vibesys:measure` says, are the exceptions), and do not queue more jobs than your
 budget allows. While a job is queued, do not poll or stop: wait in the background and go on to your
 next step. A job runs the commit it was submitted with and the CLI cannot change it. When a newer
 commit of yours makes your own queued job's result useless, cancel that job and submit the newer
@@ -67,7 +68,7 @@ agents' jobs alone ([reading the queue](../measure/references/jobs.md#reading-th
 - Amend, rebase or force-push a commit that was measured (`vibesys:commit`).
 - Add a stub, a special case for the benchmark's inputs, a skipped check or any shortcut that
   raises a number without the program doing the work. Obey every rule in `OBJECTIVE.md`.
-- Report a number that `vibesys-cli` did not print.
+- Report a number that `vibesys-cli` did not print as a measurement.
 
 ## Finish
 

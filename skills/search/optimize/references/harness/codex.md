@@ -2,6 +2,14 @@
 
 ## Dispatch a subagent with a fresh context
 
+You and your subagents create branches and worktrees and commit in them, so the session must be
+able to write the repository's git metadata. Codex's `workspace-write` sandbox keeps every
+`.git` read-only, even inside a writable root, so `git worktree add` and `git commit` fail there.
+The user chooses how to run it: with `--sandbox danger-full-access` inside an environment that
+confines the session in its own way (a container, a VM), or under the VibeSys orchestrator,
+which confines agents itself. If your first `git worktree add` fails with a read-only error,
+stop and say so; do not change the sandbox yourself.
+
 Call `spawn_agent` with the brief as `message`. Pass `fork_turns: "none"` (or
 `fork_context: false`, in builds whose schema has that field instead): newer builds default to
 forking the whole lead history into the subagent. Leave `model` and `reasoning_effort` unset
@@ -9,7 +17,8 @@ unless the optimization's instructions ask for one. A subagent's final answer is
 the lead when it finishes; `wait_agent` waits for it. `send_input` or `followup_task`
 continues a subagent, `list_agents` shows which exist, and `interrupt_agent` stops its turn.
 A finished subagent still counts toward the concurrency limit until `close_agent` closes it, so
-close each one after reading its result. The limit is `agents.max_concurrent_threads_per_session`
+close each one after reading its result, in builds that have `close_agent`. A subagent has no
+handoff tool; its final answer is its handoff. The limit is `agents.max_concurrent_threads_per_session`
 in `config.toml` (legacy name `agents.max_threads`); keep it above `--fanout`.
 
 ## Run a long command as a tracked background task
