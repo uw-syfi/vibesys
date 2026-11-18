@@ -706,6 +706,16 @@ def test_selected_cli_tool_skill_materializes_every_file_and_every_link(tmp_path
             assert link.is_file(), f"{markdown.relative_to(installed)} links to missing {link}"
 
 
+@pytest.mark.parametrize("domain", list(DomainName))
+def test_create_task_names_every_domain_a_task_can_declare(domain: DomainName) -> None:
+    """A task author is told every `[agent] domain` value, since `optimize` loads skills by it."""
+    task_format = (
+        PROJECT_ROOT / "skills" / "search" / "create-task" / "references" / "task-format.md"
+    )
+
+    assert f"`{domain.value}`" in task_format.read_text(encoding="utf-8")
+
+
 _DIAL9_RANK_SKILL = "dial9-rank-bottlenecks"
 _DIAL9_TOOLKIT_FILES = ("trace_parser.js", "trace_analysis.js", "decode.js", "diagnose_setup.js")
 _SKILL_DIR_COMMAND = re.compile(r"<this skill's directory>/(\S+)")
