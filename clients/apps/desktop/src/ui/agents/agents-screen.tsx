@@ -24,6 +24,7 @@ import {
   spawnTree,
   toggled,
 } from '../../state/index.js';
+import {type Precision, precisionOf} from '../cost/words.js';
 import {useDisplayClock} from '../display-clock.js';
 import {agentLabel, groupLabel, runtimeLabel} from './labels.js';
 import {formatSpan, formatUsd} from './time.js';
@@ -75,13 +76,18 @@ function shared(row: SpawnRow, label: string): GanttRow {
   };
 }
 
-function agentRow(row: AgentRow, labels: ReadonlyMap<string, string>, actions: Actions): GanttRow {
+function agentRow(
+  row: AgentRow,
+  labels: ReadonlyMap<string, string>,
+  actions: Actions,
+  precision: Precision,
+): GanttRow {
   const fold = () => actions.fold(row);
   const count = foldedCount(row);
   return {
     ...shared(row, labels.get(row.agentId) ?? ''),
     tag: runtimeLabel(row.runtime),
-    ...(row.costUsd === null ? {} : {figure: formatUsd(row.costUsd)}),
+    ...(row.costUsd === null ? {} : {figure: formatUsd(row.costUsd, precision)}),
     ...(row.children > 0 ? {fold: {open: !isFolded(row), toggle: fold}} : {}),
     ...(count > 0 ? {count} : {}),
     marks: row.ticks.map(tick => ({
@@ -149,8 +155,12 @@ export function AgentsScreen(props: {
     open: props.open,
     fold: target => setFolds(choices => toggled(choices, target)),
   };
+  const costs = tree.rows.flatMap(row =>
+    row.kind === 'agent' && row.costUsd !== null ? [row.costUsd] : [],
+  );
+  const precision = precisionOf(costs.length === 0 ? null : costs.reduce((a, b) => a + b, 0));
   const rows = tree.rows.map(row =>
-    row.kind === 'agent' ? agentRow(row, labels, actions) : groupRow(row, actions),
+    row.kind === 'agent' ? agentRow(row, labels, actions, precision) : groupRow(row, actions),
   );
   const to = Math.max(tree.endMs, tree.startMs + 1000);
   return (
