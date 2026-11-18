@@ -37,9 +37,12 @@ found through `$ROCPROF_ATT_LIBRARY_PATH` or `$ROCM_PATH/lib`; install it in the
 ## Two kinds of capture job
 
 Both go through `vibesys-cli submit command` (the `vibesys:measure` skill says how to submit and
-wait), which names the image the command runs in. `--wrap` is an argv prefix the CLI puts in front
-of a command without reading it; `capture.py` and its options, ending with `--`, are that prefix.
-`capture.py` and the profiler must be in the candidate's image, where the server runs.
+wait), which names the image the command runs in. A ROCm task needs GPUs, so every job below also
+says `--gpus N` where the operator configured a pool of GPUs, and is refused without it: ask for
+the fewest the capture needs, and read the sizes a refusal names (see GPUs in `vibesys:measure`).
+`--wrap` is an argv prefix the CLI puts in front of a command without reading it; `capture.py` and
+its options, ending with `--`, are that prefix. `capture.py` and the profiler must be in the
+candidate's image, where the server runs.
 
 **A standard capture** profiles the server under a fixed load from the task's own image, the same
 for every candidate, so two captures of two commits are comparable. With `--image harness` on a
@@ -49,7 +52,7 @@ one (its README or harness says, such as a `profile` mode of its benchmark scrip
 argv for every capture you compare.
 
 ```bash
-vibesys-cli submit command <sha> --image harness --wrap 'python3 tools/capture.py timeline --hip-api --' -- <the task's load argv>
+vibesys-cli submit command <sha> --image harness --gpus N --wrap 'python3 tools/capture.py timeline --hip-api --' -- <the task's load argv>
 ```
 
 The CLI starts the candidate's server behind the prefix, waits until it is ready, runs the load,
@@ -68,11 +71,11 @@ the command.
 
 ```bash
 # your own load against the candidate's server, which runs under the profiler
-vibesys-cli submit command <sha> --image harness --wrap 'python3 tools/capture.py counters --pmc TCC_HIT_sum TCC_MISS_sum --kernel-include Cijk_ --' -- <load argv>
+vibesys-cli submit command <sha> --image harness --gpus N --wrap 'python3 tools/capture.py counters --pmc TCC_HIT_sum TCC_MISS_sum --kernel-include Cijk_ --' -- <load argv>
 # a kernel microbenchmark in the candidate's image, no server
-vibesys-cli submit command <sha> --image candidate --wrap 'python3 tools/capture.py thread-trace --kernel-include fmha --' -- python bench/attn.py
+vibesys-cli submit command <sha> --image candidate --gpus N --wrap 'python3 tools/capture.py thread-trace --kernel-include fmha --' -- python bench/attn.py
 # versions only: cheap, run it after any image change
-vibesys-cli submit command <sha> --image candidate -- python3 tools/capture.py check
+vibesys-cli submit command <sha> --image candidate --gpus N -- python3 tools/capture.py check
 ```
 
 On a task without `[candidate]`, everything runs in the task's image: use `--image harness`, and
@@ -119,8 +122,8 @@ says so.
   seconds, after startup and warmup. Narrow it further with `--kernel-include`. Wrapping rocprofv3
   directly, pass `--collection-period <delay>:<duration>:<repeat>` yourself (seconds unless
   `--collection-period-unit` says otherwise). The flag's form has changed between ROCm releases:
-  read the image's `rocprofv3 --help` first, with a cheap `submit command <sha> --image candidate --
-  rocprofv3 --help`.
+  read the image's `rocprofv3 --help` first, with a cheap `submit command <sha> --image candidate --gpus N
+  -- rocprofv3 --help`.
 - **Mind the format.** CSV is what `analyze.py` reads, and it spends a line of text on every
   dispatch; JSON is larger still. A bounded window is what keeps a CSV trace small. rocprofv3's
   binary formats (`pftrace` for Perfetto, `otf2`, and `rocpd` from ROCm 7) avoid that text, but
