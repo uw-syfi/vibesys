@@ -9,7 +9,9 @@ from the smallest part that runs to the whole system under the benchmark.
 
 - **Frozen at:** the endpoint or checkout and the simulator revision every number came from, the
   deployment kind (match or proxy, each difference named) and the head residual when there is a
-  measured head.
+  measured head. When the simulation reports another metric than the task's, or runs on other
+  hardware, no residual can be computed: write "Head residual: none" with the reason, and rest
+  the next version on measurements and profiles of the head.
 - **Design in one sentence:** model, hardware and layout, the workload, and the result the
   simulator gives for it.
 - **Design:** the model and precision; the GPU layout (parallelism, replicas, a prefill/decode

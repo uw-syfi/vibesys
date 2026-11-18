@@ -111,7 +111,9 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    --status paused|closed --note "<one line of why>"`, and `--status active` when it resumes.
 3. Dispatch workers for chosen plans with a self-contained brief from briefs.md; save the brief
    text as a plan comment. Branch new ideas from the current result branch head.
-4. Measure every returned candidate commit, then dispatch a judge. A candidate is a full commit with
+4. Measure every returned candidate commit, then dispatch a judge. Resolve a handed-back SHA with
+   `git rev-parse <its branch>` before using it: a worker can hand back one that does not exist.
+   A candidate is a full commit with
    `Checks: pass` (`vibesys:commit`); `wip` commits below it are not measured. Link every measure
    to the plan it tests: `vibesys-cli submit measure <sha> --samples 5 --plan <n>`. That link is how
    each point on the run's chart is tied to its idea; `vibesysd` refuses a measure from a run that

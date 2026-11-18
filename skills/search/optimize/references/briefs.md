@@ -34,8 +34,10 @@ Rules:
   full commit with `Checks: pass`; the branch name and `Plan: N` come from the brief); judge and
   profile workers edit nothing.
 - Finish every turn by measuring (within the budget), then delivering the handoff with the
-  harness's handoff tool (`post_handoff` in a run that has it) as your last act. A prose summary
-  is not a handoff; never end a turn without one.
+  harness's handoff tool (`post_handoff` in a run that has it; in a harness with no such tool,
+  your final message is the handoff) as your last act. A prose summary in an earlier message is
+  not a handoff; never end a turn without one. Copy every SHA you hand back from `git rev-parse`
+  output, never from memory.
 ```
 
 Domain skills: the skills [domain-plugins.md](domain-plugins.md) found for the task's

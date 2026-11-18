@@ -37,7 +37,7 @@ Read the failed check's log (`vibesys-cli logs <job>`) and `OBJECTIVE.md`.
    nothing, create the result branch at the bootstrap commit, once
    (`git branch vibesys/result/<task> <bootstrap SHA>`). Creating a branch that does not exist
    moves nothing; nothing was promoted. The bootstrap commit is now the base: comment it on the
-   plan, close the plan, and go on with step 4 of Start (measure the base) and the Loop. The first
+   plan, close the plan as `won` (its comment says it became the base, unpromoted), and go on with step 4 of Start (measure the base) and the Loop. The first
    base commit stays unmeasured and is never promoted.
 5. If two bootstrap attempts in a row end without a passing commit, stop and report the blocker
    the worker named.

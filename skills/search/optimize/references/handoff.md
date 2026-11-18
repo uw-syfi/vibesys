@@ -46,7 +46,12 @@ contract to close a gap.
 A version is frozen once you brief its first item. When the evidence changes the design (a
 measurement contradicts the model, the model itself changes, a better design shows up), write the
 next version as a new directory, with a first line in its `README.md` saying what changed and
-why. Earlier versions stay as they were, so every brief still points at what it was given.
+why. Earlier versions stay as they were, so every brief still points at what it was given. An
+item already briefed keeps its version in `STATUS.md`; a later version lists it as done or in
+progress rather than repeating it.
+
+The evidence for a later version can be measurements and profiles of the head instead of the
+model, when they rank the designs better; say so in its first line.
 
 ## The loop
 
@@ -54,7 +59,9 @@ why. Earlier versions stay as they were, so every brief still points at what it 
    runs, or dispatch a profile brief for a sweep. Write version 1.
 2. **Brief an item.** Each item you fund becomes one plan, which you create from the item:
    `plan create --title "<the item, as a claim>" --body-file <the item's text> --workstream <n>`,
-   all items of a handoff in one workstream named after it. Dispatch an implement worker with
+   all items of a handoff in one workstream named after it. When a planner's open plan already
+   is the item, use that plan instead: move it with `plan edit <n> --workstream <k>` and say so
+   in a comment. Dispatch an implement worker with
    the `Handoff:` line of [briefs.md](briefs.md). Items with no order between them and disjoint
    files can run at once.
 3. **Read the outcome.** After the measure and the judge, append one line to `STATUS.md`:

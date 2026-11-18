@@ -2,8 +2,11 @@
 
 ## Dispatch a subagent with a fresh context
 
-Use the Agent tool with a general-purpose subagent and `run_in_background: true`. When it
-finishes, a notification with its result arrives in the lead's turn. SendMessage continues a
+Use the Agent tool with a general-purpose subagent and `run_in_background: true`. The prompt is
+literal text: paste the whole brief into it, never a file path or a shell substitution such as
+`$(cat brief.md)`. When it finishes, a notification with its result arrives in the lead's turn.
+A subagent has no handoff tool; its final message is its handoff. A notification that a
+subagent is waiting on its own background work is not its result. SendMessage continues a
 running or finished agent, ListAgents shows which exist, and TaskStop stops one.
 
 ## Run a long command as a tracked background task
@@ -21,8 +24,11 @@ as your last message, start it with the words "Final report", and end the turn.
 ## Wait for work without polling
 
 Rely on the background-task and subagent notifications; end the turn to yield, but only while a
-subagent or a background command is running, since only they send a notification. Never use a
-foreground `sleep`.
+subagent or a background command is running, since only they send a notification. That holds for
+the lead. A subagent's turn ending is its handoff, so a subagent keeps working, or waits on its
+background task's output, until its handoff is ready. Start every wait as a background task from
+the start: a long foreground command is moved to the background after a few minutes anyway.
+Never use a foreground `sleep`.
 
 ## Packaging
 
