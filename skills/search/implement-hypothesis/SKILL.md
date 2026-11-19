@@ -38,7 +38,7 @@ set; export it as the absolute path of the vibesys-cli to use`.
 3. Commit in your worktree as `vibesys:commit` says: often, with `wip` checkpoints as you go, and the
    candidate as a full commit with `Checks: pass`. A cheap check on a commit that needs no number:
    `vibesys-cli submit check <sha> --wait --plan <n>`. For the number, follow your brief: if it
-   grants a budget, `vibesys-cli submit measure <sha> --samples 5 --plan <n>` and wait for it
+   grants a budget, `vibesys-cli submit measure <sha> --plan <n>` and wait for it
    (`vibesys:measure`; a measure without `--plan <n>` is refused), otherwise return the SHA as
    `ready for measurement`. Then
    `vibesys-cli compare <sha>`, and add `--against <sha>` when you built on a candidate, to see the
@@ -74,7 +74,7 @@ agents' jobs alone ([reading the queue](../measure/references/jobs.md#reading-th
 Every turn ends the same way, in this order, and no turn ends any other way:
 
 1. **Measure.** If your brief grants a budget and you have a candidate commit,
-   `vibesys-cli submit measure <sha> --samples 5 --plan <n>`, wait for it, and run
+   `vibesys-cli submit measure <sha> --plan <n>`, wait for it, and run
    `vibesys-cli compare <sha>` (`vibesys:measure`). A commit you did not measure is
    `ready for measurement`, and your handoff says so. Prose about how fast it should be is not a
    measurement.

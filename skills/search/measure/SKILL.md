@@ -31,7 +31,7 @@ Commit first: a job runs a commit, never a working copy, so what is not committe
 | You need | Run |
 | --- | --- |
 | The correctness check on a commit | `vibesys-cli submit check <sha> [--gpus N]` |
-| The official number: check, then benchmark samples | `vibesys-cli submit measure <sha> --samples 5 --plan <n>` |
+| The official number: check, then benchmark samples | `vibesys-cli submit measure <sha> --plan <n>` |
 | Any other work that drives load (a sanity or tuning run, a profile) | `vibesys-cli submit command <sha> --image harness\|candidate [--gpus N] -- <argv...>` |
 
 Each prints a job id and returns at once. A command names the image it runs in, with no default:
@@ -103,8 +103,14 @@ A failed check or build saves nothing; put the failing output in the hand-back, 
   `--json` has as `comparison.verdict.kind` (`VERDICT_KIND_BETTER`, `VERDICT_KIND_WORSE`,
   `VERDICT_KIND_WITHIN_NOISE`, `VERDICT_KIND_INCONCLUSIVE` or `VERDICT_KIND_TRADEOFF`). Only `better` is a gain. `worse` and `within_noise` are
   not. On `inconclusive`, add samples within your brief's budget, unless the line says `not comparable`: the two commits were measured under different task versions or metrics, which more samples cannot fix, so report it. Never compute a verdict yourself.
-- Samples add up: `submit measure <sha> --samples 8 --plan <n>` runs only the missing ones. Identical readings
-  on both sides stay inconclusive however many you add.
+- A measure without `--samples` takes the task's count: `samples` in its `objectives.toml`, else 5.
+  Leave it to the task; a task whose sample is expensive declares 1. Samples add up:
+  `submit measure <sha> --samples <count> --plan <n>` with more than the commit holds runs only the
+  missing ones. Identical readings on both sides stay inconclusive however many you add.
+- The verdict records what it rested on: `relative_noise` (the task's declared noise floor),
+  `min_gain` (the smallest gain the task counts as better) and `decided_by`. A `within_noise`
+  decided by `VERDICT_BOUND_MIN_GAIN` is a gain the noise test passed that is below the task's
+  `min_gain`; it is not a gain, so report it as within the task's bar, not as noise.
 - `vibesys-cli result --json` has the number to report for the result branch, in
   `current.result.measure.value`: the head's latest checked measurement, the one a promotion rests
   on included. It exits 1 when there is none (`none.reason` says why); for `NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED`,

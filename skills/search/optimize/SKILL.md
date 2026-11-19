@@ -70,8 +70,8 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    harness file, for you and for every subagent that inherits your environment. Every worktree of the repository shares the task's one store, so each agent sees
    the others' jobs.
 5. If `vibesys-cli show <base>` lists no measure result, measure the base with
-   `vibesys-cli submit measure <base> --samples 5 --no-plan`, as a tracked background `wait`
-   (`vibesys:measure`). The base tests no plan, which `--no-plan` says. No comparison means
+   `vibesys-cli submit measure <base> --no-plan`, as a tracked background `wait`
+   (`vibesys:measure`). Leave out `--samples`: the task's `objectives.toml` sets the count. The base tests no plan, which `--no-plan` says. No comparison means
    anything until it lands. Plan while it runs.
 6. Early, from first principles, declare the speed-of-light bound of each objective the task scores:
    `vibesys-cli bound declare --objective <name> --value <v> --unit <u> --note "<how derived>"`.
@@ -99,7 +99,7 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    text as a plan comment. Branch new ideas from the current result branch head.
 4. Measure every returned candidate commit, then dispatch a judge. A candidate is a full commit with
    `Checks: pass` (`vibesys:commit`); `wip` commits below it are not measured. Link every measure
-   to the plan it tests: `vibesys-cli submit measure <sha> --samples 5 --plan <n>`. That link is how
+   to the plan it tests: `vibesys-cli submit measure <sha> --plan <n>`, at the task's sample count. That link is how
    each point on the run's chart is tied to its idea; `vibesysd` refuses a measure from a run that
    names neither `--plan <n>` nor `--no-plan`. Say `--no-plan` only for the baseline and for
    re-measuring the head, which test no idea. Combine parked or won plans with

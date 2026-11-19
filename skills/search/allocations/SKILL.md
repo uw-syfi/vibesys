@@ -31,7 +31,7 @@ path of the vibesys-cli to use`. Pass the context flags your brief names (`--run
 
 ```
 vibesys-cli alloc request <placement> --for 6h        # returns at once, usually PENDING
-vibesys-cli submit measure <sha> --samples 5 --plan <n> --alloc any
+vibesys-cli submit measure <sha> --plan <n> --alloc any
 ```
 
 `--alloc any` is the default choice: the job goes to a running allocation of your run if it fits,

@@ -1474,7 +1474,12 @@ type TaskObjectives struct {
 	// protocol 2 benchmark scores unless the manifest names another.
 	Objective []*TaskObjective `protobuf:"bytes,1,rep,name=objective,proto3" json:"objective,omitempty"`
 	// `[pareto]`: the task is judged on every objective together.
-	Pareto        *TaskPareto `protobuf:"bytes,2,opt,name=pareto,proto3" json:"pareto,omitempty"`
+	Pareto *TaskPareto `protobuf:"bytes,2,opt,name=pareto,proto3" json:"pareto,omitempty"`
+	// How many benchmark samples a measurement takes when the submission does not say (`submit
+	// measure` without --samples). Absent takes the CLI's built-in count, 5. A task whose one sample
+	// is expensive may declare 1, with a relative_noise on what it scores: a comparison under no
+	// declared floor needs three samples a side.
+	Samples       *uint32 `protobuf:"varint,3,opt,name=samples,proto3,oneof" json:"samples,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1523,6 +1528,13 @@ func (x *TaskObjectives) GetPareto() *TaskPareto {
 	return nil
 }
 
+func (x *TaskObjectives) GetSamples() uint32 {
+	if x != nil && x.Samples != nil {
+		return *x.Samples
+	}
+	return 0
+}
+
 // TaskObjective is one `[[objective]]`: a measured quantity and the way it improves.
 type TaskObjective struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1531,13 +1543,20 @@ type TaskObjective struct {
 	Name      string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Direction TaskObjectiveDirection `protobuf:"varint,2,opt,name=direction,proto3,enum=vibesys.cli.v1.TaskObjectiveDirection" json:"direction,omitempty"`
 	// The relative change below which two measurements of this objective are one, for this objective
-	// alone, instead of the [pareto] floor. Zero declares no floor. Absent takes the [pareto] floor.
+	// alone, instead of the [pareto] floor. Zero declares no floor. Absent takes the [pareto] floor in
+	// a multi-objective task and declares none in any other. A single-metric task may declare it on
+	// the objective it scores only.
 	RelativeNoise *float64 `protobuf:"fixed64,3,opt,name=relative_noise,json=relativeNoise,proto3,oneof" json:"relative_noise,omitempty"`
 	// What the quantity is counted in, such as "tok/s" or "ms": a label for people, which nothing
 	// converts. Every measurement of the objective records it, so a bound declared for the objective
 	// can be checked against the unit of the numbers it bounds. Absent declares none, and the
 	// measurements then have an unknown unit. One line, without whitespace at its edges.
-	Unit          string `protobuf:"bytes,4,opt,name=unit,proto3" json:"unit,omitempty"`
+	Unit string `protobuf:"bytes,4,opt,name=unit,proto3" json:"unit,omitempty"`
+	// The smallest relative gain on this objective that counts as better, such as 0.02 for 2%: a
+	// comparison is better on it only when the gain passes the noise test and exceeds this too. It
+	// does not change what counts as worse. Absent or zero declares none. At least 0 and less than
+	// 1. A single-metric task may declare it on the objective it scores only.
+	MinGain       *float64 `protobuf:"fixed64,5,opt,name=min_gain,json=minGain,proto3,oneof" json:"min_gain,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1598,6 +1617,13 @@ func (x *TaskObjective) GetUnit() string {
 		return x.Unit
 	}
 	return ""
+}
+
+func (x *TaskObjective) GetMinGain() float64 {
+	if x != nil && x.MinGain != nil {
+		return *x.MinGain
+	}
+	return 0
 }
 
 // TaskPareto is `[pareto]`.
@@ -1797,20 +1823,26 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\x05modal\x18\x03 \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\x05modal\"t\n" +
 	"\fTaskAgentV02\x12#\n" +
 	"\x06domain\x18\x01 \x01(\tB\v\xbaH\x04r\x02\x10\x01\xd0\xf3\x18\x02R\x06domain\x12?\n" +
-	"\tinterface\x18\x02 \x01(\tB!\xbaH\x1ar\x182\x16^(inprocess|service)?$\xd0\xf3\x18\x02R\tinterface\"\xab\x05\n" +
+	"\tinterface\x18\x02 \x01(\tB!\xbaH\x1ar\x182\x16^(inprocess|service)?$\xd0\xf3\x18\x02R\tinterface\"\xc0\x03\n" +
 	"\x0eTaskObjectives\x12;\n" +
 	"\tobjective\x18\x01 \x03(\v2\x1d.vibesys.cli.v1.TaskObjectiveR\tobjective\x122\n" +
-	"\x06pareto\x18\x02 \x01(\v2\x1a.vibesys.cli.v1.TaskParetoR\x06pareto:\xa7\x04\xbaH\xa3\x04\x1a\xfe\x01\n" +
-	"\x17objectives.names_unique\x1a\xe2\x01this.objective.filter(o, this.objective.filter(p, p.name == o.name).size() > 1).size() == 0 ? '' : 'objective \"' + this.objective.filter(o, this.objective.filter(p, p.name == o.name).size() > 1)[0].name + '\" is declared twice'\x1a\x9f\x02\n" +
-	"\x1dobjectives.noise_needs_pareto\x1a\xfd\x01!this.objective.exists(o, has(o.relative_noise)) || (has(this.pareto) && this.objective.size() > 1) ? '' : 'objective \"' + this.objective.filter(o, has(o.relative_noise))[0].name + '\": relative_noise needs a [pareto] section and more than one objective'\"\x91\x04\n" +
+	"\x06pareto\x18\x02 \x01(\v2\x1a.vibesys.cli.v1.TaskParetoR\x06pareto\x12)\n" +
+	"\asamples\x18\x03 \x01(\rB\n" +
+	"\xbaH\a*\x05\x18\xe8\a(\x01H\x00R\asamples\x88\x01\x01:\x85\x02\xbaH\x81\x02\x1a\xfe\x01\n" +
+	"\x17objectives.names_unique\x1a\xe2\x01this.objective.filter(o, this.objective.filter(p, p.name == o.name).size() > 1).size() == 0 ? '' : 'objective \"' + this.objective.filter(o, this.objective.filter(p, p.name == o.name).size() > 1)[0].name + '\" is declared twice'B\n" +
+	"\n" +
+	"\b_samples\"\xae\x06\n" +
 	"\rTaskObjective\x12\x1b\n" +
 	"\x04name\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04name\x12P\n" +
 	"\tdirection\x18\x02 \x01(\x0e2&.vibesys.cli.v1.TaskObjectiveDirectionB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tdirection\x12*\n" +
 	"\x0erelative_noise\x18\x03 \x01(\x01H\x00R\rrelativeNoise\x88\x01\x01\x121\n" +
-	"\x04unit\x18\x04 \x01(\tB\x1d\xbaH\x1ar\x18(@2\x14^([^\\s](.*[^\\s])?)?$R\x04unit:\x9e\x02\xbaH\x9a\x02\x1a\x97\x02\n" +
-	"\x1eobjective.relative_noise_range\x1a\xf4\x01!has(this.relative_noise) || (!this.relative_noise.isNan() && this.relative_noise >= 0.0 && this.relative_noise < 1.0) ? '' : 'objective \"' + this.name + '\": relative_noise must be at least 0 and less than 1, got ' + string(this.relative_noise)B\x11\n" +
-	"\x0f_relative_noise\"N\n" +
+	"\x04unit\x18\x04 \x01(\tB\x1d\xbaH\x1ar\x18(@2\x14^([^\\s](.*[^\\s])?)?$R\x04unit\x12\x1e\n" +
+	"\bmin_gain\x18\x05 \x01(\x01H\x01R\aminGain\x88\x01\x01:\x8e\x04\xbaH\x8a\x04\x1a\x97\x02\n" +
+	"\x1eobjective.relative_noise_range\x1a\xf4\x01!has(this.relative_noise) || (!this.relative_noise.isNan() && this.relative_noise >= 0.0 && this.relative_noise < 1.0) ? '' : 'objective \"' + this.name + '\": relative_noise must be at least 0 and less than 1, got ' + string(this.relative_noise)\x1a\xed\x01\n" +
+	"\x18objective.min_gain_range\x1a\xd0\x01!has(this.min_gain) || (!this.min_gain.isNan() && this.min_gain >= 0.0 && this.min_gain < 1.0) ? '' : 'objective \"' + this.name + '\": min_gain must be at least 0 and less than 1, got ' + string(this.min_gain)B\x11\n" +
+	"\x0f_relative_noiseB\v\n" +
+	"\t_min_gain\"N\n" +
 	"\n" +
 	"TaskPareto\x12@\n" +
 	"\x0erelative_noise\x18\x01 \x01(\x01B\x19\xbaH\x16\x12\x14@\x01\x11\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00R\rrelativeNoise*\xdc\x01\n" +
@@ -1936,6 +1968,7 @@ func file_vibesys_cli_v1_task_proto_init() {
 	}
 	file_vibesys_cli_v1_environment_proto_init()
 	file_vibesys_cli_v1_task_proto_msgTypes[12].OneofWrappers = []any{}
+	file_vibesys_cli_v1_task_proto_msgTypes[16].OneofWrappers = []any{}
 	file_vibesys_cli_v1_task_proto_msgTypes[17].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

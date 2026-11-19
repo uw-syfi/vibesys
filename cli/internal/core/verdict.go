@@ -30,8 +30,22 @@ const (
 	ReasonTaskVersionMismatch InconclusiveReason = "task_version_mismatch"
 )
 
+// VerdictBound is the bar that decided a conclusive verdict.
+type VerdictBound string
+
+// The bounds. The zero value is for an inconclusive verdict.
+const (
+	BoundNone VerdictBound = ""
+	// BoundNoise is the noise test: the gain against a multiple of the noise.
+	BoundNoise VerdictBound = "noise"
+	// BoundMinGain is the objective's declared minimum gain. A Better verdict names it when it was
+	// the higher bar, and a WithinNoise one when the gain passed the noise test but not it.
+	BoundMinGain VerdictBound = "min_gain"
+)
+
 // Verdict is a pure function of two sample sets, a metric's direction and the task's declared
-// noise floor: the same samples always give the same verdict. Compare in this package decides it.
+// noise floor and minimum gain: the same samples always give the same verdict. Compare in this
+// package decides it.
 type Verdict struct {
 	Kind             VerdictKind
 	Reason           InconclusiveReason
@@ -44,6 +58,12 @@ type Verdict struct {
 	Ratio float64
 	// Noise is one standard error of Ratio. The verdict weighs the gain against a multiple of it.
 	Noise float64
+	// RelativeNoise is the noise floor the task declared and the comparison used, zero for none.
+	RelativeNoise float64
+	// MinGain is the smallest relative gain the task declared to count as better, zero for none.
+	MinGain float64
+	// DecidedBy is the bar that decided a conclusive verdict, BoundNone for an inconclusive one.
+	DecidedBy VerdictBound
 }
 
 // Comparison is a verdict with what it compared.

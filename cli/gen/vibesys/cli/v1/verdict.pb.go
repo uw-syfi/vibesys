@@ -143,9 +143,65 @@ func (InconclusiveReason) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_verdict_proto_rawDescGZIP(), []int{1}
 }
 
+// VerdictBound is the bar that decided a conclusive verdict.
+type VerdictBound int32
+
+const (
+	// The verdict is inconclusive, or was saved before verdicts named their bound.
+	VerdictBound_VERDICT_BOUND_UNSPECIFIED VerdictBound = 0
+	// The noise test: the gain against a multiple of the noise.
+	VerdictBound_VERDICT_BOUND_NOISE VerdictBound = 1
+	// The objective's declared min_gain. A better verdict names it when min_gain was the higher bar,
+	// and a within-noise one when the gain passed the noise test but not min_gain.
+	VerdictBound_VERDICT_BOUND_MIN_GAIN VerdictBound = 2
+)
+
+// Enum value maps for VerdictBound.
+var (
+	VerdictBound_name = map[int32]string{
+		0: "VERDICT_BOUND_UNSPECIFIED",
+		1: "VERDICT_BOUND_NOISE",
+		2: "VERDICT_BOUND_MIN_GAIN",
+	}
+	VerdictBound_value = map[string]int32{
+		"VERDICT_BOUND_UNSPECIFIED": 0,
+		"VERDICT_BOUND_NOISE":       1,
+		"VERDICT_BOUND_MIN_GAIN":    2,
+	}
+)
+
+func (x VerdictBound) Enum() *VerdictBound {
+	p := new(VerdictBound)
+	*p = x
+	return p
+}
+
+func (x VerdictBound) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (VerdictBound) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_cli_v1_verdict_proto_enumTypes[2].Descriptor()
+}
+
+func (VerdictBound) Type() protoreflect.EnumType {
+	return &file_vibesys_cli_v1_verdict_proto_enumTypes[2]
+}
+
+func (x VerdictBound) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use VerdictBound.Descriptor instead.
+func (VerdictBound) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_verdict_proto_rawDescGZIP(), []int{2}
+}
+
 // Verdict is a pure function of the two sample sets, the metric's direction and the task's declared
-// noise floor: the same samples always give the same verdict. Without a declared floor it is Welch's
-// t test at 95% and needs at least 3 samples a side; with one, a difference must exceed 2 noises.
+// noise floor and minimum gain: the same samples always give the same verdict. Without a declared
+// floor it is Welch's t test at 95% and needs at least 3 samples a side; with one, a difference must
+// exceed 2 noises, at any sample count. A declared min_gain also holds a better verdict to a gain
+// above it.
 type Verdict struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Kind  VerdictKind            `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.cli.v1.VerdictKind" json:"kind,omitempty"`
@@ -158,7 +214,13 @@ type Verdict struct {
 	// candidate_mean / base_mean, raw: not oriented by the metric's direction, and never rounded.
 	Ratio float64 `protobuf:"fixed64,7,opt,name=ratio,proto3" json:"ratio,omitempty"`
 	// One standard error of the ratio. The verdict compares the gain against a multiple of it.
-	Noise         float64 `protobuf:"fixed64,8,opt,name=noise,proto3" json:"noise,omitempty"`
+	Noise float64 `protobuf:"fixed64,8,opt,name=noise,proto3" json:"noise,omitempty"`
+	// The noise floor the task declared and the comparison used (relative_noise), zero for none.
+	RelativeNoise float64 `protobuf:"fixed64,9,opt,name=relative_noise,json=relativeNoise,proto3" json:"relative_noise,omitempty"`
+	// The smallest relative gain the task declared to count as better (min_gain), zero for none.
+	MinGain float64 `protobuf:"fixed64,10,opt,name=min_gain,json=minGain,proto3" json:"min_gain,omitempty"`
+	// The bar that decided a conclusive verdict; unspecified for an inconclusive one.
+	DecidedBy     VerdictBound `protobuf:"varint,11,opt,name=decided_by,json=decidedBy,proto3,enum=vibesys.cli.v1.VerdictBound" json:"decided_by,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -247,6 +309,27 @@ func (x *Verdict) GetNoise() float64 {
 		return x.Noise
 	}
 	return 0
+}
+
+func (x *Verdict) GetRelativeNoise() float64 {
+	if x != nil {
+		return x.RelativeNoise
+	}
+	return 0
+}
+
+func (x *Verdict) GetMinGain() float64 {
+	if x != nil {
+		return x.MinGain
+	}
+	return 0
+}
+
+func (x *Verdict) GetDecidedBy() VerdictBound {
+	if x != nil {
+		return x.DecidedBy
+	}
+	return VerdictBound_VERDICT_BOUND_UNSPECIFIED
 }
 
 // ObjectiveVerdict is the verdict on one objective of a multi-objective comparison: the comparison of
@@ -394,7 +477,7 @@ var File_vibesys_cli_v1_verdict_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_verdict_proto_rawDesc = "" +
 	"\n" +
-	"\x1cvibesys/cli/v1/verdict.proto\x12\x0evibesys.cli.v1\x1a vibesys/cli/v1/environment.proto\x1a\x1bvibesys/cli/v1/result.proto\"\xb6\x02\n" +
+	"\x1cvibesys/cli/v1/verdict.proto\x12\x0evibesys.cli.v1\x1a vibesys/cli/v1/environment.proto\x1a\x1bvibesys/cli/v1/result.proto\"\xb5\x03\n" +
 	"\aVerdict\x12/\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1b.vibesys.cli.v1.VerdictKindR\x04kind\x12:\n" +
 	"\x06reason\x18\x02 \x01(\x0e2\".vibesys.cli.v1.InconclusiveReasonR\x06reason\x12+\n" +
@@ -403,7 +486,12 @@ const file_vibesys_cli_v1_verdict_proto_rawDesc = "" +
 	"\x0ecandidate_mean\x18\x05 \x01(\x01R\rcandidateMean\x12\x1b\n" +
 	"\tbase_mean\x18\x06 \x01(\x01R\bbaseMean\x12\x14\n" +
 	"\x05ratio\x18\a \x01(\x01R\x05ratio\x12\x14\n" +
-	"\x05noise\x18\b \x01(\x01R\x05noise\"u\n" +
+	"\x05noise\x18\b \x01(\x01R\x05noise\x12%\n" +
+	"\x0erelative_noise\x18\t \x01(\x01R\rrelativeNoise\x12\x19\n" +
+	"\bmin_gain\x18\n" +
+	" \x01(\x01R\aminGain\x12;\n" +
+	"\n" +
+	"decided_by\x18\v \x01(\x0e2\x1c.vibesys.cli.v1.VerdictBoundR\tdecidedBy\"u\n" +
 	"\x10ObjectiveVerdict\x12.\n" +
 	"\x06metric\x18\x01 \x01(\v2\x16.vibesys.cli.v1.MetricR\x06metric\x121\n" +
 	"\averdict\x18\x02 \x01(\v2\x17.vibesys.cli.v1.VerdictR\averdict\"\xfd\x01\n" +
@@ -428,7 +516,11 @@ const file_vibesys_cli_v1_verdict_proto_rawDesc = "" +
 	"#INCONCLUSIVE_REASON_TOO_FEW_SAMPLES\x10\x01\x12(\n" +
 	"$INCONCLUSIVE_REASON_CONSTANT_SAMPLES\x10\x02\x12'\n" +
 	"#INCONCLUSIVE_REASON_METRIC_MISMATCH\x10\x03\x12-\n" +
-	")INCONCLUSIVE_REASON_TASK_VERSION_MISMATCH\x10\x04B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
+	")INCONCLUSIVE_REASON_TASK_VERSION_MISMATCH\x10\x04*b\n" +
+	"\fVerdictBound\x12\x1d\n" +
+	"\x19VERDICT_BOUND_UNSPECIFIED\x10\x00\x12\x17\n" +
+	"\x13VERDICT_BOUND_NOISE\x10\x01\x12\x1a\n" +
+	"\x16VERDICT_BOUND_MIN_GAIN\x10\x02B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
 
 var (
 	file_vibesys_cli_v1_verdict_proto_rawDescOnce sync.Once
@@ -442,30 +534,32 @@ func file_vibesys_cli_v1_verdict_proto_rawDescGZIP() []byte {
 	return file_vibesys_cli_v1_verdict_proto_rawDescData
 }
 
-var file_vibesys_cli_v1_verdict_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_vibesys_cli_v1_verdict_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
 var file_vibesys_cli_v1_verdict_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_vibesys_cli_v1_verdict_proto_goTypes = []any{
 	(VerdictKind)(0),               // 0: vibesys.cli.v1.VerdictKind
 	(InconclusiveReason)(0),        // 1: vibesys.cli.v1.InconclusiveReason
-	(*Verdict)(nil),                // 2: vibesys.cli.v1.Verdict
-	(*ObjectiveVerdict)(nil),       // 3: vibesys.cli.v1.ObjectiveVerdict
-	(*Comparison)(nil),             // 4: vibesys.cli.v1.Comparison
-	(*Metric)(nil),                 // 5: vibesys.cli.v1.Metric
-	(*EnvironmentFingerprint)(nil), // 6: vibesys.cli.v1.EnvironmentFingerprint
+	(VerdictBound)(0),              // 2: vibesys.cli.v1.VerdictBound
+	(*Verdict)(nil),                // 3: vibesys.cli.v1.Verdict
+	(*ObjectiveVerdict)(nil),       // 4: vibesys.cli.v1.ObjectiveVerdict
+	(*Comparison)(nil),             // 5: vibesys.cli.v1.Comparison
+	(*Metric)(nil),                 // 6: vibesys.cli.v1.Metric
+	(*EnvironmentFingerprint)(nil), // 7: vibesys.cli.v1.EnvironmentFingerprint
 }
 var file_vibesys_cli_v1_verdict_proto_depIdxs = []int32{
 	0, // 0: vibesys.cli.v1.Verdict.kind:type_name -> vibesys.cli.v1.VerdictKind
 	1, // 1: vibesys.cli.v1.Verdict.reason:type_name -> vibesys.cli.v1.InconclusiveReason
-	5, // 2: vibesys.cli.v1.ObjectiveVerdict.metric:type_name -> vibesys.cli.v1.Metric
-	2, // 3: vibesys.cli.v1.ObjectiveVerdict.verdict:type_name -> vibesys.cli.v1.Verdict
-	2, // 4: vibesys.cli.v1.Comparison.verdict:type_name -> vibesys.cli.v1.Verdict
-	6, // 5: vibesys.cli.v1.Comparison.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
-	3, // 6: vibesys.cli.v1.Comparison.objectives:type_name -> vibesys.cli.v1.ObjectiveVerdict
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	2, // 2: vibesys.cli.v1.Verdict.decided_by:type_name -> vibesys.cli.v1.VerdictBound
+	6, // 3: vibesys.cli.v1.ObjectiveVerdict.metric:type_name -> vibesys.cli.v1.Metric
+	3, // 4: vibesys.cli.v1.ObjectiveVerdict.verdict:type_name -> vibesys.cli.v1.Verdict
+	3, // 5: vibesys.cli.v1.Comparison.verdict:type_name -> vibesys.cli.v1.Verdict
+	7, // 6: vibesys.cli.v1.Comparison.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
+	4, // 7: vibesys.cli.v1.Comparison.objectives:type_name -> vibesys.cli.v1.ObjectiveVerdict
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_verdict_proto_init() }
@@ -480,7 +574,7 @@ func file_vibesys_cli_v1_verdict_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_verdict_proto_rawDesc), len(file_vibesys_cli_v1_verdict_proto_rawDesc)),
-			NumEnums:      2,
+			NumEnums:      3,
 			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,

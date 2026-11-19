@@ -10,7 +10,7 @@ task is the test.
 | File | Holds |
 | --- | --- |
 | `vibesys.input.toml` | The manifest: the commands and how the benchmark reports. Required. |
-| `objectives.toml` | The scored metric's direction, and optionally the noise floor. |
+| `objectives.toml` | The scored metric's direction, and optionally the sample count, the noise floor and the minimum gain. |
 | `OBJECTIVE.md` | The goal, scope, correctness bar and rules, for the agents. |
 | `Dockerfile` | Optional. When present every job runs in the image it builds, unless `--env host`. |
 | anything else | The checker, the benchmark, the reference, the inputs. |
@@ -83,13 +83,14 @@ metric = "requests_per_sec"       # the top-level field of that JSON file
 ## `objectives.toml`
 
 ```toml
+samples = 3                 # optional: samples a measure takes without --samples (default 5)
+
 [[objective]]
 name = "requests_per_sec"   # equals [benchmark.result] metric
 direction = "max"           # or "min"
 unit = "req/s"              # optional: what it is counted in
-
-[pareto]
 relative_noise = 0.02       # optional: the relative spread of one run
+min_gain = 0.01             # optional: the smallest relative gain that counts as better
 ```
 
 Declare a `unit` for every objective. Each measurement records it, so a bound an agent declares
@@ -105,10 +106,28 @@ a loss on another is `tradeoff`. `promote` refuses a `tradeoff`. Name the object
 `OBJECTIVE.md` with the trade the user accepts, if any.
 
 With `relative_noise`, `compare` needs a gain above two standard errors of the ratio, with the
-noise never taken below the floor. Without it, `compare` uses Welch's t test and answers
-`inconclusive` until each side has three samples that are not all equal. Declare the floor from
-the spread you measured (validation.md), not from hope: too low promotes noise, too high hides
-real gains. Objectives of one task differ in spread (a throughput and a tail latency rarely
+noise never taken below the floor, at any sample count, one a side included. Without it, `compare`
+uses Welch's t test and answers `inconclusive` until each side has three samples that are not all
+equal. Declare the floor from the spread you measured (validation.md), not from hope: too low
+promotes noise, too high hides real gains.
+
+When to declare each:
+
+- `relative_noise`: whenever you measured the spread (validation.md), and always with a sample
+  count below three. Set it to the same-code spread of one run, rounded up.
+- `samples` (1 to 1000): when the default of 5 does not fit the cost of one sample. A benchmark
+  that takes most of an hour or the whole machine declares `samples = 1` with a `relative_noise`;
+  a cheap but noisy one may declare more. Every measure submitted without `--samples` takes it,
+  so the skills never name a count.
+- `min_gain` (at least 0, below 1): when the user names the smallest gain worth promoting, such as
+  `0.02` for "only at +2% or more". `better` then needs the gain to pass the noise test and to
+  exceed `min_gain`; a gain that passes the noise test but not `min_gain` is `within_noise`, and
+  the verdict's `decided_by` says `VERDICT_BOUND_MIN_GAIN`. It never changes what is `worse`.
+
+In a task with one scored metric, only the objective it scores may carry `relative_noise` and
+`min_gain`. Every verdict records the `relative_noise` and `min_gain` it used, and each
+measurement records what the task declared, so a later reader sees what a verdict rested on.
+Changing any of them changes the task's version: measure the base again after it. Objectives of one task differ in spread (a throughput and a tail latency rarely
 agree), so in a multi-objective task an `[[objective]]` may carry its own `relative_noise`, which
 replaces the `[pareto]` one for that objective only:
 
@@ -123,8 +142,9 @@ relative_noise = 0.03       # the floor of every objective that declares none
 ```
 
 The value is at least 0 and below 1; `0` declares no floor for that objective, so Welch's t test
-judges it. It is refused in a task that is not multi-objective. Set each floor from that
-objective's own measured spread (validation.md).
+judges it. The `[pareto]` floor applies to a multi-objective task only; a task with one objective
+declares its floor on the `[[objective]]`. Set each floor from that objective's own measured
+spread (validation.md). Each objective of a multi-objective task may carry its own `min_gain` too.
 
 ## Services, clusters and remote hardware
 

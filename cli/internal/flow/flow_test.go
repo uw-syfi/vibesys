@@ -570,6 +570,27 @@ func TestAMultiObjectiveMeasureRecordsItsObjectivesAndNeedsEveryOne(t *testing.T
 	}
 }
 
+// A single-metric measure job whose task declares a floor or a minimum gain for its metric records
+// them with the result, whether the benchmark writes a JSON field or a record stream.
+func TestASingleMetricMeasureRecordsWhatItsTaskDeclares(t *testing.T) {
+	for _, protocol2 := range []bool{false, true} {
+		p := shape{kind: core.JobMeasure, protocol2: protocol2, samples: 1}.plan()
+		p.Objectives = core.Objectives{
+			Metrics:  []core.Metric{p.Metric},
+			Noise:    []core.ObjectiveNoise{{Name: p.Metric.Name, RelativeNoise: 0.003}},
+			MinGains: []core.ObjectiveMinGain{{Name: p.Metric.Name, MinGain: 0.02}},
+		}
+		v, err := flow.Drive(context.Background(), p, &world{p: p, at: -1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := p.Record("j1", commit, passedOf(t, v), time.Unix(1, 0))
+		if got := r.Outcome.(core.MeasureOutcome).Objectives; !got.Equal(p.Objectives) {
+			t.Errorf("protocol 2 %v: the result records objectives %+v, want %+v", protocol2, got, p.Objectives)
+		}
+	}
+}
+
 func TestAnInvalidPlanNeverStarts(t *testing.T) {
 	good := shape{kind: core.JobMeasure, build: true, samples: 2}
 	for name, mutate := range map[string]func(*flow.Plan){
@@ -605,6 +626,18 @@ func TestAnInvalidPlanNeverStarts(t *testing.T) {
 		"one objective": func(p *flow.Plan) {
 			p.Result = task.Result{Protocol2: true}
 			p.Objectives = core.Objectives{Metrics: []core.Metric{p.Metric}}
+		},
+		"one objective with a [pareto] floor": func(p *flow.Plan) {
+			p.Objectives = core.Objectives{Metrics: []core.Metric{p.Metric}, RelativeNoise: 0.1, Noise: []core.ObjectiveNoise{{Name: p.Metric.Name, RelativeNoise: 0.1}}}
+		},
+		"one objective that is not the scored one": func(p *flow.Plan) {
+			p.Objectives = core.Objectives{Metrics: []core.Metric{{Name: "p99", Direction: core.Minimize}}, MinGains: []core.ObjectiveMinGain{{Name: "p99", MinGain: 0.02}}}
+		},
+		"a minimum gain for an objective the task does not have": func(p *flow.Plan) {
+			p.Objectives = core.Objectives{Metrics: []core.Metric{p.Metric}, MinGains: []core.ObjectiveMinGain{{Name: "ttft", MinGain: 0.02}}}
+		},
+		"a minimum gain of 1": func(p *flow.Plan) {
+			p.Objectives = core.Objectives{Metrics: []core.Metric{p.Metric}, MinGains: []core.ObjectiveMinGain{{Name: p.Metric.Name, MinGain: 1}}}
 		},
 	} {
 		p := good.plan()

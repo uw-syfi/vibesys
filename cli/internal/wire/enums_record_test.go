@@ -30,6 +30,7 @@ func checkEnum[W ~int32, D ~string](t *testing.T, what string, values map[int32]
 func TestEveryRecordEnumValueIsTranslatedOrRefused(t *testing.T) {
 	checkEnum(t, "verdict kind", cliv1.VerdictKind_name, wire.ToVerdictKind, wire.VerdictKind)
 	checkEnum(t, "reason", cliv1.InconclusiveReason_name, wire.ToInconclusiveReason, wire.InconclusiveReason)
+	checkEnum(t, "bound", cliv1.VerdictBound_name, wire.ToVerdictBound, wire.VerdictBound)
 	checkEnum(t, "refusal kind", cliv1.PromoteRefusalKind_name, wire.ToPromoteRefusalKind, wire.PromoteRefusalKind)
 	checkEnum(t, "direction", cliv1.Direction_name, wire.ToDirection, wire.Direction)
 	checkEnum(t, "command", cliv1.Command_name, wire.ToCommand, wire.Command)

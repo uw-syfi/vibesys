@@ -354,6 +354,7 @@
                     "baseSamples": 5,
                     "candidateMean": 120.4,
                     "candidateSamples": 5,
+                    "decidedBy": "VERDICT_BOUND_NOISE",
                     "kind": "VERDICT_KIND_BETTER",
                     "noise": 0.007930081942578819,
                     "ratio": 1.199203187250996
@@ -381,6 +382,7 @@
                     "baseSamples": 5,
                     "candidateMean": 100.4,
                     "candidateSamples": 5,
+                    "decidedBy": "VERDICT_BOUND_NOISE",
                     "kind": "VERDICT_KIND_WORSE",
                     "noise": 0.005514322054551365,
                     "ratio": 0.8338870431893688
@@ -407,6 +409,7 @@
                     "baseSamples": 5,
                     "candidateMean": 80.4,
                     "candidateSamples": 5,
+                    "decidedBy": "VERDICT_BOUND_NOISE",
                     "kind": "VERDICT_KIND_WORSE",
                     "noise": 0.005092518958789325,
                     "ratio": 0.6677740863787376

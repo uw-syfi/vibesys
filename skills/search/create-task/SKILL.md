@@ -73,8 +73,10 @@ the CLI refuses an unknown key.
 Commit the task on a branch (`git switch -c vibesys-task/<task>`) and run the recipes in
 validation.md, all through `vibesys-cli` jobs:
 
-1. The base passes the check, and five samples measure with a spread you can live with. Each
-   objective's spread sets that objective's own noise floor.
+1. The base passes the check, and repeated samples of it measure with a spread you can live
+   with. Each objective's spread sets that objective's own noise floor; the cost of one sample
+   sets the task's sample count, and the gain the user needs sets any `min_gain`
+   (task-format.md, validation.md).
 2. Each mutant (a broken or cheating variant of the code, committed on a throwaway branch) fails
    the check. Delete the throwaway branches afterwards.
 3. A deliberate small slowdown is reported `worse` by `vibesys-cli compare`, so a real change

@@ -274,7 +274,7 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | Command | What it does |
 | --- | --- |
 | `submit check <commit> [flags]` | Queue the task's check. A pass already saved for the commit answers it without running. Also `--wait`, `--note`, `--no-cache`, `--plan`, `--env` and `--gpus N` (see "GPU pools"). |
-| `submit measure <commit> [--samples n] [--recheck] [--plan n \| --no-plan] [flags]` | Queue the task's benchmark for `n` samples (the task's default when omitted). Saved samples count: only the missing ones run. Flags as for `check`, except that a measure takes the whole node and refuses `--gpus`. `--plan n` says the measurement tests plan `n`, which the plan's view and a run's chart show beside the point; `--no-plan` says it tests none, as the baseline's does. A measure submitted from a run (a call that carries `--run`, or `VIBESYS_RUN`) must give one of them, since every point on a run's chart is a measure job and the plan is what the app shows beside it: without either the daemon refuses it as `INVALID_INPUT`, naming both flags. A person at a terminal, with no run, is not asked. The two are never given together, and `--plan 0` is not "none". Only a measure job takes `--no-plan`. An unknown plan is `NOT_FOUND`, naming `--plan`. |
+| `submit measure <commit> [--samples n] [--recheck] [--plan n \| --no-plan] [flags]` | Queue the task's benchmark for `n` samples (the task's default when omitted: `samples` in its `objectives.toml`, else 5). Saved samples count: only the missing ones run. Flags as for `check`, except that a measure takes the whole node and refuses `--gpus`. `--plan n` says the measurement tests plan `n`, which the plan's view and a run's chart show beside the point; `--no-plan` says it tests none, as the baseline's does. A measure submitted from a run (a call that carries `--run`, or `VIBESYS_RUN`) must give one of them, since every point on a run's chart is a measure job and the plan is what the app shows beside it: without either the daemon refuses it as `INVALID_INPUT`, naming both flags. A person at a terminal, with no run, is not asked. The two are never given together, and `--plan 0` is not "none". Only a measure job takes `--no-plan`. An unknown plan is `NOT_FOUND`, naming `--plan`. |
 | `submit command <commit> --image harness\|candidate [flags] -- <argv...>` | Queue a command and print its id. Returns at once; `--wait` blocks as `wait` does. `--image` is required, with no default: `harness` runs the command in the task's image, where its check and benchmark run (the host for a task with no Dockerfile), and on a task with `[candidate]` beside the candidate's server exactly as the check and the benchmark run (server started from `[candidate] serve`, readiness polled, `VIBESYS_SERVICE_URL` set, the same resource shares; the server's startup time is added to `--timeout`); `candidate` runs it in the image built from the commit's `[candidate] dockerfile`, with no server, and is refused for a task without `[candidate]` or with `--env host`. Also `--note`, `--no-cache`, `--plan`, `--env`, `--timeout`, `--service`, `--probe` and `--wrap`. A revision is resolved to a full commit id. `--service`, `--probe` and `--wrap` are split into words as a shell would split them, with single quotes, double quotes and backslashes, and nothing else of a shell. The daemon puts `--wrap` in front of the candidate's server for `--image harness` on a task with `[candidate]` (a profile: `--wrap '<profiler>' -- <load argv>`), and otherwise in front of `--service` when it is given and of the command when not; `--service` is refused beside the candidate's server. Never cached or scored; its artifacts are kept with it. `jobs` names the image of each command job, and the job's output starts by naming it for a docker job. (`submit profile` and the 0.2 `[profile]` it read are retired; a manifest with `[profile]` still loads.) |
 | `wait <job>... [--any] [--timeout d]` | Block until the jobs are final, or with `--any` until one is. The daemon decides how the wait ended and keeps the timeout. |
 | `cancel <job> [--reason text]` | Stop a job and print it once it is final. Cancelling a final job prints it unchanged. |
@@ -1329,6 +1329,33 @@ count, so nothing taken under another task version stands for the head (a commit
 that of the task its tree holds), and a failed check or measure saves no result. A head with no such
 measurement is `head_not_measured`, and `submit measure <head> --no-plan` gives it one.
 
+## Sample count, noise floor and minimum gain
+
+`objectives.toml` may say how many samples a measurement takes and, for the objective a task
+scores, its noise floor and the smallest gain that counts:
+
+```toml
+samples = 1                  # optional: submit measure without --samples takes 1 (default 5)
+
+[[objective]]
+name = "tok_per_s"
+direction = "max"
+relative_noise = 0.003       # optional: the measured same-code spread of one run
+min_gain = 0.02              # optional: better needs more than +2% as well as the noise test
+```
+
+`samples` is from 1 to 1000. With `relative_noise` the noise is never below the floor and a gain
+must exceed two noises, at any sample count, one a side included; without it `compare` needs three
+samples a side. `min_gain` is at least 0 and less than 1: `better` then also needs the gain to
+exceed it, and a gain that passes the noise test but not `min_gain` is `within_noise`. It never
+changes what is `worse`. Every verdict records the `relative_noise` and `min_gain` it used and
+`decided_by`, the bar that decided it: `VERDICT_BOUND_NOISE`, or `VERDICT_BOUND_MIN_GAIN` when the
+minimum gain was the higher bar of a `better`, or held back a gain the noise test passed. In a
+task that is not multi-objective only the scored objective may declare either key; one on another
+objective is refused naming it. Each measurement records what was declared, so the verdict rests on
+the values in force when the samples were taken; changing either changes the task version. The job
+records the sample count it ran with.
+
 ## Multi-objective tasks
 
 A task is multi-objective (Pareto) when its `objectives.toml` has a `[pareto]` section and declares
@@ -1353,8 +1380,8 @@ relative_noise = 0.03        # the floor of every objective that declares none
 ```
 
 The value is at least 0 and less than 1 (`0` declares no floor for that objective, so Welch's t
-test judges it); anything else, or a `relative_noise` in a task that is not multi-objective, is
-refused naming the objective. The floor is in `objectives.toml`, so it is part of the task version,
+test judges it); anything else is refused naming the objective. An objective may also declare a
+`min_gain`, which holds a `better` verdict on it to a gain above it (see the section above). The floor is in `objectives.toml`, so it is part of the task version,
 and each measurement records it with its objectives: measurements judged under different floors
 are not pooled. A task with no per-objective value is judged exactly as before.
 

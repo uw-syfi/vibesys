@@ -29,6 +29,8 @@ func TestCompareRefusesWhatHasNoComparison(t *testing.T) {
 		{"direction unknown", core.CompareInput{Direction: "max", Candidate: good, Base: good}, core.FailureInvalidInput, "direction"},
 		{"negative floor", core.CompareInput{Direction: core.Maximize, Candidate: good, Base: good, RelativeNoise: -0.1}, core.FailureInvalidInput, "relative noise"},
 		{"NaN floor", core.CompareInput{Direction: core.Maximize, Candidate: good, Base: good, RelativeNoise: math.NaN()}, core.FailureInvalidInput, "relative noise"},
+		{"negative minimum gain", core.CompareInput{Direction: core.Maximize, Candidate: good, Base: good, MinGain: -0.02}, core.FailureInvalidInput, "minimum gain"},
+		{"infinite minimum gain", core.CompareInput{Direction: core.Maximize, Candidate: good, Base: good, MinGain: math.Inf(1)}, core.FailureInvalidInput, "minimum gain"},
 		{"means overflow", core.CompareInput{Direction: core.Maximize, Candidate: []float64{math.MaxFloat64, math.MaxFloat64}, Base: good}, core.FailureInvalidInput, "overflow"},
 		{"ratio overflows", core.CompareInput{Direction: core.Maximize, Candidate: []float64{1e308}, Base: []float64{1e-308}}, core.FailureInvalidInput, "too extreme"},
 	}
@@ -107,6 +109,9 @@ func comparisons(t *testing.T, seed uint64, check func(in core.CompareInput, ver
 		if r.IntN(3) == 0 {
 			in.RelativeNoise = []float64{0.001, 0.01, 0.05, 0.2, 1}[r.IntN(5)]
 		}
+		if r.IntN(3) == 0 {
+			in.MinGain = []float64{0.001, 0.02, 0.1, 0.5, r.Float64()}[r.IntN(5)]
+		}
 		verdict, err := core.Compare(in)
 		check(in, verdict, err)
 	}
@@ -142,6 +147,18 @@ func checkVerdictShape(t testing.TB, in core.CompareInput, v core.Verdict) {
 	}
 	if (v.Kind == core.Inconclusive) != (v.Reason != core.ReasonNone) {
 		t.Fatalf("%+v: kind %s with reason %q", in, v.Kind, v.Reason)
+	}
+	if v.RelativeNoise != in.RelativeNoise || v.MinGain != in.MinGain {
+		t.Fatalf("%+v: the verdict records a floor of %v and a minimum gain of %v", in, v.RelativeNoise, v.MinGain)
+	}
+	if (v.Kind == core.Inconclusive) != (v.DecidedBy == core.BoundNone) {
+		t.Fatalf("%+v: kind %s decided by %q", in, v.Kind, v.DecidedBy)
+	}
+	if v.DecidedBy == core.BoundMinGain && (in.MinGain == 0 || (v.Kind != core.Better && v.Kind != core.WithinNoise)) {
+		t.Fatalf("%+v: %s decided by a minimum gain of %v", in, v.Kind, in.MinGain)
+	}
+	if v.Kind == core.Better && !(gainOf(in.Direction, v.Ratio) > in.MinGain) {
+		t.Fatalf("%+v: better with a gain of %v, not above the minimum gain", in, gainOf(in.Direction, v.Ratio))
 	}
 	switch v.Kind {
 	case core.Better:
@@ -207,8 +224,9 @@ func TestCompareDirectionsMirrorEachOther(t *testing.T) {
 		core.Better: core.Worse, core.Worse: core.Better,
 		core.WithinNoise: core.WithinNoise, core.Inconclusive: core.Inconclusive,
 	}
+	// A minimum gain holds back a gain only, so only a comparison without one mirrors.
 	comparisons(t, 4, func(in core.CompareInput, verdict core.Verdict, err error) {
-		if err != nil {
+		if err != nil || in.MinGain != 0 {
 			return
 		}
 		flipped := in

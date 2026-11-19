@@ -28,8 +28,8 @@ const (
 	dockerfile    = "Dockerfile"
 )
 
-// Defaults for what a task leaves out. The task format has no sample count, so the count is this
-// built-in one until the format gains a key for it.
+// Defaults for what a task leaves out. DefaultSamples is the sample count of a task whose
+// objectives.toml declares no samples.
 const (
 	DefaultSamples        uint32 = 5
 	DefaultCommandTimeout        = 30 * time.Minute
@@ -122,8 +122,9 @@ type Task struct {
 	Others []core.Metric
 	// Objectives is set for a multi-objective (Pareto) task: one whose objectives.toml has a
 	// [pareto] section and more than one objective. Its measurements are judged on every objective,
-	// in the order declared, under the [pareto] relative_noise. It is the zero value for any other
-	// task, which is judged on Metric alone.
+	// in the order declared, under the [pareto] relative_noise. For any other task, which is judged
+	// on Metric alone, it is Metric with the relative_noise and min_gain its objective declares, and
+	// the zero value when it declares neither.
 	Objectives core.Objectives
 
 	// Schema is the task schema the manifest declares.
@@ -614,17 +615,49 @@ func score(t *Task, bench *benchSection, metric string, o *cliv1.TaskObjectives)
 	if err := resultOf(t, bench, metric, axes); err != nil {
 		return err
 	}
-	if o.GetPareto() != nil && len(axes) > 1 {
-		if !t.Result.Protocol2 {
-			return invalid("%s: a [pareto] task with %d objectives needs result_protocol = 2 in [benchmark], so every sample reports every objective; [benchmark.result] reads one field", ObjectiveName, len(axes))
+	if o.Samples != nil {
+		t.Samples = o.GetSamples()
+	}
+	if o.GetPareto() == nil || len(axes) <= 1 {
+		return declaredForMetric(t, axes)
+	}
+	if !t.Result.Protocol2 {
+		return invalid("%s: a [pareto] task with %d objectives needs result_protocol = 2 in [benchmark], so every sample reports every objective; [benchmark.result] reads one field", ObjectiveName, len(axes))
+	}
+	t.Objectives.RelativeNoise = o.GetPareto().GetRelativeNoise()
+	for _, a := range axes {
+		t.Objectives.Metrics = append(t.Objectives.Metrics, core.Metric{Name: a.name, Direction: a.direction, Unit: a.unit})
+		if a.noise != nil {
+			t.Objectives.Noise = append(t.Objectives.Noise, core.ObjectiveNoise{Name: a.name, RelativeNoise: *a.noise})
 		}
-		t.Objectives.RelativeNoise = o.GetPareto().GetRelativeNoise()
-		for _, a := range axes {
-			t.Objectives.Metrics = append(t.Objectives.Metrics, core.Metric{Name: a.name, Direction: a.direction, Unit: a.unit})
-			if a.noise != nil {
-				t.Objectives.Noise = append(t.Objectives.Noise, core.ObjectiveNoise{Name: a.name, RelativeNoise: *a.noise})
-			}
+		if a.minGain != 0 {
+			t.Objectives.MinGains = append(t.Objectives.MinGains, core.ObjectiveMinGain{Name: a.name, MinGain: a.minGain})
 		}
+	}
+	return nil
+}
+
+// declaredForMetric sets the Objectives of a single-metric task from what its scored objective
+// declares: its relative_noise and min_gain, recorded with every measurement so a comparison rests
+// on what was declared when the samples were taken. A task that declares neither keeps the zero
+// Objectives. Only the scored objective is judged, so a declaration on another one would be
+// silently unused, and is refused.
+func declaredForMetric(t *Task, axes []axis) error {
+	for _, a := range axes {
+		if a.name != t.Metric.Name && (a.noise != nil || a.minGain != 0) {
+			return invalid("%s: objective %q: relative_noise and min_gain apply only to the objective a single-metric task scores, %q; a task judged on several objectives needs a [pareto] section", ObjectiveName, a.name, t.Metric.Name)
+		}
+	}
+	a, ok := find(axes, t.Metric.Name)
+	if !ok || ((a.noise == nil || *a.noise == 0) && a.minGain == 0) {
+		return nil
+	}
+	t.Objectives.Metrics = []core.Metric{t.Metric}
+	if a.noise != nil && *a.noise != 0 {
+		t.Objectives.Noise = []core.ObjectiveNoise{{Name: a.name, RelativeNoise: *a.noise}}
+	}
+	if a.minGain != 0 {
+		t.Objectives.MinGains = []core.ObjectiveMinGain{{Name: a.name, MinGain: a.minGain}}
 	}
 	return nil
 }

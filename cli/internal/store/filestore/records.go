@@ -455,9 +455,14 @@ func verdictFromMessage(field string, v *cliv1.Verdict) (core.Verdict, error) {
 	if err != nil {
 		return core.Verdict{}, err
 	}
+	bound, err := wire.ToVerdictBound(field+".decided_by", v.GetDecidedBy())
+	if err != nil {
+		return core.Verdict{}, err
+	}
 	return core.Verdict{
 		Kind: kind, Reason: reason, CandidateSamples: v.GetCandidateSamples(), BaseSamples: v.GetBaseSamples(),
 		CandidateMean: v.GetCandidateMean(), BaseMean: v.GetBaseMean(), Ratio: v.GetRatio(), Noise: v.GetNoise(),
+		RelativeNoise: v.GetRelativeNoise(), MinGain: v.GetMinGain(), DecidedBy: bound,
 	}, nil
 }
 
@@ -469,6 +474,9 @@ func objectivesFromMessage(field string, o *cliv1.Objectives) (core.Objectives, 
 	out := core.Objectives{RelativeNoise: o.GetRelativeNoise()}
 	for _, n := range o.GetNoise() {
 		out.Noise = append(out.Noise, core.ObjectiveNoise{Name: n.GetName(), RelativeNoise: n.GetRelativeNoise()})
+	}
+	for _, g := range o.GetMinGain() {
+		out.MinGains = append(out.MinGains, core.ObjectiveMinGain{Name: g.GetName(), MinGain: g.GetMinGain()})
 	}
 	for i, m := range o.GetMetrics() {
 		d, err := wire.ToDirection(fmt.Sprintf("%s.metrics[%d].direction", field, i), m.GetDirection())
