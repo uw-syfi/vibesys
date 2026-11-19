@@ -63,9 +63,17 @@ First step: <the smallest change to the claim that you can finish, commit and me
 Parent: <base commit, or the candidate commit you build on and its measured value>
 Measure: <whether you submit the measure yourself, or return `ready for measurement`>
 Safeguards: <on backend trainium, the neuron-safeguards checklist, copied whole; else omit>
+Evidence: <simulator-led only: the plan kind's acceptance ladder, rung by rung; you submit no
+  measure and no full check; else omit>
+Device jobs: <simulator-led only: each device job you may submit, with the note it carries,
+  "Question: <...>. Predicts: <...>."; any other device job is cancelled; else omit>
 Hand back: claim, commit SHA, job ids and the compare output, what you learned, the next step
   you propose.
 ```
+
+On a simulator-led run ([simulator-led.md](simulator-led.md)), the ladders and the device-job
+rule are in [acceptance-ladder.md](acceptance-ladder.md). A simulator plan's worktree is a
+worktree of the simulator's checkout, not of the task's repository.
 
 ## Judge
 
