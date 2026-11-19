@@ -28,7 +28,9 @@ refused with the list of what is allowed: choose from that list, or leave the fi
   from the worker's, or with one harness, a different `model`. With no choice, an empty spawn is
   right.
 - The brief you were given may carry a steering note from the operator about harnesses, models
-  or cost. It outranks this guidance.
+  or cost. It outranks this guidance. The operator may also steer you mid-run (`vibesys-client run
+  steer`), which reaches you as a message; in simulator-led mode, the messages it acts on and how
+  it records them are in [simulator-led.md](../simulator-led.md#steering).
 
 `list_agents` shows each agent of the run with its role, status and plan. `send_message` with
 `agent_id` and `text` steers a working agent, or starts the next turn of an idle one; use it to

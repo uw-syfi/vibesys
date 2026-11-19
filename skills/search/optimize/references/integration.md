@@ -43,7 +43,9 @@ Integrate the accepted plans when either holds, whichever comes first:
 
 Also integrate whatever is accepted before the final report. A single accepted plan whose own
 prediction clears the bar may be measured on its own instead, as any candidate is, when no other
-plan is waiting to join it.
+plan is waiting to join it. In simulator-led mode ([simulator-led.md](simulator-led.md)), it
+still gets an integration plan, with one part: the integration is the only step that runs a full
+check and a measure.
 
 ## The composed prediction
 

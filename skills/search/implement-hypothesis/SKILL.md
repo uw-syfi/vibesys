@@ -45,6 +45,11 @@ set; export it as the absolute path of the vibesys-cli to use`.
    gain over your parent.
 4. With the verdict in hand, build the next step on it, or stop.
 
+When your brief has `Evidence:` and `Device jobs:` lines (a simulator-led run), climb that ladder
+in order instead of measuring: stop at the first rung that fails and hand back its evidence. Submit
+only the device jobs the brief lists, each with its `--note "Question: <...>. Predicts: <...>."`.
+The lead cancels any other device job, and its result counts for nothing.
+
 GPUs: stay inside the task's GPU budget. When your change touches how the server launches,
 places or shards work, or claims a throughput gain, check per-device use under load and report how
 many budgeted devices were busy ([GPUs](../measure/references/gpus.md)). Your own check and

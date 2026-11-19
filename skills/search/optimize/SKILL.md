@@ -30,7 +30,8 @@ and pass the selected absolute path to every subagent and background command.
 
 Arguments: `<task>` and `--fanout N`, the most subagents running at once (default 3). Planners,
 workers, profilers, combiners and judges all count; a judge takes a slot too. A repository with no
-`.vibesys/tasks/<task>/` needs one first: `vibesys:create-task`.
+`.vibesys/tasks/<task>/` needs one first: `vibesys:create-task`. `--simulator-led`, or an operator
+steering note that asks for it, selects [simulator-led mode](#simulator-led-mode).
 
 Needs a harness that can run background tasks and subagents, on POSIX (Linux or macOS), with git
 and `vibesys-cli`. Where things live and how to resume: `vibesys:state`. Commands for measuring:
@@ -124,6 +125,14 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
 6. After every profile or promotion that moves the bottleneck, re-triage the parked and rejected
    plans: reopen any whose reason no longer holds (time, size, an old profile, a gain that was
    too small before). A plan is never closed for good by a verdict on an older base.
+
+## Simulator-led mode
+
+Where one measurement costs hours and a domain skill offers a simulator, a simulator plans the
+work and cheap evidence accepts it: [simulator-led.md](references/simulator-led.md). It keeps a
+versioned design target and roadmap, accepts each plan on its kind's ladder
+([acceptance-ladder.md](references/acceptance-ladder.md)), and spends a full check and measure
+only on integrations. It replaces Loop steps 1 to 4; everything else here holds.
 
 ## Rules
 

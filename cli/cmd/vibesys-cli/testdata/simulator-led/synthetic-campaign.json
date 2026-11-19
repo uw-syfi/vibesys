@@ -1,0 +1,61 @@
+{
+  "synthetic": "SYNTHETIC RECORD, NOT A REAL CAMPAIGN. Every number here was made up for the replay test of the simulator-led loop (#4329). No device, simulator or campaign produced them. Only the record's shape follows what a simulator-led campaign keeps: calibration inputs, frozen predictions, roadmap versions and measured outcomes.",
+  "task": {
+    "metric": "tokens_per_sec",
+    "direction": "max",
+    "samples": 3,
+    "relative_noise": 0.005,
+    "min_gain": 0.02
+  },
+  "head": {
+    "samples": [1000.0, 1004.0, 996.0]
+  },
+  "plans": [
+    {"number": 1, "kind": "kernel", "title": "a fused MoE prefill kernel raises tokens_per_sec by 4%", "depends_on": [],
+     "predicted": {"calibration-001": 0.04, "calibration-002": 0.04}},
+    {"number": 2, "kind": "kernel", "title": "a split-KV decode attention kernel raises tokens_per_sec by 3%", "depends_on": [],
+     "predicted": {"calibration-001": 0.03, "calibration-002": 0.03}},
+    {"number": 3, "kind": "layout", "title": "tensor parallel 8 instead of 4 raises tokens_per_sec by 9% once MoE prefill is fast", "depends_on": [1],
+     "predicted": {"calibration-001": -0.02, "calibration-002": 0.09}},
+    {"number": 4, "kind": "system", "title": "a 512-token prefill chunk raises tokens_per_sec by 1%", "depends_on": [],
+     "predicted": {"calibration-001": 0.01, "calibration-002": 0.012}}
+  ],
+  "calibrations": [
+    {"id": "calibration-001", "supersedes": null,
+     "fitted_on": [{"commit": "head", "job": "j-0001", "metric": "tokens_per_sec", "measured": 1000.0}],
+     "factors": {"kind_time_scale.moe_prefill": 1.0},
+     "residual_before": {"tokens_per_sec": 0.08}, "residual_after": {"tokens_per_sec": -0.01}},
+    {"id": "calibration-002", "supersedes": "calibration-001",
+     "imported_timings": {
+       "plan": 1,
+       "device_job": {"question": "How long does the fused MoE prefill kernel take at the engine's shapes?",
+                      "prediction": "at most 120 us at 512 tokens and 440 us at 2048 tokens"},
+       "file": "timings.json",
+       "content": "{\"kernel\": \"moe_prefill\", \"unit\": \"us\", \"shapes\": [{\"tokens\": 512, \"time\": 118.0}, {\"tokens\": 2048, \"time\": 431.0}]}\n",
+       "sha256": "6c74b38a47e6d300eb636d67258bb98c08313a25147927206e365ce18f9c1b62"},
+     "factors": {"kind_time_scale.moe_prefill": 0.55},
+     "residual_before": {"tokens_per_sec": 0.03}, "residual_after": {"tokens_per_sec": -0.005}}
+  ],
+  "roadmap": [
+    {"version": 1, "date": "2026-10-02", "calibration": "calibration-001",
+     "order": [1, 2], "waiting": [3], "parked": [4]},
+    {"version": 2, "date": "2026-10-03", "calibration": "calibration-002",
+     "why": "timings of plan 1 imported as calibration-002",
+     "order": [3, 1, 2], "waiting": [], "parked": [4]}
+  ],
+  "device_jobs": [
+    {"plan": 2, "question": "Does the split-KV kernel match the reference on the device?", "prediction": "max abs error under 1e-3", "decision": "kept"},
+    {"plan": 2, "question": "", "prediction": "", "decision": "refused"},
+    {"plan": 4, "question": "Does the engine serve 16 requests with a 512-token chunk?", "prediction": "", "decision": "refused"}
+  ],
+  "integrations": [
+    {"plan": 5, "parts": [1, 2],
+     "prediction": {"calibration": "calibration-002", "composed_gain": 0.072, "how": "(1 + 0.04)(1 + 0.03) - 1: they speed up different work"},
+     "samples": [1068.0, 1072.0, 1064.0],
+     "decision": {"verdict": "better", "decided_by_min_gain": true, "promoted": true}},
+    {"plan": 6, "parts": [3],
+     "prediction": {"calibration": "calibration-002", "composed_gain": 0.09, "how": "plan 3 alone"},
+     "samples": [1080.0, 1084.0, 1076.0],
+     "decision": {"verdict": "within_noise", "decided_by_min_gain": true, "promoted": false, "refusal": "within_noise"}}
+  ]
+}

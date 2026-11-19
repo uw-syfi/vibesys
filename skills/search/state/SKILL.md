@@ -51,6 +51,10 @@ All worktrees of the repository share one store per task, so any agent sees the 
   submodules empty: when the repository has any (`.gitmodules`), run
   `git -C <path> submodule update --init --recursive` after `git worktree add`, so the agent can
   read the submodule source (a framework's examples and docs) that the repository vendors.
+- Roadmap (simulator-led mode only): the lead's numbered roadmap versions in
+  `<parent>/<name>.roadmap/<task>/`, beside the worktrees directory. Each version is written
+  once and never edited, and the directory outlives the run. The optimize skill's simulator-led
+  reference has the format.
 - Scratch: disposable machine output (profiles, raw logs). Any directory the lead names in the
   briefs; nothing depends on it.
 
