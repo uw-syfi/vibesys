@@ -21,6 +21,8 @@ the user did not tell you or the machine did not show: no guessed host name, par
 ## What to find out first
 
 1. The GPUs: `nvidia-smi -L` (NVIDIA) or `rocm-smi --showid` (AMD). Note the count and the model.
+   On AWS Trainium, `neuron-ls --json-output` (in `/opt/aws/neuron/bin`): note the number of devices
+   and each one's `nc_count`, its NeuronCores.
    A pool is all of the machine's GPUs: `count` must equal the number the machine reports, and the
    CLI refuses a different number. If the user wants to keep some GPUs out, or the GPUs are of
    mixed types, say that this is not supported yet and ask what they want.
@@ -116,6 +118,20 @@ partition = "mi300"
 count = 8              # GPUs per node, no gres_type
 ```
 
+An AWS Trainium machine (local or ssh): its pool counts NeuronCores, not devices. `count` is the sum
+of `nc_count` over the devices and `cores_per_device` one device's `nc_count`; the CLI checks both.
+A task of the `trainium` backend needs `neuron`.
+
+```toml
+version = "0.2"
+
+[placements.trn]
+kind = "local"
+[placements.trn.resources.neuron]
+count = 4              # a trn2.3xlarge: one device of 4 NeuronCores
+cores_per_device = 4
+```
+
 For the other keys (accounts, time limits, mounts, standing allocations) read
 [the operator config in the CLI README](https://github.com/uw-syfi/vibesys/blob/main/cli/README.md#the-operator-config).
 Ask the user for each fact; never invent one.
@@ -127,7 +143,11 @@ Ask the user for each fact; never invent one.
 - Jobs wait for free GPUs and run side by side on disjoint ones. `vibesys-cli placement capacity
   <placement>` shows free GPUs and who holds the rest; `jobs` shows what each job asked for.
 - A job reads `VIBESYS_GPUS` and `VIBESYS_GPU_DEVICES`, and the vendor's own variable
-  (`CUDA_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES`).
+  (`CUDA_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES`, `NEURON_RT_VISIBLE_CORES`). On a Neuron pool
+  `--gpus N` counts NeuronCores, and a job gets N in a row.
+- A Neuron job does not start while device memory is held on its cores, by another process or left
+  by one that ended uncleanly: it fails naming the device. `neuron-ls` shows which processes hold
+  the device. Tell the user; do not kill processes you did not start.
 - Confinement is best effort. A Docker job gets its NVIDIA devices by number, so it cannot see
   the others. A host job and an AMD job get variables only: a process that ignores them can open any
   GPU, and so can a process the CLI did not start.
@@ -142,7 +162,7 @@ Ask the user for each fact; never invent one.
    commit any pending change to it (a job runs a commit), then submit a job that prints what it
    sees:
    `"$VIBESYS_CLI" submit command <sha> --task <name> --image harness --gpus 1 --wait -- sh -c 'echo $VIBESYS_GPU_DEVICES; nvidia-smi -L'`
-   (`rocm-smi --showid` on AMD). `--task` is always needed (or set `VIBESYS_TASK`), even with one
+   (`rocm-smi --showid` on AMD; `echo $NEURON_RT_VISIBLE_CORES` on Trainium). `--task` is always needed (or set `VIBESYS_TASK`), even with one
    task. `--image harness` runs the command in the task's own environment. Add `--env host` when
    the task has no `Dockerfile` or the machine has no container runtime. `--wait` prints the job's
    state, not its output: read the output with `"$VIBESYS_CLI" logs <job>`, which must show one GPU,

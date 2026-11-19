@@ -68,7 +68,7 @@ func (d *NVIDIADevices) Pool() (core.PoolID, core.GPUCount) { return d.id, d.siz
 // Container implements resource.Devices: the group by number, to docker's --gpus (or the runtime's
 // variable), and no variable of CUDA's, since the container's devices are numbered from 0.
 func (d *NVIDIADevices) Container(g core.DeviceGroup) (resource.Attachment, error) {
-	if err := resource.CheckGroup(g, d.size); err != nil {
+	if err := resource.CheckGroup(core.ResourceGPU, g, d.size); err != nil {
 		return resource.Attachment{}, invalid("%v", err)
 	}
 	a := resource.Attachment{GPUs: resource.GPUs{NVIDIA: resource.List(g), Runtime: d.runtime}}
@@ -81,8 +81,17 @@ func (d *NVIDIADevices) Container(g core.DeviceGroup) (resource.Attachment, erro
 
 // Process implements resource.Devices: CUDA_VISIBLE_DEVICES, in the PCI bus order.
 func (d *NVIDIADevices) Process(g core.DeviceGroup) (map[string]string, error) {
-	if err := resource.CheckGroup(g, d.size); err != nil {
+	if err := resource.CheckGroup(core.ResourceGPU, g, d.size); err != nil {
 		return nil, invalid("%v", err)
 	}
 	return map[string]string{EnvCUDAVisibleDevices: resource.List(g), EnvCUDADeviceOrder: PCIBusOrder}, nil
+}
+
+// Check implements resource.Devices: none. NVIDIA GPUs are not read for another process's use
+// before a job starts.
+func (d *NVIDIADevices) Check(g core.DeviceGroup) ([]string, error) {
+	if err := resource.CheckGroup(core.ResourceGPU, g, d.size); err != nil {
+		return nil, invalid("%v", err)
+	}
+	return nil, nil
 }

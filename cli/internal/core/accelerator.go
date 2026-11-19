@@ -86,7 +86,8 @@ var accelerators = []AcceleratorIdentity{
 	{VendorNVIDIA, ModelB200, "NVIDIA B200", []string{"b200"}},
 	{VendorNVIDIA, ModelL4, "NVIDIA L4", []string{"l4"}},
 	{VendorNVIDIA, ModelA100, "NVIDIA A100", []string{"a100"}},
-	{VendorAWS, ModelTrainium2, "AWS Trainium2", nil},
+	// The neuron driver names the device "Trainium2" (info/architecture/device_name).
+	{VendorAWS, ModelTrainium2, "AWS Trainium2", []string{"trainium2"}},
 	{VendorApple, ModelAppleSilicon, "Apple Silicon", nil},
 }
 

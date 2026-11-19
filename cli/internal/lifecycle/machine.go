@@ -1429,7 +1429,8 @@ func (s *State) schedule() []Request {
 				}
 			} else if grant, why := s.choose(placed, held); why != "" {
 				// Step counted the devices free, so none of this happens while the grants and the
-				// claims agree; a job that cannot be given its devices waits instead of sharing one.
+				// claims agree, but in a pool of ranges whose free devices are not in a row; a job
+				// that cannot be given its devices waits instead of sharing one.
 				cur.wait, cur.waits = schedule.WaitReason{Kind: core.WaitFull, Resource: schedule.ResourceID(why)}, true
 				continue
 			} else if grant != nil {
@@ -1501,8 +1502,10 @@ func (s *State) heldDevices() map[core.PoolID][]core.DeviceGroup {
 
 // choose is the grant of the GPUs of a pool for a job the scheduler started on the option, from the
 // devices no one holds: nil when the option claims no pool. A job gets as many devices as it
-// claims, and the whole pool when it claims it alone. When the devices cannot be chosen, which
-// the scheduler's counts rule out, it returns the pool's id instead, as the reason.
+// claims (a contiguous range of them for a pool whose kind needs one, core.TakeFor), and the
+// whole pool when it claims it alone. When the devices cannot be chosen, it returns the pool's id
+// instead, as the reason: the scheduler's counts rule that out, but for a pool of ranges whose free
+// devices are as many as the job claims and not in a row, where the job waits for a range.
 func (s *State) choose(o schedule.Option, held map[core.PoolID][]core.DeviceGroup) (*core.Grant, string) {
 	claims := s.deviceClaims([]schedule.Option{o})
 	if len(claims) == 0 {
@@ -1516,7 +1519,7 @@ func (s *State) choose(o schedule.Option, held map[core.PoolID][]core.DeviceGrou
 	if err != nil || err2 != nil {
 		return nil, string(c.Resource)
 	}
-	devices, ok := core.TakeDevices(count, held[pool], n)
+	devices, ok := core.TakeFor(pool, count, held[pool], n)
 	if !ok {
 		return nil, string(c.Resource)
 	}

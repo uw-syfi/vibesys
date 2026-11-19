@@ -67,6 +67,12 @@ func runArgs(spec docker.ContainerSpec) []string {
 		// The kernel driver's devices, and the group that may open them; ROCm's runtime is the
 		// image's own.
 		args = append(args, "--device", "/dev/kfd", "--device", "/dev/dri", "--group-add", "video")
+	case g.Neuron != "":
+		// The devices that hold the job's NeuronCores; the runtime is the image's own, and
+		// NEURON_RT_VISIBLE_CORES, in Env, says which of their cores it uses.
+		for n := range strings.SplitSeq(g.Neuron, ",") {
+			args = append(args, "--device", "/dev/neuron"+n)
+		}
 	case g.Devices == "" && g.NVIDIA == "":
 	case g.Runtime != "":
 		// The runtime reads the devices from a variable the GPU resource sets in Env.

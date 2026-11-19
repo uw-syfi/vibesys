@@ -19,12 +19,14 @@ import (
 const (
 	poolID    schedule.ResourceID = "gpu:local"
 	poolPlace string              = "local"
+	// neuronPoolID is a pool of NeuronCores, whose kind gives a job a contiguous range of them.
+	neuronPoolID schedule.ResourceID = "neuron:local"
 )
 
-func poolScheduling(size int) lifecycle.Scheduling {
+func poolScheduling(size int, pool schedule.ResourceID) lifecycle.Scheduling {
 	return lifecycle.Scheduling{Resources: []schedule.Resource{
 		{ID: schedule.PlacementOf(poolPlace), Capacity: size},
-		{ID: poolID, Capacity: size, Devices: true},
+		{ID: pool, Capacity: size, Devices: true},
 	}}
 }
 
@@ -39,14 +41,14 @@ func gpuCountOf(t *testing.T, n int) core.GPUCount {
 
 // poolWork is the work of a job that claims n devices of the pool, or all of them alone for a
 // measure (n is then the pool's size), as schedule.PlacementDemand makes it.
-func poolWork(n int, whole bool, run core.RunID) lifecycle.Work {
+func poolWork(pool schedule.ResourceID, n int, whole bool, run core.RunID) lifecycle.Work {
 	kind := core.JobCheck
 	if whole {
 		kind = core.JobMeasure
 	}
 	claims := []schedule.Claim{
 		{Resource: schedule.PlacementOf(poolPlace), Amount: 1, Exclusive: whole},
-		{Resource: poolID, Amount: n, Exclusive: whole},
+		{Resource: pool, Amount: n, Exclusive: whole},
 	}
 	return lifecycle.Work{Kind: kind, Run: run, Options: []schedule.Option{{Placement: poolPlace, Claims: claims}}}
 }
@@ -65,6 +67,7 @@ const (
 type poolWorld struct {
 	t     *testing.T
 	size  int
+	pool  schedule.ResourceID
 	state lifecycle.State
 	now   time.Time
 	order []lifecycle.Ref
@@ -82,13 +85,15 @@ type poolWorld struct {
 	log []string
 }
 
-func newPoolWorld(t *testing.T, size int) *poolWorld {
+func newPoolWorld(t *testing.T, size int) *poolWorld { return newPoolWorldOf(t, size, poolID) }
+
+func newPoolWorldOf(t *testing.T, size int, pool schedule.ResourceID) *poolWorld {
 	w := &poolWorld{
-		t: t, size: size, now: epoch,
+		t: t, size: size, pool: pool, now: epoch,
 		work: map[lifecycle.Ref]lifecycle.Work{}, status: map[lifecycle.Ref]jobStatus{},
 		recorded: map[lifecycle.Ref]*core.Grant{}, asked: map[lifecycle.Ref]*core.Grant{}, holding: map[lifecycle.Ref]*core.Grant{},
 	}
-	w.state, _ = lifecycle.Step(lifecycle.RecoveringWith(poolScheduling(size)), lifecycle.RecoveryDone{})
+	w.state, _ = lifecycle.Step(lifecycle.RecoveringWith(poolScheduling(size, pool)), lifecycle.RecoveryDone{})
 	return w
 }
 
@@ -128,7 +133,7 @@ func (w *poolWorld) feed(e lifecycle.Event) {
 func (w *poolWorld) checkGrant(r lifecycle.LaunchRequest) {
 	w.t.Helper()
 	claims := w.work[r.Ref].Options[0].Claims
-	i := slices.IndexFunc(claims, func(c schedule.Claim) bool { return c.Resource == poolID })
+	i := slices.IndexFunc(claims, func(c schedule.Claim) bool { return c.Resource == w.pool })
 	switch {
 	case i < 0 && r.GPUs != nil:
 		w.t.Fatalf("job %v claims no GPUs and was given %+v", r.Ref, r.GPUs)
@@ -139,8 +144,10 @@ func (w *poolWorld) checkGrant(r lifecycle.LaunchRequest) {
 	}
 	g, claim := r.GPUs, claims[i]
 	switch {
-	case g.Pool != core.PoolID(poolID) || g.Size.Int() != w.size:
-		w.t.Fatalf("job %v got the grant %+v, want the pool %s of %d", r.Ref, g, poolID, w.size)
+	case g.Pool != core.PoolID(w.pool) || g.Size.Int() != w.size:
+		w.t.Fatalf("job %v got the grant %+v, want the pool %s of %d", r.Ref, g, w.pool, w.size)
+	case g.Pool.Kind().Contiguous() && !g.Devices.IsRange():
+		w.t.Fatalf("job %v was given %v of a pool of ranges", r.Ref, g.Devices.Devices())
 	case g.Devices.Len() != claim.Amount:
 		w.t.Fatalf("job %v claims %d GPUs and was given %v", r.Ref, claim.Amount, g.Devices.Devices())
 	case g.Whole != claim.Exclusive:
@@ -202,7 +209,7 @@ func (w *poolWorld) admit(n int, whole bool, run core.RunID) lifecycle.Ref {
 	if whole {
 		n = w.size
 	}
-	w.work[ref] = poolWork(n, whole, run)
+	w.work[ref] = poolWork(w.pool, n, whole, run)
 	w.status[ref] = statusQueued
 	w.order = append(w.order, ref)
 	w.feed(lifecycle.Admitted{Ref: ref, SubmittedAt: w.tick(), Work: w.work[ref]})
@@ -239,7 +246,7 @@ func (w *poolWorld) crash(parked func(lifecycle.Ref) bool) {
 	w.t.Helper()
 	w.holding = map[lifecycle.Ref]*core.Grant{}
 	w.running, w.closing = nil, nil
-	w.state = lifecycle.RecoveringWith(poolScheduling(w.size))
+	w.state = lifecycle.RecoveringWith(poolScheduling(w.size, w.pool))
 	for _, ref := range w.order {
 		work := w.work[ref]
 		switch w.status[ref] {
@@ -295,13 +302,16 @@ func (w *poolWorld) answerOne(pick func(n int) int) bool {
 // records the job running and before its command starts (a parked supervisor, whose devices stay
 // its own), or while it runs. No two jobs that hold devices share one, and the grants the machine
 // gives from one seed are the same each time.
+//
+// A pool of NeuronCores keeps the same rules, and every job of it is given a contiguous range.
 func TestJobsHoldDisjointDevicesThroughEveryEventSequenceAndCrash(t *testing.T) {
-	for seed := uint64(1); seed <= 300; seed++ {
+	for seed := uint64(1); seed <= 600; seed++ {
 		size := []int{1, 2, 4, 8, 6, 3}[seed%6]
+		pool := []schedule.ResourceID{poolID, neuronPoolID}[seed%2]
 		var logs [2][]string
 		for run := range 2 {
 			r := newRand(seed)
-			w := newPoolWorld(t, size)
+			w := newPoolWorldOf(t, size, pool)
 			for step := 0; step < 120; step++ {
 				switch c := r.IntN(10); {
 				case c < 3:
@@ -374,5 +384,46 @@ func TestAJobThatWaitsForDevicesSaysWhatItWaitsFor(t *testing.T) {
 	}
 	if queue[1].Ref != small || queue[1].Reason.Kind != core.WaitBehind {
 		t.Fatalf("the 1-device job waits as %+v, want behind the 4-device job, though a device is free", queue[1])
+	}
+}
+
+// A job of a pool of ranges whose free devices are as many as it claims and not in a row waits for
+// a range, naming the pool, instead of being given devices with a gap, which the Neuron runtime
+// refuses; once a range is free it is given it.
+func TestAJobOfAPoolOfRangesWaitsForARange(t *testing.T) {
+	w := newPoolWorldOf(t, 4, neuronPoolID)
+	var ones []lifecycle.Ref
+	for range 3 {
+		ones = append(ones, w.admit(1, false, "run-a"))
+	}
+	for _, ref := range ones {
+		w.launched(ref)
+	}
+	holder := func(d core.DeviceIndex) lifecycle.Ref {
+		for ref, g := range w.holding {
+			if g != nil && g.Devices.Has(d) {
+				return ref
+			}
+		}
+		t.Fatalf("no job holds core %d: %v", d, w.holding)
+		return lifecycle.Ref{}
+	}
+	end := func(ref lifecycle.Ref) {
+		w.running = append(w.running, ref)
+		w.finish(ref)
+		w.close(ref)
+	}
+	end(holder(1)) // cores 1 and 3 are free, and not in a row
+	two := w.admit(2, false, "run-b")
+	if g := w.holding[two]; g != nil {
+		t.Fatalf("a job of 2 was given %v while cores 1 and 3 were free", g.Devices.Devices())
+	}
+	queue := w.state.Queue()
+	if len(queue) != 1 || queue[0].Ref != two || queue[0].Reason.Kind != core.WaitFull || queue[0].Reason.Resource != neuronPoolID {
+		t.Fatalf("the queue is %+v, want the job of 2 waiting for the pool", queue)
+	}
+	end(holder(2))
+	if g := w.holding[two]; g == nil || !g.Devices.IsRange() || g.Devices.Len() != 2 {
+		t.Fatalf("once cores 1 to 3 were free the job of 2 was given %+v", g)
 	}
 }

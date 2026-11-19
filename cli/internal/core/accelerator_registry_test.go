@@ -15,6 +15,7 @@ func probeSpelling(rng *rand.Rand, v core.AcceleratorVendor, alias string) strin
 	prefixes := map[core.AcceleratorVendor][]string{
 		core.VendorNVIDIA: {"", "NVIDIA ", "nvidia_", "NVIDIA Tesla "},
 		core.VendorAMD:    {"", "AMD ", "AMD Instinct ", "Instinct "},
+		core.VendorAWS:    {"", "AWS ", "aws_"},
 	}[v]
 	suffixes := []string{"", " 80GB HBM3", "-SXM4-80GB", "_192G", " PCIe", "-40GB", " (rev a1)"}
 	name := alias
@@ -28,7 +29,7 @@ func probeSpelling(rng *rand.Rand, v core.AcceleratorVendor, alias string) strin
 }
 
 func probedVendors() []core.AcceleratorVendor {
-	return []core.AcceleratorVendor{core.VendorNVIDIA, core.VendorAMD}
+	return []core.AcceleratorVendor{core.VendorNVIDIA, core.VendorAMD, core.VendorAWS}
 }
 
 // Every alias of every row, in any generated spelling, reads back as the row's model.

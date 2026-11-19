@@ -21,11 +21,26 @@ const (
 	ResourceMounts ResourceKind = "mounts"
 	// ResourceROCm is AMD GPUs passed into the container, through the ROCm kernel driver.
 	ResourceROCm ResourceKind = "rocm"
+	// ResourceNeuron is AWS Neuron devices (Trainium) passed into the container, shared by
+	// NeuronCore.
+	ResourceNeuron ResourceKind = "neuron"
 )
 
 // ResourceKinds returns every resource kind, in the order the contract numbers them.
 func ResourceKinds() []ResourceKind {
-	return []ResourceKind{ResourceGPU, ResourceKubernetes, ResourceMounts, ResourceROCm}
+	return []ResourceKind{ResourceGPU, ResourceKubernetes, ResourceMounts, ResourceROCm, ResourceNeuron}
+}
+
+// Contiguous says a pool of the kind gives a job only a contiguous range of its devices: the Neuron
+// runtime refuses a NEURON_RT_VISIBLE_CORES that is not one ("Logical Neuron cores are not
+// contiguous"), so a group of NeuronCores with a gap would fail in the job. The pool's devices are
+// chosen by TakeFor, which keeps to it.
+func (k ResourceKind) Contiguous() bool { return k == ResourceNeuron }
+
+// DeviceKinds are the resource kinds whose devices a pool hands out by number, which a job of a
+// task that needs one asks for by count (--gpus): NVIDIA and AMD GPUs, and NeuronCores.
+func DeviceKinds() []ResourceKind {
+	return []ResourceKind{ResourceGPU, ResourceROCm, ResourceNeuron}
 }
 
 // ParseResourceKind reads a resource kind by its name, and fails with FailureInvalidInput naming

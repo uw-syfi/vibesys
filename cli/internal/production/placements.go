@@ -14,6 +14,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/backend/amd"
 	"github.com/uw-syfi/vibesys/cli/internal/backend/cpu"
+	neuronfacts "github.com/uw-syfi/vibesys/cli/internal/backend/neuron"
 	"github.com/uw-syfi/vibesys/cli/internal/backend/nvidia"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -34,6 +35,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/resource/gpu"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/kubernetes"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/mounts"
+	"github.com/uw-syfi/vibesys/cli/internal/resource/neuron"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/rocm"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
@@ -453,6 +455,14 @@ func resources(r *cliv1.Resources, shell remote.Shell, where, gpus string, clk C
 	var out []resource.Resource
 	if r.GetRocm() != nil {
 		res, err := rocm.New(rocm.Config{Machine: gpus, Facts: amdFacts, Pool: pool})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, res)
+	}
+	if r.GetNeuron() != nil {
+		// Always a pool: each job is given its range of NeuronCores (NeuronDevices).
+		res, err := neuron.New(neuron.Config{Machine: gpus, Facts: &neuronfacts.Devices{Shell: shell, Timers: clk}})
 		if err != nil {
 			return nil, err
 		}

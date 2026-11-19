@@ -14,8 +14,10 @@ import (
 // data out, so each vendor's numbering and variables are its own package's.
 //
 // The numbers are those of the pool, 0 to its size less one, in the numbering the vendor's own
-// device variable takes (NVIDIA_VISIBLE_DEVICES and CUDA_VISIBLE_DEVICES, or ROCR_VISIBLE_DEVICES),
-// which is not always the numbering of the vendor's monitoring tool. How firmly a group is kept
+// device variable takes (NVIDIA_VISIBLE_DEVICES and CUDA_VISIBLE_DEVICES, ROCR_VISIBLE_DEVICES, or
+// NEURON_RT_VISIBLE_CORES, whose devices are NeuronCores), which is not always the numbering of
+// the vendor's monitoring tool. A pool whose kind is core.ResourceKind.Contiguous gives a job only a
+// contiguous range (core.TakeFor), and its role refuses a group that is not one. How firmly a group is kept
 // to its devices belongs to the environment that applies it: Container is what a container
 // engine can enforce, Process only what a process is asked to respect.
 //
@@ -31,16 +33,23 @@ type Devices interface {
 	Pool() (core.PoolID, core.GPUCount)
 
 	// Container is what a container is given so that it uses exactly the group: the engine's
-	// device flags for a vendor whose devices it can pass by number, and the variables that name
-	// the group. It is the same on every call for the same group. It fails with a *core.Failure of
-	// kind FailureInvalidInput, naming the device, for a group that has a device outside the pool,
-	// and for an empty group.
+	// device flags for a vendor whose devices it can pass by number, the variables that name
+	// the group, and the vendor's Check of the group, when it has one, as the attachment's Check.
+	// It is the same on every call for the same group. It fails with a *core.Failure of kind
+	// FailureInvalidInput, naming the device, for a group CheckGroup refuses.
 	Container(g core.DeviceGroup) (Attachment, error)
 
 	// Process is the variables a process on the host is given so that it uses exactly the group.
 	// Nothing enforces them: a process that ignores them can use any GPU of the machine. It fails
 	// as Container does.
 	Process(g core.DeviceGroup) (map[string]string, error)
+
+	// Check is a command the environment runs on the machine before the job's commands, a program
+	// and its arguments that exits 0 when the group's devices may be used, and otherwise prints why
+	// not, naming the device, which is what the job fails with before anything of it runs. It reads
+	// the devices as they are, never the scheduler's own record of who holds them. Nil when the
+	// vendor checks nothing. It fails as Container does.
+	Check(g core.DeviceGroup) ([]string, error)
 }
 
 var poolID = regexp.MustCompile(`^[a-z]+:[A-Za-z0-9][A-Za-z0-9_.@-]*$`)
@@ -56,15 +65,24 @@ func PoolIDOf(kind core.ResourceKind, machine string) (core.PoolID, error) {
 	return core.PoolID(id), nil
 }
 
-// CheckGroup refuses a group that no one may be given: an empty one, or one with a device outside
-// a pool of the size. It names the device.
-func CheckGroup(g core.DeviceGroup, size core.GPUCount) error {
+// CheckGroup refuses a group that no one may be given of a pool of the kind and size: an empty one,
+// one with a device outside the pool, and, for a kind whose groups are ranges
+// (core.ResourceKind.Contiguous), one with a gap. It names the device.
+func CheckGroup(kind core.ResourceKind, g core.DeviceGroup, size core.GPUCount) error {
 	if g.Len() == 0 {
 		return invalid("the group has no device")
 	}
-	for _, d := range g.Devices() {
+	devices := g.Devices()
+	for _, d := range devices {
 		if int(d) >= size.Int() {
 			return invalid("device %d is not one of the pool's %d (0 to %d)", d, size.Int(), size.Int()-1)
+		}
+	}
+	if kind.Contiguous() && !g.IsRange() {
+		for i := 1; i < len(devices); i++ {
+			if devices[i] != devices[i-1]+1 {
+				return invalid("device %d follows device %d: a group of %s devices is a contiguous range", devices[i], devices[i-1], kind)
+			}
 		}
 	}
 	return nil

@@ -232,7 +232,7 @@ refuses it naming the variable, where the release took it as it was.
 | Identity of the environment | The image digest, plus the machine: architecture, CPU model and count, and, when GPUs are passed, GPU model, count, driver and the driver's CUDA version. Two results are comparable only when all of these are equal. |
 | Containment | One container per command run (a check, or one benchmark sample). The CLI removes it on every path: exit, timeout, cancel, and the death of the process that started it. A timeout or a cancel first sends SIGTERM to the command's processes and waits for them to end, up to `stop_grace_seconds` (30 by default), so a trusted wrapper can delete what it created outside the container; then the container is removed. |
 | Placement | Where the Docker engine runs: this machine, another machine over ssh, or another machine inside a Slurm allocation. Chosen in the operator config. |
-| GPU access | `docker run --gpus all`, or `--runtime nvidia` with `NVIDIA_VISIBLE_DEVICES`; for a pool, the job's own devices by number, `--gpus '"device=2,3"'` (the quotes are part of the value: docker reads a list as CSV) or the runtime's variable. Never CDI. A placement's GPUs are a pool of `count` devices declared in the operator config, and a job is given a group of them by the vendor's role (`resource.Devices`); AMD GPUs are confined by `ROCR_VISIBLE_DEVICES` alone, and a host process by its variables alone, since neither the ROCm driver's devices nor a host process can be hidden by number. |
+| GPU access | `docker run --gpus all`, or `--runtime nvidia` with `NVIDIA_VISIBLE_DEVICES`; for a pool, the job's own devices by number, `--gpus '"device=2,3"'` (the quotes are part of the value: docker reads a list as CSV) or the runtime's variable. Never CDI. A placement's GPUs are a pool of `count` devices declared in the operator config, and a job is given a group of them by the vendor's role (`resource.Devices`); AMD GPUs are confined by `ROCR_VISIBLE_DEVICES` alone, and a host process by its variables alone, since neither the ROCm driver's devices nor a host process can be hidden by number. Neuron devices (Trainium) are a pool of logical NeuronCores: a container gets the `/dev/neuron*` devices of its contiguous range of cores by `--device`, and `NEURON_RT_VISIBLE_CORES` names the range. |
 | Build cache | A directory per task image on the engine's machine, mounted at `/vibesys/cache` and kept across commits and jobs. |
 | Artifacts | A directory per command run, mounted at `/vibesys/artifacts`, kept with the job afterwards. |
 | Machine-local inputs | Read-only directories the operator names, mounted at `/vibesys/mounts/<name>`. |
@@ -536,8 +536,9 @@ The Spark's Docker 29.2.1 has the `nvidia` runtime registered and no CDI
 devices, so `--gpus all` (through the NVIDIA hook) or `--runtime nvidia` with
 `NVIDIA_VISIBLE_DEVICES` work and CDI names do not. A task for the `cuda`
 backend is refused unless the operator config passes GPUs; a task for the
-`rocm` backend unless it gives a `rocm` resource (below); other accelerator
-backends are refused.
+`rocm` backend unless it gives a `rocm` resource (below); for the `trainium`
+backend unless it gives a `neuron` resource (below); other accelerator backends
+are refused.
 
 ### AMD GPUs are a resource of their own, checked in the container
 
@@ -560,6 +561,29 @@ GPU agent and, when there is none, fails the job before its command with
 `the container's ROCm runtime does not see the GPU: … (the image's ROCm X, the
 node's amdgpu driver Y)`. In a task of two images the GPUs and the check are the
 server's.
+
+### Neuron devices are shared by NeuronCore, and read before a job starts
+
+`neuron` is a resource kind of its own, like `rocm`, for tasks of the
+`trainium` backend: its devices are `/dev/neuron*` character devices passed
+with `--device`, not `--gpus`. Its pool counts logical NeuronCores, not devices,
+since `NEURON_RT_VISIBLE_CORES` names cores and one Trainium2 device has four of
+them, so short jobs of one core each share a device while a measure takes every
+core. The Neuron runtime refuses a core list with a gap, so the pool gives each
+job a contiguous range (`core.TakeFor`), and a job whose count of cores is free
+but not in a row waits for one. The operator config states `count` and
+`cores_per_device` (which places core `c` on `/dev/neuron<c / cores_per_device>`),
+and the daemon checks both against `neuron-ls`.
+
+A runtime that ended uncleanly can leave device memory allocated, and a process
+the scheduler does not know of can hold cores, so the scheduler's own record of
+who holds which core is not evidence that a core is free. Before a job's
+commands, in its container or on the host, a POSIX shell check reads the device
+memory the driver counts per physical core in sysfs and fails the job, naming
+the device, when more physical cores hold memory than the cores the job was not
+given are made of. sysfs does not say which physical cores back which logical
+core, so the check counts rather than maps: exact for a whole device, as a
+measure holds, and sound but weaker for part of one.
 
 ### Apptainer: a multi-node cluster without Docker
 

@@ -1,6 +1,7 @@
 package docker_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -148,5 +149,27 @@ func TestAJobOfAClusterWhoseGPUsAreNotCountedIsAssignedItsDevices(t *testing.T) 
 		if spec.GPUs.NVIDIA != tc.want || spec.Env["VIBESYS_GPU_DEVICES"] != tc.want || spec.AskedGPUs != tc.asked {
 			t.Errorf("asked %d: the container is given %+v with the variables %v and the count %d, want the devices %s and the count %d", tc.asked, spec.GPUs, spec.Env, spec.AskedGPUs, tc.want, tc.asked)
 		}
+	}
+}
+
+// The role's check of a job's devices runs in its container before the command, and a check that
+// fails, as one whose devices another process holds does, ends the job before its command runs,
+// with what the check said, naming the device; one that passes lets the command run.
+func TestAJobWhoseDevicesAreHeldFailsBeforeItsCommand(t *testing.T) {
+	said := "neuron: /dev/neuron0 holds device memory on 2 of its 8 physical cores"
+	devices := newDevices(t)
+	devices.CheckArgv = append(append([]string{"print"}, strings.Fields(said)...), ";", "exit", "1")
+	s := newScene(t, options{configure: withPool(devices)})
+	a, _ := runAs(t, s, grantOf(t, poolOfEight, 0, 1))
+	failure := envtest.NotStarted(t, a)
+	if failure.Kind != core.FailureUnavailable || !strings.Contains(failure.Message, said) {
+		t.Errorf("failure %+v, want what the check said", failure)
+	}
+
+	devices.CheckArgv = []string{"mark", "checked"}
+	s = newScene(t, options{configure: withPool(devices)})
+	a, _ = runAs(t, s, grantOf(t, poolOfEight, 0, 1))
+	if _, ok := a.(core.Unobserved); !ok || !s.world.Marked("checked") {
+		t.Errorf("attempt %+v, checked %v: want the check run and the command after it", a, s.world.Marked("checked"))
 	}
 }

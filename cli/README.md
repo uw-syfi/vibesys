@@ -143,6 +143,8 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/backend/nvidia/` | The GPU facts of a machine (model, count, driver, the driver's CUDA version) for a fingerprint, read with `nvidia-smi`. |
 | `internal/backend/amd/` | The AMD GPU facts of a machine (model, count, the amdgpu driver's version) for a fingerprint, read with `rocminfo` or `amd-smi` and `/sys/module/amdgpu/version`. |
 | `internal/resource/rocm/` | The `rocm` resource: the machine's AMD GPUs, and a check, run in the container before the command, that the image's ROCm runtime sees them. |
+| `internal/backend/neuron/` | The Neuron facts of a machine (model, devices, NeuronCores per device and in all, the logical core config, the neuron driver's version) for a fingerprint and the check of a pool, read with `neuron-ls --json-output` and the driver's sysfs. |
+| `internal/resource/neuron/` | The `neuron` resource: the machine's AWS Neuron devices, a pool of NeuronCores whose role gives a job the `/dev/neuron*` devices of its range and `NEURON_RT_VISIBLE_CORES`, and a check, run before the job's commands, that its cores hold no other process's device memory. |
 | `internal/tomlproto/` | Decoding TOML into a proto message by its field names, refusing an unknown key by name, and a key newer than the schema version the file declares (`task_schema_since_minor`). The task manifest and the operator config are read with it. |
 | `internal/operator/` | The operator config (`cli.toml`), decoded into `OperatorConfig` in `operator.proto` with unknown keys refused by name: its version (`0.2`, the only one read; every key of the earlier shape refused by name), its named placements, each placement's kind and sections, its GPU pools, and the defaults the file leaves out. What a kind's section means is that kind's package's business. |
 | `internal/resource/` | `Resource`: what a placement gives every container (`Kind`, `Claims` for scheduling, `Fingerprint`, and `Attach`, the mounts, variables, network and GPUs a container is made with), and the contract suite in `resourcetest/` every resource passes, with the Fake in `fakeresource/` (tests only). |
@@ -737,6 +739,7 @@ refused with the reason.
   | `gpu` | The GPUs, by `--gpus all`, or by the runtime with `NVIDIA_VISIBLE_DEVICES`. When the table has a `count`, the devices of the job's own group instead, by number: `--gpus '"device=2,3"'`, quoted as docker needs a list, or the runtime's variable, and `VIBESYS_GPUS` and `VIBESYS_GPU_DEVICES` (see "GPU pools"). |
   | `kubernetes` | The kubeconfig, read-only, at `/vibesys/kubeconfig`, with `KUBECONFIG` naming it; the network mode (`docker run --network`), such as `host` for a cluster whose API server listens on the machine's loopback address; `VIBESYS_K8S_REGISTRY` and `VIBESYS_K8S_BUILDER` when the config names them. The task deploys to the cluster and cleans up after itself; the daemon does not manage the cluster. |
   | `mounts` | Each directory, read-only, at `/vibesys/mounts/<name>`, with `VIBESYS_MOUNTS` listing the names. |
+  | `neuron` | The `/dev/neuron*` devices that hold the job's range of NeuronCores, by `--device`, with `NEURON_RT_VISIBLE_CORES` naming the range, and `VIBESYS_GPUS` and `VIBESYS_GPU_DEVICES` (see "GPU pools"). Before the command, the container checks that the cores hold no other process's device memory; when they do, the job fails before its command, naming the device. In a task of two images the devices are the server's. |
   | `rocm` | The machine's AMD GPUs: `--device /dev/kfd --device /dev/dri --group-add video` under docker, `--rocm` under Apptainer, and each of `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`, `GPU_DEVICE_ORDINAL` and `CUDA_VISIBLE_DEVICES` that Slurm set. When the table has a `count`, the devices are the same, and `ROCR_VISIBLE_DEVICES` names the job's group (see "GPU pools"). Before the command, the container checks that its ROCm runtime sees a GPU; when it does not, the job fails before its command with why, naming the image's ROCm version and the machine's amdgpu driver version. In a task of two images the GPUs are the server's. |
 
   A task names the resources its jobs need in its manifest, `[environment] needs = ["kubernetes"]`
@@ -814,6 +817,7 @@ below.
 | `[placements.<name>.allocations] fit_margin`, `run_idle_end` | Optional: the time a job's fit keeps free before its allocation ends (`"2m"` by default), and how long a run holding allocations of the placement may make no call before it is taken to have ended, as `alloc end-run` ends it (`"2h"` by default, at least `"1m"`). |
 | `[placements.<name>.resources.gpu] count`, `gres_type`, `runtime` | The machine's NVIDIA GPUs. `count` (1 to 64) is how many the machine has (for a cluster, each node): set, the GPUs `0` to `count - 1` are a pool that jobs share, each job given GPUs of its own, and it must equal the number of GPUs the machine reports where the CLI reads it (`nvidia-smi -L \| wc -l`). An empty table, with no `count`, gives every job all of the machine's GPUs. `slurm` placements need `count`, since their allocations ask for GPUs by count. `gres_type`, for `slurm` only, is the GPU type of the cluster's GRES (`a100` asks for `gpu:a100:<n>`), for a partition that names or mixes types. With `runtime` (such as `nvidia`) the GPUs are passed by that container runtime and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
 | `[placements.<name>.resources.rocm] count`, `gres_type` | The machine's AMD GPUs, for tasks of the `rocm` backend, with the same `count` and `gres_type` as `gpu` (`rocm-smi --showid` lists them); `apptainer` placements need `count`. `gres_type` says the cluster has a GPU resource to ask for GPUs in (`--gres=gpu:<gres_type>:<n>`, per job); an `apptainer` placement without it asks for none, since a cluster with no such resource refuses the request: Slurm cannot then keep two allocations off one GPU, so every allocation is a whole node (`--exclusive`) and the CLI names the job's devices inside it in `ROCR_VISIBLE_DEVICES` (as many as the job asked for, the lowest block), which the runtime honours and nothing enforces. An `apptainer` placement gives GPUs only this way; it refuses `gpu` and `kubernetes`. A placement gives the GPUs of one vendor, never both tables. |
+| `[placements.<name>.resources.neuron] count`, `cores_per_device` | The machine's AWS Neuron devices (Trainium), for tasks of the `trainium` backend, shared by logical NeuronCore, the unit `NEURON_RT_VISIBLE_CORES` names. Both are required: `count` is how many NeuronCores the machine has (`neuron-ls --json-output`: the sum of `nc_count`) and `cores_per_device` how many each device has (`nc_count`), which says the device of each core (core `c` is on `/dev/neuron<c / cores_per_device>`). The CLI checks both against `neuron-ls` at daemon start. The table is always a pool: the cores `0` to `count - 1` are shared by the jobs, each given a contiguous range of its own (see "GPU pools"). Only `local` and `ssh` placements give it, and not beside a `gpu` or `rocm` table. |
 | `[placements.<name>.resources.kubernetes] kubeconfig`, `registry`, `builder`, `network` | An absolute path of the kubeconfig on the engine's machine (required), the registry and image builder addresses the container gets, and its network mode (empty leaves docker's default). |
 | `[placements.<name>.resources.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`; for `apptainer`, a directory of the compute nodes, such as one on the shared file system. |
 
@@ -913,6 +917,18 @@ count = 8              # GPUs per node
 hf = "/shared/hf-cache"
 ```
 
+This machine, an AWS Trainium instance (a trn2.3xlarge has one device of four NeuronCores):
+
+```toml
+version = "0.2"
+
+[placements.trn]
+kind = "local"
+[placements.trn.resources.neuron]
+count = 4              # neuron-ls --json-output: the sum of nc_count; max_jobs is 4 unless set
+cores_per_device = 4   # nc_count of each device
+```
+
 Several placements in one file, with a policy and a Kubernetes cluster on this machine:
 
 ```toml
@@ -950,12 +966,20 @@ count = 8
 
 ### GPU pools
 
-A `local` or `ssh` placement whose GPU table (`gpu` or `rocm`) has a `count` makes the machine's GPUs
-`0` to `count - 1` a pool, and jobs share it by number. At daemon start the CLI reads how many GPUs
-the machine has, with `nvidia-smi` or the AMD tools (an ssh host is read over ssh), and refuses to
-start when the `count` is not that number, naming the key
-(`placements.pod.resources.gpu.count = 8, and local has 4 GPUs`); a machine it cannot read says
+A `local` or `ssh` placement whose GPU table (`gpu` or `rocm`) has a `count`, or that has a `neuron`
+table, makes the machine's devices `0` to `count - 1` a pool, and jobs share it by number. At daemon
+start the CLI reads how many devices the machine has, with `nvidia-smi`, the AMD tools or `neuron-ls`
+(an ssh host is read over ssh), and refuses to start when the `count` is not that number, naming the
+key (`placements.pod.resources.gpu.count = 8, and local has 4 GPUs`); a machine it cannot read says
 nothing, and its `count` is believed.
+
+A pool of Neuron devices counts logical NeuronCores, not devices: `NEURON_RT_VISIBLE_CORES` names
+cores, and one Trainium2 device has four (eight with `NEURON_LOGICAL_NC_CONFIG=1`), so jobs of one
+core each can share a device. Everything below holds for it with "GPU" read as "NeuronCore", with
+two differences. A job is given a contiguous range of cores, since the Neuron runtime refuses a
+`NEURON_RT_VISIBLE_CORES` with a gap ("Logical Neuron cores are not contiguous"): a job whose count
+of cores is free but not in a row waits for a range. And before a job's commands run, its
+environment checks that its cores hold no other process's device memory (below).
 
 - **Claims.** A check or command job of a task that needs GPUs claims as many devices of the pool as
   its `--gpus N` says, and a measure takes the whole pool, alone, with its placement, as it takes
@@ -1000,7 +1024,25 @@ nothing, and its `count` is believed.
   (`CUDA_VISIBLE_DEVICES`, or `ROCR_VISIBLE_DEVICES`) and nothing else: a host process that ignores
   them can open any GPU, and so can a process that vibesys did not start, which the pool never
   sees. Only `ROCR_VISIBLE_DEVICES` is set for AMD GPUs: `HIP_VISIBLE_DEVICES` counts the devices
-  left after it, so setting both to the group would filter twice.
+  left after it, so setting both to the group would filter twice. A container of a Neuron pool gets
+  the `/dev/neuron*` devices that hold its cores (`--device /dev/neuron0`), so it cannot open
+  another device, and `NEURON_RT_VISIBLE_CORES` names its cores, by the machine's numbering; the
+  cores of its devices that are not its own are kept from it by that variable alone. A host process
+  gets the variable alone.
+- **Device memory another process holds.** A Neuron runtime that ends uncleanly, as after profiling,
+  can leave device memory allocated, and a process the pool does not know of can hold cores. So
+  before a job of a Neuron pool runs its commands, in its container or on the host, it runs a
+  check that reads the device memory the driver counts on each physical core in sysfs
+  (`/sys/class/neuron_device/neuron<d>/neuron_core<p>/stats/memory_usage/device_mem/present`),
+  never the scheduler's record. The job fails before its commands (`UNAVAILABLE`), naming the
+  device and the physical cores, when more physical cores of one of its devices hold more than
+  1 MiB than the cores it was not given are made of: then some of that memory is on its own cores.
+  sysfs does not say which physical cores make up which logical NeuronCore (on a trn2.3xlarge,
+  logical core 0 is counted on physical core 4), so the check counts: it is exact for a job given a
+  whole device, as a measure is, which any memory on the device refuses, and for a job given part of
+  a device it refuses only what the count proves. `neuron-ls` lists the processes that hold a
+  device; memory with no process is stale, and the next Neuron runtime that opens those cores frees
+  it. A check that cannot read sysfs fails the job too.
 - **Host jobs** take their GPUs from the pool of the local placement that declares this machine's
   GPUs, and its slot, so a host job and a docker job of this machine never share a GPU. A machine
   with no container runtime declares `kind = "local"` with a `count` (the second example below)
@@ -1018,8 +1060,10 @@ nothing, and its `count` is believed.
   given the GPUs it asks for of the pool.
 
 Adding a vendor is a package under `internal/resource/` with its role (`resource.Devices`: the
-pool's id and size, what a container is given for a group, and the variables a host process is
-given) and its resource, a line in the wiring, and its `devicestest` suite: no other file changes.
+pool's id and size, what a container is given for a group, the variables a host process is given,
+and the check that runs before a job's commands, if any) and its resource, a line in the wiring,
+and its `devicestest` suite: no other file changes. A vendor whose groups must be ranges says so
+in `core.ResourceKind.Contiguous`.
 
 ### The apptainer placement
 

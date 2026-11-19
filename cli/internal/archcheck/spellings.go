@@ -30,8 +30,9 @@ var spelledAt = map[string][]string{
 	"nvidia": {"cli/internal/backend/nvidia/", "cli/internal/resource/gpu/", "cli/internal/core/accelerator.go"},
 	// The variables that name the GPUs a process may use are each vendor's own, and only its role
 	// (resource.Devices) writes them; the apptainer engine lists the ones a cluster's Slurm sets.
-	"cuda_visible_devices": {"cli/internal/resource/gpu/", "cli/internal/environment/apptainer/cluster.go"},
-	"rocr_visible_devices": {"cli/internal/resource/rocm/", "cli/internal/environment/apptainer/cluster.go"},
+	"cuda_visible_devices":    {"cli/internal/resource/gpu/", "cli/internal/environment/apptainer/cluster.go"},
+	"rocr_visible_devices":    {"cli/internal/resource/rocm/", "cli/internal/environment/apptainer/cluster.go"},
+	"neuron_rt_visible_cores": {"cli/internal/resource/neuron/"},
 }
 
 // Spellings returns the spellings the rule holds, sorted.

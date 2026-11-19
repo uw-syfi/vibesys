@@ -48,6 +48,12 @@ func amdOf(check ...string) *fakeresource.Fake {
 	}
 }
 
+// neuronOf is a resource of Neuron devices the way the neuron resource is: its facts, and nothing
+// attached or claimed of its own, since a job's devices are its range's (resource.Devices).
+func neuronOf() *fakeresource.Fake {
+	return &fakeresource.Fake{Of: core.ResourceNeuron, Facts: map[string]string{"neuron_model": "Trainium2", "neuron_device_count": "1"}}
+}
+
 // remoteMachine is a Machine whose directories live under another root, as a machine reached
 // over ssh has them, and that records what it was asked.
 type remoteMachine struct {

@@ -6,15 +6,18 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/backend/amd"
+	neuronfacts "github.com/uw-syfi/vibesys/cli/internal/backend/neuron"
 	"github.com/uw-syfi/vibesys/cli/internal/backend/nvidia"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/operator"
 	"github.com/uw-syfi/vibesys/cli/internal/remote"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/gpu"
+	"github.com/uw-syfi/vibesys/cli/internal/resource/neuron"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/rocm"
 	"github.com/uw-syfi/vibesys/cli/internal/schedule"
 )
@@ -62,6 +65,9 @@ func pooledOf(name string, pl *cliv1.Placement) (*pooled, error) {
 	case core.VendorAMD:
 		p.kind = core.ResourceROCm
 		p.devices, err = rocm.NewDevices(rocm.DevicesConfig{Machine: machine, Size: pool.Size})
+	case core.VendorAWS:
+		p.kind = core.ResourceNeuron
+		p.devices, err = neuron.NewDevices(neuron.DevicesConfig{Machine: machine, Size: pool.Size, CoresPerDevice: int(pl.GetResources().GetNeuron().GetCoresPerDevice())})
 	default:
 		return nil, fmt.Errorf("%s: no GPUs of the vendor %q are given by number", pool.Key, pool.Vendor)
 	}
@@ -109,30 +115,39 @@ func hostPoolOf(pools map[string]*pooled) (*pooled, error) {
 		"the operator config: placements %s are local placements that each declare GPUs of this machine, and a host job cannot say which it uses: declare this machine's GPUs in one", found)}
 }
 
-// countOf reads how many GPUs of a vendor a machine has.
+// countOf reads how many devices of a vendor a machine has.
 type countOf struct {
 	facts interface {
 		ProbeFacts(ctx context.Context) (map[string]string, error)
 	}
 	fact string
+	// unit is what the pool counts, for the refusal.
+	unit string
+	// perDevice, when set, is the fact of how many of the pool's units each device has, which
+	// must be the declared one.
+	perDevice string
 }
 
-// machineCounts are the readers of the GPU count of a machine each vendor's facts come from.
+// machineCounts are the readers of the device count of a machine each vendor's facts come from.
 func machineCounts(vendor core.AcceleratorVendor, shell remote.Shell, clk Clocks) (countOf, bool) {
 	switch vendor {
 	case core.VendorNVIDIA:
-		return countOf{facts: &nvidia.GPUs{Shell: shell, Timers: clk}, fact: nvidia.FactCount}, true
+		return countOf{facts: &nvidia.GPUs{Shell: shell, Timers: clk}, fact: nvidia.FactCount, unit: "GPUs"}, true
 	case core.VendorAMD:
-		return countOf{facts: &amd.GPUs{Shell: shell, Timers: clk}, fact: amd.FactCount}, true
+		return countOf{facts: &amd.GPUs{Shell: shell, Timers: clk}, fact: amd.FactCount, unit: "GPUs"}, true
+	case core.VendorAWS:
+		return countOf{facts: &neuronfacts.Devices{Shell: shell, Timers: clk}, fact: neuronfacts.FactCores, unit: "NeuronCores", perDevice: neuronfacts.FactCoresPerDevice}, true
 	}
 	return countOf{}, false
 }
 
-// checkPool refuses a pool whose declared size is not the number of GPUs its machine has: it hands
-// out numbers that name no GPU, or leaves GPUs that no job is given while a measure believes it
-// holds the machine whole. The refusal names the key of the file. A machine that cannot be read
-// says nothing: the check is made again when it can.
-func checkPool(ctx context.Context, p *pooled, count countOf) error {
+// checkPool refuses a pool whose declared size is not the number of devices its machine has: it
+// hands out numbers that name no device, or leaves devices that no job is given while a measure
+// believes it holds the machine whole. For a pool of NeuronCores it also refuses a cores_per_device
+// that is not the machine's, which would give a job the wrong /dev/neuron* devices. The refusal
+// names the key of the file. A machine that cannot be read says nothing: the check is made again
+// when it can.
+func checkPool(ctx context.Context, p *pooled, count countOf, perDevice uint32) error {
 	facts, err := count.facts.ProbeFacts(ctx)
 	if err != nil {
 		return nil
@@ -141,7 +156,17 @@ func checkPool(ctx context.Context, p *pooled, count countOf) error {
 	if err != nil {
 		return nil
 	}
-	return core.CheckPoolCount(p.pool.Key, p.pool.Size, p.machine, n)
+	if err := core.CheckPoolCount(p.pool.Key, p.pool.Size, p.machine, n, count.unit); err != nil {
+		return err
+	}
+	if count.perDevice == "" {
+		return nil
+	}
+	if per, err := strconv.Atoi(facts[count.perDevice]); err == nil && per != int(perDevice) {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
+			"%s = %d, and each device of %s has %d %s", strings.TrimSuffix(p.pool.Key, ".count")+".cores_per_device", perDevice, p.machine, per, count.unit)}
+	}
+	return nil
 }
 
 // checkPools refuses a config whose pool is not the number of GPUs its machine has, before the
@@ -163,7 +188,7 @@ func (p Process) checkPools(ctx context.Context, op *cliv1.OperatorConfig, clk C
 		if !ok {
 			continue
 		}
-		if err := checkPool(ctx, pool, count); err != nil {
+		if err := checkPool(ctx, pool, count, op.GetPlacements()[name].GetResources().GetNeuron().GetCoresPerDevice()); err != nil {
 			return fmt.Errorf("the operator config %s: %w", operator.Path(p.Getenv, p.Home), err)
 		}
 	}
