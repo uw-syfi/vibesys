@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -282,3 +283,148 @@ def test_a_directory_that_holds_a_result_is_never_overwritten(tmp_path: Path) ->
     assert _simulate(tmp_path, again) == 64
     assert again.calls == []
     assert (tmp_path / "out" / "provenance.json").read_text() == before
+
+
+REV = "e3ace30520b20a116d9df497f2f56bdfca300d51"
+FITTED_ON: dict[str, object] = {
+    "commit": "0123456789abcdef",
+    "job": "j-17",
+    "metric": "output_tok_s",
+    "measured": 194.0,
+    "timeline": "/scratch/profile-head/steps.jsonl",
+}
+CALIBRATION: dict[str, object] = {
+    "simulator": {"checkout": "/sims/ServingStudioSim", "revision": REV, "pinned_by": "pins.toml"},
+    "preset": "/records/presets/head.yaml",
+    "workload": "trace: 64 requests, 2048 in / 512 out, 50 ms apart",
+    "fitted_on": [FITTED_ON],
+    "factors": {"arch.kind_time_scale.moe_prefill": 1.12},
+    "residual_before": {"output_tok_s": 0.18},
+    "residual_after": {"output_tok_s": -0.02},
+    "engine_limitations_not_fitted": ["first-use stalls after warm-up"],
+    "commands": ["uv run --no-sync python -m launcher head.yaml --no-gpu"],
+    "result_dirs": ["/scratch/sim-head-fit"],
+    "supersedes": None,
+}
+TODAY = {"name": "today", "overrides": {}}
+FASTER_MOE = {"name": "moe_prefill_2x", "overrides": {"arch.kind_time_scale.moe_prefill": 0.5}}
+ENGINE_STEP: dict[str, object] = {
+    "name": "engine",
+    "overrides": {},
+    "values": {"64": 194.0},
+    "command": "c0",
+    "result_dir": "/scratch/l0",
+}
+CHUNK_STEP: dict[str, object] = {
+    "name": "+ chunk 512",
+    "overrides": {"worker.max_batch_tokens": 512},
+    "values": {"64": 240.0},
+    "command": "c1",
+    "result_dir": "/scratch/l1",
+}
+BEST: dict[str, object] = {
+    "concurrency": 64,
+    "overrides": {"worker.max_batch_tokens": 512},
+    "value": 240.0,
+    "command": "c1",
+    "result_dir": "/scratch/l1",
+}
+STUDY: dict[str, object] = {
+    "simulator": {"checkout": "/sims/ServingStudioSim", "revision": REV},
+    "preset": "/records/presets/head.yaml",
+    "workload": "trace: 64 requests, 2048 in / 512 out, 50 ms apart",
+    "metric": "output_tok_s",
+    "calibration": "calibration-001",
+    "axes": [
+        {"name": "worker.max_batch_tokens", "values": [512, 2048, 4096], "assumption": None},
+        {"name": "worker.dp_placement", "values": ["least-loaded"], "assumption": "engine only"},
+    ],
+    "scenarios": [TODAY, FASTER_MOE],
+    "ladder": [ENGINE_STEP, CHUNK_STEP],
+    "best": [BEST],
+}
+
+
+def _keep(tmp_path: Path, kind: str, record: object) -> int:
+    file = tmp_path / "record.json"
+    file.write_text(json.dumps(record))
+    return ss.main(["record", "--kind", kind, "--file", str(file), "--dir", str(tmp_path / "r")])
+
+
+def _kept(tmp_path: Path) -> list[str]:
+    return sorted(p.name for p in (tmp_path / "r").glob("*.json"))
+
+
+def test_calibrations_are_appended_each_superseding_the_latest(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert _keep(tmp_path, "calibration", CALIBRATION) == 0
+    assert json.loads(capsys.readouterr().out)["id"] == "calibration-001"
+
+    assert _keep(tmp_path, "calibration", CALIBRATION) == 64  # must supersede calibration-001
+    assert _keep(tmp_path, "calibration", {**CALIBRATION, "supersedes": "calibration-001"}) == 0
+    assert _kept(tmp_path) == ["calibration-001.json", "calibration-002.json"]
+    assert json.loads((tmp_path / "r" / "calibration-001.json").read_text()) == CALIBRATION
+
+
+@given(count=st.integers(min_value=1, max_value=12))
+def test_records_are_numbered_in_order_and_never_replaced(count: int) -> None:
+    with tempfile.TemporaryDirectory() as scratch:
+        tmp_path = Path(scratch)
+        for n in range(count):
+            assert _keep(tmp_path, "study", {**STUDY, "metric": f"m{n}"}) == 0
+        kept = _kept(tmp_path)
+        assert kept == [f"study-{n:03d}.json" for n in range(1, count + 1)]
+        for n, name in enumerate(kept):
+            assert json.loads((tmp_path / "r" / name).read_text())["metric"] == f"m{n}"
+
+
+@pytest.mark.parametrize("key", sorted(CALIBRATION))
+def test_a_calibration_missing_a_key_is_refused_naming_it(
+    tmp_path: Path, key: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    record = {k: v for k, v in CALIBRATION.items() if k != key}
+
+    assert _keep(tmp_path, "calibration", record) == 64
+    assert key in capsys.readouterr().err
+    assert not (tmp_path / "r").exists()
+
+
+@pytest.mark.parametrize(
+    ("kind", "change", "message"),
+    [
+        ("calibration", {"extra": 1}, "unknown key extra"),
+        ("calibration", {"factors": {}}, "factors"),
+        ("calibration", {"factors": {"x": 0}}, "factors.x"),
+        ("calibration", {"residual_after": {}}, "residual_after"),
+        ("calibration", {"simulator": {"checkout": "/s", "revision": "main"}}, "revision"),
+        ("calibration", {"fitted_on": [{**FITTED_ON, "timeline": ""}]}, "fitted_on[0].timeline"),
+        ("study", {"axes": [{"name": "a", "values": [1, 2], "assumption": "x"}]}, "axes[0]"),
+        ("study", {"axes": [{"name": "a", "values": [1], "assumption": None}]}, "no axis"),
+        ("study", {"scenarios": [FASTER_MOE, FASTER_MOE]}, "today's kernels"),
+        ("study", {"ladder": [CHUNK_STEP]}, "ladder[0]"),
+        ("study", {"ladder": [ENGINE_STEP, CHUNK_STEP, ENGINE_STEP]}, "not cumulative"),
+        ("study", {"best": [BEST, BEST]}, "listed twice"),
+    ],
+)
+def test_a_record_that_breaks_its_format_is_refused_naming_the_key(
+    tmp_path: Path,
+    kind: str,
+    change: dict[str, object],
+    message: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    record = {**(CALIBRATION if kind == "calibration" else STUDY), **change}
+
+    assert _keep(tmp_path, kind, record) == 64
+    assert message in capsys.readouterr().err
+    assert not (tmp_path / "r").exists()
+
+
+def test_a_record_needs_a_directory(tmp_path: Path) -> None:
+    file = tmp_path / "record.json"
+    file.write_text(json.dumps(STUDY))
+    records = {"SERVINGSTUDIO_RECORDS": str(tmp_path / "r")}
+
+    assert ss.main(["record", "--kind", "study", "--file", str(file)], environ={}) == 64
+    assert ss.main(["record", "--kind", "study", "--file", str(file)], environ=records) == 0

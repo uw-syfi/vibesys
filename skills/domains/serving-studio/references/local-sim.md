@@ -47,10 +47,16 @@ A what-if is the same preset with one override, run beside the reproduction:
 Sweep a scale over several factors and report the curve: a gain that flattens early says the
 next bottleneck is close.
 
+The same scales, fitted to the head's measured timeline instead of chosen, are a calibration
+([calibration.md](calibration.md)): a calibrated what-if runs with the calibration's factors as
+overrides on both the reproduction and the change. A sweep over many system axes at once is a
+design study ([design-study.md](design-study.md)).
+
 ## Trainium
 
 Trainium2 needs the `[trainium]` commit of [`../assets/pins.toml`](../assets/pins.toml)
-(ServingStudioSim pull request 107). Its presets are under `presets/trn2/`, and
+(ServingStudioSim pull request 107), unless the task pins its own. Its presets are under
+`presets/trn2/`, and
 `doc/pr/trn2-flashnext/` in that checkout records how the model was aligned with a real engine
 and which parts it does not trust: the all-to-all cost at 8-way data parallelism, activation and
 scratch memory in the HBM check, and first-use stalls after warm-up. A prediction that rests on

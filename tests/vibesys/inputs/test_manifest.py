@@ -512,3 +512,37 @@ def test_the_cli_tools_domain_is_declared_by_its_hyphenated_name() -> None:
 def test_a_domain_that_is_not_registered_is_rejected_naming_the_field(spelling: str) -> None:
     with pytest.raises(ValidationError, match=r"agent\.domain"):
         InputManifest.model_validate(_manifest({"agent": {"domain": spelling}}))
+
+
+_TOOL_NAMES = st.from_regex(r"[a-z][a-z0-9]{0,8}(-[a-z0-9]{1,8}){0,2}", fullmatch=True)
+_COMMITS = st.text(alphabet="0123456789abcdefABCDEF", min_size=7, max_size=64)
+
+
+@given(revisions=st.dictionaries(_TOOL_NAMES, _COMMITS, max_size=3))
+def test_tool_revisions_round_trip_in_lower_case(revisions: dict[str, str]) -> None:
+    manifest = InputManifest.model_validate(
+        _manifest({"agent": {"domain": "llm-serving", "tool_revisions": revisions}})
+    )
+
+    assert manifest.agent.tool_revisions == {k: v.lower() for k, v in revisions.items()}
+    assert InputManifest.model_validate(tomllib.loads(render_input_manifest(manifest))) == manifest
+
+
+@pytest.mark.parametrize(
+    ("revisions", "message"),
+    [
+        ({"ServingStudio": _COMMIT}, "is not a tool name"),
+        ({"servingstudio_sim": _COMMIT}, "is not a tool name"),
+        ({"servingstudio--sim": _COMMIT}, "is not a tool name"),
+        ({"servingstudio-sim": "main"}, "servingstudio-sim must be a 7-64 character"),
+        ({"servingstudio-sim": ""}, "servingstudio-sim must be non-empty"),
+    ],
+)
+def test_a_bad_tool_revision_is_rejected_naming_the_table(
+    revisions: dict[str, str], message: str
+) -> None:
+    with pytest.raises(ValidationError, match=r"agent\.tool_revisions") as error:
+        InputManifest.model_validate(
+            _manifest({"agent": {"domain": "llm-serving", "tool_revisions": revisions}})
+        )
+    assert message in str(error.value)

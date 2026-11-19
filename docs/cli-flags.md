@@ -729,6 +729,11 @@ instead, `--input-domain` sets `[agent].domain` for the generated manifest. New
 domains are added in source by registering a domain package with optional
 environment setup/teardown hooks.
 
+`[agent.tool_revisions]` optionally names, by tool, the commit of a tool that a
+domain skill uses (`servingstudio-sim = "<commit>"` for the `serving-studio`
+skill's simulator). The run checks each name and commit and otherwise leaves it
+to the skill, which reads it before its own default pin. Task schema 0.1 only.
+
 `--modality` selects one of the modalities the run's domain declares (for `llm-serving`:
 text generation, the default, image or video generation, text-to-speech, speech-to-text and
 realtime audio); its text lives in that domain's pack. Other domains declare none and reject

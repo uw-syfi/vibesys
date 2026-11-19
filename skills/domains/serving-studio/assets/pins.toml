@@ -1,6 +1,11 @@
 # The ServingStudio revisions this skill was written against. A local install checks out one of
 # these; another revision works too, but every prediction then names the revision it came from.
 # ServingStudio publishes no packages or release tags, so a commit is the only stable name.
+# A task that needs another ServingStudioSim revision names it in its vibesys.input.toml, which
+# wins over this file:
+#
+#   [agent.tool_revisions]
+#   servingstudio-sim = "<commit>"
 
 [workspace]
 # The ServingStudio meta-repository: it pins compatible Sim, Agent and UI commits as submodules.
