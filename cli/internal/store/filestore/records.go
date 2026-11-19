@@ -69,7 +69,13 @@ import (
 // versions 2 to 8, and Open migrates a store of 2 to 7 the same way, writing the format file at
 // version 8 last. A job saved before has neither: it asked for no count, and its GPUs are unknown,
 // never guessed.
-const formatVersion = 8
+//
+// Version 9 adds a plan's kind and the plans it depends on (Plan.kind, Plan.depends_on), which a
+// version 8 program would refuse as unknown. It only adds, so this program reads versions 2 to 9, and
+// Open migrates a store of 2 to 8 the same way, writing the format file at version 9 last. A plan
+// saved before has no kind and no dependencies, and none is invented for it: it reads as a plan whose
+// planner stated neither, and is ready while it is open.
+const formatVersion = 9
 
 // rekeyedBefore is the first version whose results carry keys of the current rule: a result of a
 // record older than it is rekeyed when it is read.

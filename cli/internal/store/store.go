@@ -121,7 +121,9 @@ type FrontierStore interface {
 // PlanStore holds plans.
 type PlanStore interface {
 	// CreatePlan stores a plan with the next number, open, and returns it. Numbers are never
-	// reused.
+	// reused. Its dependencies are kept ascending and each once; one the task does not have fails
+	// with FailureNotFound, and a kind that is neither none nor one of core.PlanKinds is invalid
+	// input.
 	CreatePlan(ctx context.Context, plan core.NewPlan) (core.Plan, error)
 
 	// Plan returns one plan, comments included.
@@ -130,7 +132,10 @@ type PlanStore interface {
 	// Plans returns the plans matching the filter, by number.
 	Plans(ctx context.Context, filter core.PlanFilter) ([]core.Plan, error)
 
-	// EditPlan applies an edit, including a status change and a comment, as one change.
+	// EditPlan applies an edit, including a status change and a comment, as one change. New
+	// dependencies are refused as core.CheckDependsOn refuses them: one the task does not have with
+	// FailureNotFound, and the plan itself, or one that depends on it through others, as invalid
+	// input, so no cycle is ever stored.
 	EditPlan(ctx context.Context, number core.PlanNumber, edit core.PlanEdit) (core.Plan, error)
 }
 

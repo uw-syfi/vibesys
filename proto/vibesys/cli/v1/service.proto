@@ -688,6 +688,11 @@ message CreatePlanRequest {
   // The workstream the plan joins, or 0 for none. A number the task has no workstream for is
   // NOT_FOUND.
   uint32 workstream = 5;
+  // What kind of change the plan makes, UNSPECIFIED for none stated.
+  PlanKind kind = 6 [(buf.validate.field).enum.defined_only = true];
+  // The plans it builds on. A number the task has no plan for is NOT_FOUND; the plan's own number
+  // does not exist yet, so a new plan makes no cycle.
+  repeated uint32 depends_on = 7 [(buf.validate.field).repeated.items.uint32.gt = 0];
 }
 
 message CreatePlanResponse {
@@ -702,6 +707,13 @@ message ListPlansRequest {
   }];
   // Matches a plan whose title or body contains the text.
   string text = 3;
+  // Matches a plan of one of these kinds; a plan with no kind matches none.
+  repeated PlanKind kinds = 4 [(buf.validate.field).repeated.items.enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Matches a plan that is ready to start: open, and every plan in its depends_on won.
+  bool ready = 5;
 }
 
 message ListPlansResponse {
@@ -720,8 +732,8 @@ message ViewPlanResponse {
 message EditPlanRequest {
   option (buf.validate.message).cel = {
     id: "edit_plan.sets_something"
-    message: "set at least one of title, body, status, gain_bound or workstream"
-    expression: "has(this.title) || has(this.body) || has(this.status) || has(this.gain_bound) || this.workstream != 0u"
+    message: "set at least one of title, body, status, gain_bound, workstream, kind or depends_on"
+    expression: "has(this.title) || has(this.body) || has(this.status) || has(this.gain_bound) || this.workstream != 0u || has(this.kind) || has(this.depends_on)"
   };
   CallContext context = 1;
   uint32 number = 2 [(buf.validate.field).uint32.gt = 0];
@@ -737,6 +749,20 @@ message EditPlanRequest {
   // Moves the plan to this workstream, and 0 leaves it where it is: a plan's workstream is set and
   // moved, never cleared. A number the task has no workstream for is NOT_FOUND.
   uint32 workstream = 7;
+  // Replaces the plan's kind. A plan's kind is replaced and never cleared.
+  optional PlanKind kind = 8 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Replaces the plan's dependencies with these, all of them; present and empty clears them. A
+  // number the task has no plan for is NOT_FOUND, and the plan itself, or a plan that depends on it
+  // through others, is INVALID_ARGUMENT: dependencies make no cycle.
+  PlanDependencies depends_on = 9;
+}
+
+// PlanDependencies is a whole set of plans a plan depends on, by number.
+message PlanDependencies {
+  repeated uint32 plans = 1 [(buf.validate.field).repeated.items.uint32.gt = 0];
 }
 
 message EditPlanResponse {

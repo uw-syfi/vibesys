@@ -64,9 +64,16 @@ you stop), so a miss costs one worker pass. Fill the Bold fields in
    get one number. Then run `vibesys-cli plan create --title "<claim>" --body-file -
    --workstream <n>` with a stub body (one line of mechanism) and `--gain-bound <share>`, the
    most the idea could gain as a share of the headline (see step 5); note the number it prints.
+   Add `--kind <kind>`, one of `kernel` (one kernel or operator), `system` (scheduling, batching,
+   memory management), `layout` (how data sits in memory or across devices), `simulator` (a model
+   that predicts what other plans gain), `probe` (a measurement that ships nothing) or
+   `integration` (merges other plans). When the idea only pays once other plans have landed, say
+   so with `--depends-on <n>[,<n>...]`, their numbers; `vibesys-cli` refuses a plan that does not
+   exist and a dependency that would make a cycle.
    Before investing in details, list the plans again: if a sibling already claimed the same
    mechanism, pick another idea and change yours with `plan edit <n> --title ... --body-file -`
-   (`--workstream <n>` moves it to another line of work).
+   (`--workstream <n>` moves it to another line of work; `--kind` and `--depends-on` replace the
+   kind and the whole set of dependencies, and `--depends-on none` clears them).
 4. Check premises cheaply: read the installed library or code to confirm the API, kernel or flag
    you rely on exists and fits this hardware. Check the idea against the rules in `OBJECTIVE.md`.
    On backend `trainium`, also check it against the checklist of the `neuron-safeguards` domain

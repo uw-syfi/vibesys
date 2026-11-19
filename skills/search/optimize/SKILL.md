@@ -95,6 +95,13 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    Plans are grouped in workstreams, the lines of work the planners named (`vibesys-cli workstream
    list`). When you pause or close a line, say so where it lives: `vibesys-cli workstream edit <n>
    --status paused|closed --note "<one line of why>"`, and `--status active` when it resumes.
+   A plan may name its kind (`kernel`, `system`, `layout`, `simulator`, `probe`, `integration`;
+   `plan list --kind <kind>`) and the plans it builds on (`plan edit <n> --depends-on
+   <n>[,<n>...]`, which replaces the set; `none` clears it). `vibesys-cli plan list --ready` lists
+   the open plans whose dependencies are all `won`, the ones that can start now; `plan view <n>`
+   shows a plan's dependencies and dependents with their statuses. A dependency that is parked or
+   rejected keeps its dependents waiting until you edit their dependencies. The CLI never starts a
+   plan for you: which ready plan to fund is still your decision.
 3. Dispatch workers for chosen plans with a self-contained brief from briefs.md; save the brief
    text as a plan comment. Branch new ideas from the current result branch head.
 4. Measure every returned candidate commit, then dispatch a judge. A candidate is a full commit with

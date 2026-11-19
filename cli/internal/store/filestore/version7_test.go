@@ -43,7 +43,7 @@ func TestEveryFieldOfAJobSpecIsWrittenAtAVersionThatKnowsIt(t *testing.T) {
 }
 
 // A store of version 7, written before a job could ask for GPUs or be given them, opens as a store
-// of version 8, and each of its jobs reads as one that asked for no count and whose GPUs are
+// of the current version, and each of its jobs reads as one that asked for no count and whose GPUs are
 // unknown: nothing is guessed for a job saved before.
 func TestAStoreOfVersionSevenReadsItsJobsWithNoGPUs(t *testing.T) {
 	mem := fsys.NewMemFS()
@@ -60,8 +60,8 @@ func TestAStoreOfVersionSevenReadsItsJobsWithNoGPUs(t *testing.T) {
 		}
 	}
 	opened := openOn(t, image)
-	if got := formatOf(t, image); got != 8 {
-		t.Fatalf("format after the migration = %d, want 8", got)
+	if got := formatOf(t, image); got != 9 {
+		t.Fatalf("format after the migration = %d, want 9", got)
 	}
 	jobs, err := opened.Jobs(t.Context(), core.JobFilter{})
 	if err != nil || len(jobs) == 0 {

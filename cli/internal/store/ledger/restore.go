@@ -14,7 +14,8 @@ import (
 // breaks an invariant a store keeps: job ids, plan numbers and workstream numbers are consecutive
 // from 1, a result belongs to a job that succeeded and names it and a job that names a result has it,
 // a plan link names a plan that exists, a plan's workstream exists, a plan's history is consistent
-// (core.Plan.CheckHistory), no two workstreams that are not closed have one title, the frontier names
+// (core.Plan.CheckHistory), a plan's kind is one there is and its dependencies are plans that exist,
+// ascending, each once and in no cycle (core.CheckDependsOn), no two workstreams that are not closed have one title, the frontier names
 // each member once, and only a job has a log. A value that no store would hold is refused too, so a
 // record edited by hand cannot get past what Submit would have refused.
 func Restore(rules store.Rules, snap Snapshot) (*Ledger, error) {
@@ -174,7 +175,18 @@ func (l *Ledger) restorePlans(plans []core.Plan) error {
 		if held.Workstream != 0 && !l.hasWorkstream(held.Workstream) {
 			return internal("plan %d belongs to workstream %d, which does not exist", held.Number, held.Workstream)
 		}
+		if err := checkKind(fmt.Sprintf("plan %d.Kind", held.Number), held.Kind); err != nil {
+			return internal("%v", err)
+		}
 		l.plans = append(l.plans, held)
+	}
+	for _, plan := range l.plans {
+		if !slices.Equal(plan.DependsOn, core.NormalizeDependsOn(plan.DependsOn)) {
+			return internal("plan %d depends on %v, which is not ascending with each plan once", plan.Number, plan.DependsOn)
+		}
+		if err := core.CheckDependsOn(fmt.Sprintf("plan %d", plan.Number), plan.Number, plan.DependsOn, l.plans); err != nil {
+			return internal("%v", err)
+		}
 	}
 	return nil
 }

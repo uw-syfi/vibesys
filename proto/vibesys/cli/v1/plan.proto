@@ -20,6 +20,25 @@ enum PlanStatus {
   PLAN_STATUS_REJECTED = 5;
 }
 
+// PlanKind is what kind of change a plan makes, as its planner states it. The CLI stores it and
+// filters by it (plan list --kind), and decides nothing from it.
+enum PlanKind {
+  // No kind stated: every plan saved before store format 9, and one whose planner gives none.
+  PLAN_KIND_UNSPECIFIED = 0;
+  // Changes one kernel or operator.
+  PLAN_KIND_KERNEL = 1;
+  // Changes how the system runs work: scheduling, batching, memory management.
+  PLAN_KIND_SYSTEM = 2;
+  // Changes how data is laid out in memory or across devices.
+  PLAN_KIND_LAYOUT = 3;
+  // Builds or changes a model or simulator that predicts what other plans gain.
+  PLAN_KIND_SIMULATOR = 4;
+  // Measures or profiles to answer a question, and changes nothing that ships.
+  PLAN_KIND_PROBE = 5;
+  // Merges the work of other plans into one change.
+  PLAN_KIND_INTEGRATION = 6;
+}
+
 // PlanGainReference is what a plan's gain bound is a share of.
 enum PlanGainReference {
   PLAN_GAIN_REFERENCE_UNSPECIFIED = 0;
@@ -69,6 +88,11 @@ message Plan {
     message: "a plan that has transitions has the status of the last one"
     expression: "this.transitions.size() == 0 || this.transitions[this.transitions.size() - 1].status == this.status"
   };
+  option (buf.validate.message).cel = {
+    id: "plan.depends_not_on_itself"
+    message: "a plan does not depend on itself"
+    expression: "!(this.number in this.depends_on)"
+  };
   uint32 number = 1;
   string title = 2;
   string body = 3;
@@ -90,6 +114,30 @@ message Plan {
   // nothing and adds none. Empty on a plan saved before store format 6; such a plan's first
   // transition is its first status change after that, so its history before is not known.
   repeated PlanTransition transitions = 11;
+  // What kind of change the plan makes, UNSPECIFIED when its planner states none. Set with --kind on
+  // plan create and plan edit; replaced, never cleared.
+  PlanKind kind = 12 [(buf.validate.field).enum.defined_only = true];
+  // The plans this one builds on, by number, ascending and each once: plans of the same task, never
+  // this one, and never in a cycle, which vibesysd refuses. Set with --depends-on on plan create and
+  // plan edit. The plan is ready (plan list --ready) while it is open and every one of these is won.
+  // Empty on a plan saved before store format 9.
+  repeated uint32 depends_on = 13 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      uint32: {gt: 0}
+    }
+  }];
+}
+
+// PlanSummary names another plan in a plan's view: one it depends on, or one that depends on it.
+message PlanSummary {
+  uint32 number = 1 [(buf.validate.field).uint32.gt = 0];
+  string title = 2;
+  PlanStatus status = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  PlanKind kind = 4 [(buf.validate.field).enum.defined_only = true];
 }
 
 // LinkedJob is a job a plan was linked to, with its commit's verdict against the current result
@@ -102,6 +150,10 @@ message LinkedJob {
 message PlanView {
   Plan plan = 1;
   repeated LinkedJob jobs = 2;
+  // The plans in plan.depends_on, by number, with where each stands.
+  repeated PlanSummary depends_on = 3;
+  // The plans whose depends_on names this one, by number.
+  repeated PlanSummary dependents = 4;
 }
 
 // PlanGainAnswer is whether every plan that counts states a bound below the share.

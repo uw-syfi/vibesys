@@ -117,6 +117,13 @@ type Plan struct {
 	// edit that set a status it did not have. Empty on a plan saved before store format 6, and then
 	// they start with its first status change after that.
 	Transitions []PlanTransition
+	// Kind is what kind of change the plan makes, "" when its planner states none, which is every
+	// plan saved before store format 9.
+	Kind PlanKind
+	// DependsOn are the plans this one builds on, ascending and each once: plans the task has, never
+	// this one, and never one that depends on it through others (CheckDependsOn). Empty on a plan
+	// saved before store format 9.
+	DependsOn []PlanNumber
 }
 
 // CheckHistory says whether the plan's origin and transitions are as a store keeps them: each
@@ -158,6 +165,11 @@ type NewPlan struct {
 	Workstream WorkstreamNumber
 	// Origin is who makes the plan and when, which is its creation time.
 	Origin RecordOrigin
+	// Kind is what kind of change the plan makes, "" for none stated.
+	Kind PlanKind
+	// DependsOn are the plans it builds on, which the task has. The store keeps them ascending and
+	// each once.
+	DependsOn []PlanNumber
 }
 
 // PlanEdit changes a plan. A nil field is left as it is, and the whole edit is one change.
@@ -171,6 +183,10 @@ type PlanEdit struct {
 	// Workstream moves the plan to a workstream the task has. A plan's workstream is moved and never
 	// cleared.
 	Workstream *WorkstreamNumber
+	// Kind replaces the plan's kind. A kind is replaced and never cleared.
+	Kind *PlanKind
+	// DependsOn replaces the plan's dependencies with these, all of them: an empty list clears them.
+	DependsOn *[]PlanNumber
 	// Origin is who makes the edit and when, which is the plan's new update time, and the origin of
 	// the transition when the edit sets a status the plan does not have.
 	Origin RecordOrigin
@@ -181,6 +197,10 @@ type PlanFilter struct {
 	Statuses []PlanStatus
 	// Text matches a plan whose title or body contains it.
 	Text string
+	// Kinds matches a plan of one of these kinds; a plan with no kind matches none.
+	Kinds []PlanKind
+	// Ready matches a plan that is ready to start (Plan.Ready).
+	Ready bool
 }
 
 // The limits on what a plan holds. They keep a runaway write from filling the store, and are far
@@ -240,6 +260,10 @@ type PlanView struct {
 	// commits that could be compared. A commit with no entry has none to give: there is no head,
 	// or a side is not measured, or the sides were measured in two environments.
 	Verdicts map[Commit]Verdict
+	// DependsOn are the plans this one depends on, and Dependents the plans that depend on it, each
+	// by number.
+	DependsOn  []Plan
+	Dependents []Plan
 }
 
 // LinkedTo returns the jobs that link to the plan, in the order given.

@@ -300,6 +300,8 @@ func FuzzDecodePlan(f *testing.F) {
 				{Status: 99, Origin: &cliv1.RecordOrigin{Agent: "a"}},
 			},
 		},
+		&cliv1.Plan{Number: 5, Status: cliv1.PlanStatus_PLAN_STATUS_OPEN, Kind: cliv1.PlanKind_PLAN_KIND_INTEGRATION, DependsOn: []uint32{1, 3}},
+		&cliv1.Plan{Number: 6, Status: cliv1.PlanStatus_PLAN_STATUS_OPEN, Kind: 42, DependsOn: []uint32{6, 2, 2}},
 	)
 	f.Fuzz(func(t *testing.T, data []byte) {
 		message := &cliv1.Plan{}
@@ -315,6 +317,9 @@ func FuzzDecodePlan(f *testing.F) {
 		if _, err := wire.ToGainBound("gain_bound", message.GetGainBound()); err != nil {
 			statusErr = err
 		}
+		if _, err := wire.ToPlanKind("kind", message.GetKind()); err != nil {
+			statusErr = err
+		}
 		first, err := wire.ToPlan(message)
 		if (err != nil) != (statusErr != nil) {
 			t.Fatalf("a plan with status %s: ToPlan error %v, error of its parts %v; they must agree", message.GetStatus(), err, statusErr)
@@ -324,6 +329,12 @@ func FuzzDecodePlan(f *testing.F) {
 		}
 		if !first.Status.Valid() {
 			t.Fatalf("a decoded plan has the status %q, which is not a status", first.Status)
+		}
+		if first.Kind != "" && !first.Kind.Valid() {
+			t.Fatalf("a decoded plan has the kind %q, which is not a kind", first.Kind)
+		}
+		if deps := wire.ToPlanNumbers(message.GetDependsOn()); !slices.Equal(deps, first.DependsOn) || !slices.Equal(wire.PlanNumbers(deps), message.GetDependsOn()) {
+			t.Fatalf("a plan's dependencies %v decode to %v and back to %v", message.GetDependsOn(), deps, wire.PlanNumbers(deps))
 		}
 		for i, c := range message.GetComments() {
 			if got := wire.ToPlanComment(c); !reflect.DeepEqual(got, first.Comments[i]) {
