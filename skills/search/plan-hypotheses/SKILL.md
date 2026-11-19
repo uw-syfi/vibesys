@@ -69,6 +69,10 @@ you stop), so a miss costs one worker pass. Fill the Bold fields in
    (`--workstream <n>` moves it to another line of work).
 4. Check premises cheaply: read the installed library or code to confirm the API, kernel or flag
    you rely on exists and fits this hardware. Check the idea against the rules in `OBJECTIVE.md`.
+   On backend `trainium`, also check it against the checklist of the `neuron-safeguards` domain
+   skill (`neuron-agentic-development/neuron-safeguards/SKILL.md` under the domain skills
+   folder): every launch requirement the plan pins must hold for the input revision, and a new
+   kernel's first step includes its on-device startup self-test.
 5. Write the proposal as the plan's body, as in [proposal.md](references/proposal.md): one claim
    that can succeed or fail alone, the arithmetic, the files touched, and the smallest first step
    that reaches a measurable commit in one worker pass. Leave the status `open`. Decisions and

@@ -9,7 +9,7 @@
       "name": "vibesys",
       "source": "./skills",
       "description": "Resumable, measurement-driven optimization loop with parallel hypotheses, measurements and independent judging; the domain skills are in the vibesys-llm-serving, vibesys-database, vibesys-microservices, vibesys-cli-tools and vibesys-kernels-<backend> plugins.",
-      "version": "0.13.2",
+      "version": "0.13.3",
       "strict": false,
       "skills": [
         "./search/allocations",
@@ -105,11 +105,12 @@
       "name": "vibesys-kernels-trainium",
       "source": "./skills",
       "description": "Domain skills for correct and fast Trainium kernels, with the vendored Neuron NKI pack, for use with the vibesys optimization loop.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "strict": false,
       "skills": [
         "./domains/kernel-correctness",
         "./domains/kernel-performance",
+        "./domains/neuron-agentic-development/neuron-safeguards",
         "./domains/neuron-agentic-development/skills/neuron-explorer-profile-schema",
         "./domains/neuron-agentic-development/skills/neuron-nki-debugging",
         "./domains/neuron-agentic-development/skills/neuron-nki-docs",
