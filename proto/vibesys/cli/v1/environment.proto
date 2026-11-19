@@ -115,6 +115,9 @@ enum ResourceKind {
   RESOURCE_KIND_MOUNTS = 3;
   // AMD GPUs passed into the container, through the ROCm kernel driver.
   RESOURCE_KIND_ROCM = 4;
+  // AWS Neuron devices (Trainium, Inferentia) passed into the container as /dev/neuron* devices,
+  // shared by NeuronCore.
+  RESOURCE_KIND_NEURON = 5;
 }
 
 // EnvironmentFingerprint identifies the environment a result was taken in. Two results are

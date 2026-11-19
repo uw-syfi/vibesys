@@ -16,6 +16,11 @@ func TestGresTypesResolveThroughTheRegistry(t *testing.T) {
 	rng := rand.New(rand.NewPCG(31, 32))
 	declared := map[core.AcceleratorVendor]bool{core.VendorNVIDIA: true, core.VendorAMD: true}
 	for _, row := range core.Accelerators() {
+		if row.Vendor == core.VendorAWS {
+			// Neuron devices are given by local and ssh placements only, never declared of a
+			// cluster, so no GRES type names them; their alias is read from the driver's sysfs.
+			continue
+		}
 		for _, alias := range row.Aliases {
 			if !declared[row.Vendor] {
 				t.Fatalf("%s has aliases and no GPU table", row.Display)

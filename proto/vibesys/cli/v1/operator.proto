@@ -214,6 +214,29 @@ message Resources {
   // sets to name the GPUs it assigned (ROCR_VISIBLE_DEVICES, HIP_VISIBLE_DEVICES,
   // GPU_DEVICE_ORDINAL, CUDA_VISIBLE_DEVICES) is passed on when it is set.
   GpuPool rocm = 4;
+  // The machine's AWS Neuron devices (Trainium), for tasks of the trainium backend: the
+  // /dev/neuron* devices of a job's NeuronCores under docker, and NEURON_RT_VISIBLE_CORES.
+  NeuronPool neuron = 5;
+}
+
+// NeuronPool is the machine's AWS Neuron devices, shared by logical NeuronCore: the unit
+// NEURON_RT_VISIBLE_CORES names. The cores 0 to count-1 of the machine are a pool, which jobs share,
+// each one given a contiguous range of its own (the Neuron runtime refuses a list that is not one).
+// Only the local and ssh kinds give them.
+message NeuronPool {
+  // How many logical NeuronCores the machine has, every device's (neuron-ls: the sum of nc_count).
+  // It must equal what the machine reports where the CLI can read it.
+  uint32 count = 1 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 64
+  }];
+  // How many logical NeuronCores each device has (neuron-ls: nc_count), which says the device of
+  // each core: core c is on /dev/neuron<c / cores_per_device>. It must equal what the machine
+  // reports where the CLI can read it.
+  uint32 cores_per_device = 2 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 64
+  }];
 }
 
 // GpuPool is the GPUs of one vendor a placement gives, the vendor being the table it is written

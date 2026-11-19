@@ -114,6 +114,83 @@ func TestTakeDevicesGivesFreeDevicesOfThePoolAlignedWhenItCan(t *testing.T) {
 	}
 }
 
+// freeRun says whether n devices of the pool in a row are free.
+func freeRun(size, n int, busy map[core.DeviceIndex]bool) bool {
+	run := 0
+	for d := range size {
+		if busy[core.DeviceIndex(d)] {
+			run = 0
+			continue
+		}
+		if run++; run == n {
+			return true
+		}
+	}
+	return false
+}
+
+// TakeRange gives a contiguous range of exactly the devices asked for, all of the pool and none
+// held, whenever n free devices are in a row, and only then; it gives the same range for the same
+// arguments; it keeps to an aligned block whenever one is free, as TakeDevices does; and TakeFor
+// takes so for a pool of NeuronCores, and as TakeDevices does for a pool of GPUs.
+func TestTakeRangeGivesFreeDevicesInARowWhenThereAreAny(t *testing.T) {
+	r := newRand(43)
+	for range properties * 5 {
+		size := 1 + r.IntN(core.MaxPoolSize)
+		n := 1 + r.IntN(size)
+		held, busy := heldOf(t, r, size)
+		got, ok := core.TakeRange(gpuCount(t, size), held, gpuCount(t, n))
+		if again, ok2 := core.TakeRange(gpuCount(t, size), held, gpuCount(t, n)); ok2 != ok || !again.Equal(got) {
+			t.Fatalf("size %d, n %d: two calls gave %v and %v", size, n, got.Devices(), again.Devices())
+		}
+		if via, viaOK := core.TakeFor("neuron:local", gpuCount(t, size), held, gpuCount(t, n)); viaOK != ok || !via.Equal(got) {
+			t.Fatalf("TakeFor of a pool of NeuronCores gave %v, TakeRange %v", via.Devices(), got.Devices())
+		}
+		gpus, gpusOK := core.TakeDevices(gpuCount(t, size), held, gpuCount(t, n))
+		if via, viaOK := core.TakeFor("gpu:local", gpuCount(t, size), held, gpuCount(t, n)); viaOK != gpusOK || !via.Equal(gpus) {
+			t.Fatalf("TakeFor of a pool of GPUs gave %v, TakeDevices %v", via.Devices(), gpus.Devices())
+		}
+		if want := freeRun(size, n, busy); ok != want {
+			t.Fatalf("size %d, n %d, held %v: ok = %v, want %v", size, n, busy, ok, want)
+		}
+		if !ok {
+			if got.Len() != 0 {
+				t.Fatalf("a refusal gave %v", got.Devices())
+			}
+			continue
+		}
+		devices := got.Devices()
+		if len(devices) != n || !got.IsRange() {
+			t.Fatalf("size %d, n %d: gave %v, want %d in a row", size, n, devices, n)
+		}
+		for _, d := range devices {
+			if int(d) >= size || busy[d] {
+				t.Fatalf("size %d, n %d: gave %v, and %d is held or outside the pool (held %v)", size, n, devices, d, busy)
+			}
+		}
+		if start := alignedFree(size, n, busy); start >= 0 && int(devices[0]) != start {
+			t.Fatalf("size %d, n %d, held %v: gave %v, and the aligned block at %d is free", size, n, busy, devices, start)
+		}
+	}
+}
+
+// A pool's id names the kind of its devices, and only the NeuronCores' kind gives ranges.
+func TestAPoolIDNamesItsKind(t *testing.T) {
+	for id, want := range map[core.PoolID]core.ResourceKind{
+		"gpu:local": core.ResourceGPU, "rocm:mi300@login-a": core.ResourceROCm, "neuron:host-a": core.ResourceNeuron,
+		"local": "", "tpu:local": "", "": "",
+	} {
+		if got := id.Kind(); got != want {
+			t.Errorf("%q.Kind() = %q, want %q", id, got, want)
+		}
+	}
+	for _, k := range core.ResourceKinds() {
+		if k.Contiguous() != (k == core.ResourceNeuron) {
+			t.Errorf("%s.Contiguous() = %v", k, k.Contiguous())
+		}
+	}
+}
+
 // Jobs that take devices one after another, each holding what it took, never share a device and
 // are refused only once the pool has fewer free devices than they ask for.
 func TestJobsThatTakeDevicesInTurnNeverShareOne(t *testing.T) {
@@ -220,7 +297,7 @@ func TestTheAllowedCountsAreOneToThePoolsSize(t *testing.T) {
 func TestAPoolMustBeTheMachinesGPUs(t *testing.T) {
 	for declared := 1; declared <= 16; declared++ {
 		for probed := range 17 {
-			err := core.CheckPoolCount("placements.box.resources.gpu.count", gpuCount(t, declared), "host-a", probed)
+			err := core.CheckPoolCount("placements.box.resources.gpu.count", gpuCount(t, declared), "host-a", probed, "GPUs")
 			if (err == nil) != (declared == probed) {
 				t.Fatalf("declared %d, probed %d: %v", declared, probed, err)
 			}
@@ -319,7 +396,8 @@ func TestAGPUCountIsCheckedAgainstThePoolsOfThePlacesTheJobMayRunOn(t *testing.T
 		}
 		in.NeedsKnown = r.IntN(4) > 0
 		if r.IntN(2) == 0 {
-			in.Needs = []core.ResourceKind{core.ResourceGPU}
+			// Any kind of devices a pool hands out by number: NVIDIA or AMD GPUs, or NeuronCores.
+			in.Needs = []core.ResourceKind{core.DeviceKinds()[r.IntN(len(core.DeviceKinds()))]}
 		}
 		needsGPU := len(in.Needs) > 0
 		var want bool // refused

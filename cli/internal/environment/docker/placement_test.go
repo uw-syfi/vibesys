@@ -90,6 +90,7 @@ func TestATaskThatNeedsWhatThePlacementLacksIsRefusedNamingBoth(t *testing.T) {
 		core.ResourceKubernetes: func() resource.Resource { return clusterOf("https://k") },
 		core.ResourceMounts:     func() resource.Resource { return mountsOf() },
 		core.ResourceROCm:       func() resource.Resource { return amdOf() },
+		core.ResourceNeuron:     func() resource.Resource { return neuronOf() },
 	}
 	for range 60 {
 		var given, needs []core.ResourceKind

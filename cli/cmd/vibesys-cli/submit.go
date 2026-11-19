@@ -209,7 +209,7 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 }
 
 // gpusUsage is the help of --gpus.
-const gpusUsage = "check and command: how many GPUs of the placement's pool the job takes, the fewest the command can run on; required for a task that needs GPUs where a placement declares a pool (see `jobs` for what earlier jobs took); a measure takes the whole node and refuses it"
+const gpusUsage = "check and command: how many GPUs (or NeuronCores, of a neuron pool) of the placement's pool the job takes, the fewest the command can run on; required for a task that needs GPUs where a placement declares a pool (see `jobs` for what earlier jobs took); a measure takes the whole node and refuses it"
 
 // gpuCount reads --gpus: nil when it was not given, and otherwise a number of GPUs. An explicit 0
 // is a mistake and not "none", as for --plan. How many a job may take is for the daemon to say: it

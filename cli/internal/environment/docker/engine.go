@@ -141,6 +141,9 @@ type GPUs struct {
 	// ROCm passes the machine's AMD GPUs through the ROCm kernel driver: its devices, /dev/kfd and
 	// /dev/dri, and the video group that may use them. It is never set with Devices.
 	ROCm bool
+	// Neuron lists the numbers of the AWS Neuron devices to pass, such as "0,1": the engine passes
+	// each as the device /dev/neuron<n>. It is never set with the others.
+	Neuron string
 }
 
 // ContainerSpec is a container to start.
@@ -215,6 +218,10 @@ func (s ContainerSpec) Validate() error {
 		return invalid("the GPUs are passed both with the --gpus value %q and by number (%s)", s.GPUs.Devices, s.GPUs.NVIDIA)
 	case s.GPUs.NVIDIA != "" && !gpuNumbersPattern.MatchString(s.GPUs.NVIDIA):
 		return invalid("%q is not a list of GPU numbers such as 2,3", s.GPUs.NVIDIA)
+	case s.GPUs.Neuron != "" && (s.GPUs.Devices != "" || s.GPUs.NVIDIA != "" || s.GPUs.ROCm || s.GPUs.Runtime != ""):
+		return invalid("the Neuron devices %s are passed with the GPUs of another vendor", s.GPUs.Neuron)
+	case s.GPUs.Neuron != "" && !gpuNumbersPattern.MatchString(s.GPUs.Neuron):
+		return invalid("%q is not a list of Neuron device numbers such as 0,1", s.GPUs.Neuron)
 	case !networkPattern.MatchString(s.Network):
 		return invalid("%q is not a network mode", s.Network)
 	case s.Limit < 0:

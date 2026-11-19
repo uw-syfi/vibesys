@@ -12,12 +12,39 @@ import (
 
 // facts is a Fake of what a vendor's tool reads of a machine.
 type facts struct {
-	count string
-	err   error
+	count, perDevice string
+	err              error
 }
 
 func (f facts) ProbeFacts(context.Context) (map[string]string, error) {
-	return map[string]string{"gpu_count": f.count}, f.err
+	return map[string]string{"gpu_count": f.count, "per_device": f.perDevice}, f.err
+}
+
+// A pool of NeuronCores is refused when its count or its cores_per_device is not the machine's,
+// naming the key; a machine that cannot be read gives no verdict.
+func TestAPoolOfNeuronCoresMustBeTheMachines(t *testing.T) {
+	op := parse(t, "[placements.trn]\nkind = \"local\"\n[placements.trn.resources.neuron]\ncount = 4\ncores_per_device = 4\n")
+	pools, err := poolsOf(op)
+	if err != nil || pools["trn"] == nil || pools["trn"].kind != core.ResourceNeuron {
+		t.Fatalf("poolsOf: %v, %v", pools, err)
+	}
+	if id, size := pools["trn"].devices.Pool(); id != "neuron:local" || size.Int() != 4 {
+		t.Errorf("the pool is %s of %d", id, size.Int())
+	}
+	count := func(n, per string) countOf {
+		return countOf{facts: facts{count: n, perDevice: per}, fact: "gpu_count", unit: "NeuronCores", perDevice: "per_device"}
+	}
+	for _, c := range []struct{ n, per, want string }{
+		{"4", "4", ""},
+		{"8", "4", "placements.trn.resources.neuron.count = 4, and local has 8 NeuronCores"},
+		{"4", "2", "placements.trn.resources.neuron.cores_per_device = 4, and each device of local has 2 NeuronCores"},
+		{"4", "", ""},
+	} {
+		err := checkPool(t.Context(), pools["trn"], count(c.n, c.per), 4)
+		if c.want == "" && err != nil || c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)) {
+			t.Errorf("a machine of %s cores, %s per device: %v, want %q", c.n, c.per, err, c.want)
+		}
+	}
 }
 
 // A pool whose size is not the machine's GPU count is refused naming the key and the machine; a
@@ -29,12 +56,12 @@ func TestAPoolThatIsNotTheMachinesGPUsIsRefusedNamingItsKey(t *testing.T) {
 		t.Fatalf("poolsOf: %v, %v", pools, err)
 	}
 	for count, want := range map[string]string{"8": "", "4": "placements.pod.resources.gpu.count = 8, and local has 4 GPUs", "16": "has 16 GPUs", "": "", "x": ""} {
-		err := checkPool(t.Context(), pools["pod"], countOf{facts: facts{count: count}, fact: "gpu_count"})
+		err := checkPool(t.Context(), pools["pod"], countOf{facts: facts{count: count}, fact: "gpu_count", unit: "GPUs"}, 0)
 		if want == "" && err != nil || want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
 			t.Errorf("a machine with %q GPUs: %v, want %q", count, err, want)
 		}
 	}
-	if err := checkPool(t.Context(), pools["pod"], countOf{facts: facts{err: errors.New("no nvidia-smi")}, fact: "gpu_count"}); err != nil {
+	if err := checkPool(t.Context(), pools["pod"], countOf{facts: facts{err: errors.New("no nvidia-smi")}, fact: "gpu_count", unit: "GPUs"}, 0); err != nil {
 		t.Errorf("a machine that cannot be read: %v, want no verdict", err)
 	}
 }

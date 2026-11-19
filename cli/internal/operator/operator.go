@@ -202,7 +202,7 @@ const DefaultPolicy = "fifo"
 
 // Pool is a placement's pool of GPUs, as its file declares it: the vendor's table with a count.
 // The zero value, with no Size, is a placement without a pool, whose GPUs (if it gives any) every
-// job gets whole.
+// job gets whole. A [resources.neuron] table is always a pool, of NeuronCores, of the vendor AWS.
 type Pool struct {
 	Vendor core.AcceleratorVendor
 	// Size is the table's count: the GPUs 0 to Size-1 of the machine, or of each node of a cluster.
@@ -217,6 +217,14 @@ type Pool struct {
 // PoolOf is the pool of the placement of the name, or the zero Pool when it declares none. It fails
 // naming the key for a count out of range, which Parse refuses before.
 func PoolOf(name string, p *cliv1.Placement) (Pool, error) {
+	if n := p.GetResources().GetNeuron(); n != nil {
+		key := "placements." + name + ".resources.neuron.count"
+		size, err := core.ParseGPUCount(n.GetCount(), key)
+		if err != nil {
+			return Pool{}, err
+		}
+		return Pool{Vendor: core.VendorAWS, Size: size, Key: key}, nil
+	}
 	table, vendor, kind := p.GetResources().GetGpu(), core.VendorNVIDIA, "gpu"
 	if table == nil {
 		table, vendor, kind = p.GetResources().GetRocm(), core.VendorAMD, "rocm"
@@ -266,13 +274,12 @@ func poolsOnce(c *cliv1.OperatorConfig) error {
 			continue
 		}
 		for _, t := range gpuTablesOf(p) {
-			vendor, table := t.vendor, t.table
-			if table == nil {
+			vendor, pool := t.vendor, t.pool
+			if !t.declared {
 				continue
 			}
 			key := gpus{machine, vendor}
 			other, seen := first[key]
-			pool := table.Count != nil
 			if seen && (pool || pooled[key]) {
 				return invalid("placements.%s.resources.%s: placement %q declares the same GPUs of %s, and one of them makes them a pool with count; a machine's GPUs are declared once",
 					name, tableName(vendor), other, machine)
@@ -286,21 +293,34 @@ func poolsOnce(c *cliv1.OperatorConfig) error {
 	return nil
 }
 
-// gpuTable is a placement's table of one vendor's GPUs, nil when the file has none.
+// gpuTable is a placement's table of one vendor's devices: whether the file has it, and whether
+// it makes them a pool (a count).
 type gpuTable struct {
-	vendor core.AcceleratorVendor
-	table  *cliv1.GpuPool
+	vendor   core.AcceleratorVendor
+	declared bool
+	pool     bool
+	// gresType is the table's gres_type, "" for none or for a table that has no such key.
+	gresType string
 }
 
-// gpuTablesOf are the placement's GPU tables of every vendor, in a fixed order.
+// gpuTablesOf are the placement's device tables of every vendor, in a fixed order. A neuron table
+// is always a pool.
 func gpuTablesOf(p *cliv1.Placement) []gpuTable {
-	return []gpuTable{{core.VendorNVIDIA, p.GetResources().GetGpu()}, {core.VendorAMD, p.GetResources().GetRocm()}}
+	r := p.GetResources()
+	return []gpuTable{
+		{core.VendorNVIDIA, r.GetGpu() != nil, r.GetGpu() != nil && r.GetGpu().Count != nil, r.GetGpu().GetGresType()},
+		{core.VendorAMD, r.GetRocm() != nil, r.GetRocm() != nil && r.GetRocm().Count != nil, r.GetRocm().GetGresType()},
+		{core.VendorAWS, r.GetNeuron() != nil, r.GetNeuron() != nil, ""},
+	}
 }
 
-// tableName is the resource table of a vendor's GPUs.
+// tableName is the resource table of a vendor's devices.
 func tableName(v core.AcceleratorVendor) string {
-	if v == core.VendorAMD {
+	switch v {
+	case core.VendorAMD:
 		return "rocm"
+	case core.VendorAWS:
+		return "neuron"
 	}
 	return "gpu"
 }
@@ -387,19 +407,26 @@ func sections(p *cliv1.Placement, n sectionNames, pool Pool) error {
 // runtime on AMD GPUs, a GRES type off a cluster, and a cluster's GPUs without a count, which its
 // allocations ask for.
 func gpuTables(p *cliv1.Placement, n sectionNames, pool Pool) error {
-	gpu, rocm := p.GetResources().GetGpu(), p.GetResources().GetRocm()
+	gpu, rocm, neuron := p.GetResources().GetGpu(), p.GetResources().GetRocm(), p.GetResources().GetNeuron()
 	cluster := p.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_SLURM || p.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER
 	switch {
 	case gpu != nil && rocm != nil:
 		return invalid("%s.rocm: [%s.gpu] is set too; a placement gives the GPUs of one vendor", n.resources, n.resources)
+	case neuron != nil && (gpu != nil || rocm != nil):
+		return invalid("%s.neuron: a GPU table of [%s] is set too; a placement gives the devices of one vendor", n.resources, n.resources)
+	case neuron != nil && cluster:
+		// A cluster's allocations ask Slurm for GPUs, and no Neuron device is passed under Apptainer.
+		return invalid("%s.neuron: %s %q gives no Neuron devices; only \"local\" and \"ssh\" placements do", n.resources, n.kind, kindName(p.GetKind()))
+	case neuron != nil && neuron.GetCount()%neuron.GetCoresPerDevice() != 0:
+		return invalid("%s.neuron.count = %d is not a whole number of devices of cores_per_device = %d", n.resources, neuron.GetCount(), neuron.GetCoresPerDevice())
 	case rocm.GetRuntime() != "":
 		return invalid("%s.rocm.runtime: only the GPUs of [%s.gpu] are passed by a container runtime", n.resources, n.resources)
 	}
 	for _, t := range gpuTablesOf(p) {
-		key, table := n.resources+"."+tableName(t.vendor), t.table
+		key := n.resources + "." + tableName(t.vendor)
 		switch {
-		case table == nil:
-		case table.GetGresType() != "" && !cluster:
+		case !t.declared:
+		case t.gresType != "" && !cluster:
 			return invalid("%s.gres_type: only a placement of kind \"slurm\" or \"apptainer\" asks a cluster for GPUs by type", key)
 		case cluster && !pool.Size.IsSet():
 			return invalid("%s.count: %s %q asks the cluster for GPUs by count; set count, the GPUs of each node", key, n.kind, kindName(p.GetKind()))

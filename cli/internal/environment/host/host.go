@@ -128,14 +128,35 @@ func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) 
 	if err != nil {
 		return core.NotStarted{Failure: core.AsFailure(err)}
 	}
+	check, err := e.gpuCheck()
+	if err != nil {
+		return core.NotStarted{Failure: core.AsFailure(err)}
+	}
 	r, err := newRun(ctx, e, x, out)
 	if err != nil {
 		return environment.Finish(ctx, core.NotStarted{Failure: core.AsFailure(err)}, nil)
 	}
 	r.gpuVars = vars
+	// The vendor's check that the job's devices may be used runs first, within the limit: a job
+	// whose devices another process holds fails before any of its commands runs.
+	if attempt := environment.Check(r, check, environment.Events{Limit: r.limit, Cancelled: ctx.Done()}, func(why string) string {
+		return "host: the job's devices cannot be used: " + why
+	}); attempt != nil {
+		return environment.Finish(ctx, attempt, r.end())
+	}
 	attempt := r.execute()
 	// What the command wrote and was not kept makes its end one the environment cannot vouch for.
 	return environment.Finish(ctx, attempt, r.end())
+}
+
+// gpuCheck is the vendor's check of the job's group of the machine's pool (resource.Devices.Check),
+// nil for a job that was given no GPUs or a vendor that checks nothing. It is called after
+// gpuVariables, which refuses a grant of another pool.
+func (e *Environment) gpuCheck() ([]string, error) {
+	if e.gpus == nil || e.devices == nil {
+		return nil, nil
+	}
+	return e.devices.Check(e.gpus.Devices)
 }
 
 // gpuVariables are the variables that name the job's group of the machine's pool, which every

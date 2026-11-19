@@ -287,6 +287,7 @@ var resourceKinds = []struct {
 	{core.ResourceKubernetes, cliv1.ResourceKind_RESOURCE_KIND_KUBERNETES},
 	{core.ResourceMounts, cliv1.ResourceKind_RESOURCE_KIND_MOUNTS},
 	{core.ResourceROCm, cliv1.ResourceKind_RESOURCE_KIND_ROCM},
+	{core.ResourceNeuron, cliv1.ResourceKind_RESOURCE_KIND_NEURON},
 }
 
 // ResourceKind returns the contract's value for a resource kind.

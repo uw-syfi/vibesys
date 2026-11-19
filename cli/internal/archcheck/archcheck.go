@@ -59,6 +59,7 @@ var rules = map[string][]string{
 	"internal/backend/backendtest": {"internal/backend"},
 	"internal/backend/nvidia":      {"internal/clock", "internal/core", "internal/remote"},
 	"internal/backend/amd":         {"internal/clock", "internal/core", "internal/remote"},
+	"internal/backend/neuron":      {"internal/clock", "internal/core", "internal/remote"},
 	// Reaching a machine to run programs on: this one, or another over ssh and rsync.
 	"internal/remote": {"internal/backend/cpu", "internal/clock", "internal/core"},
 	// The operator's settings of the machine, which never come from a task: the outer structure of
@@ -76,6 +77,7 @@ var rules = map[string][]string{
 	"internal/resource/fakeresource": {"internal/core", "internal/resource"},
 	"internal/resource/gpu":          {"internal/core", "internal/resource"},
 	"internal/resource/rocm":         {"internal/core", "internal/resource"},
+	"internal/resource/neuron":       {"internal/core", "internal/resource"},
 	"internal/resource/mounts":       {"envcodec", "gen/", "internal/core", "internal/resource"},
 	"internal/resource/kubernetes":   {"envcodec", "gen/", "internal/clock", "internal/core", "internal/remote", "internal/resource"},
 	// The pure rules of standing allocations: the state, Step and the fit. No I/O.
@@ -206,7 +208,7 @@ var rules = map[string][]string{
 		"internal/schedule/policy/fifo", "gen/", "internal/resource", "internal/resource/gpu",
 		"internal/resource/kubernetes", "internal/resource/mounts", "internal/lease", "internal/lease/hostlease", "internal/lease/kubelease",
 		"internal/lease/locallease", "internal/neighbors",
-		"internal/backend/amd", "internal/resource/rocm", "internal/environment/apptainer", "internal/environment/apptainer/clustercli",
+		"internal/backend/amd", "internal/resource/rocm", "internal/backend/neuron", "internal/resource/neuron", "internal/environment/apptainer", "internal/environment/apptainer/clustercli",
 		"internal/environment/apptainer/localsif", "internal/wire",
 	},
 
@@ -250,7 +252,7 @@ var testRules = map[string][]string{
 	"internal/environment/localalloc": {"internal/environment/allocatortest", "internal/environment/fakeslots"},
 	// The core's records are checked against the contract's rules for them.
 	"internal/alloc":            {"gen/", "internal/wire"},
-	"internal/environment/host": {"internal/backend/cpu", "internal/environment/envtest", "internal/environment/fakeenv", "internal/resource/gpu"},
+	"internal/environment/host": {"internal/backend/cpu", "internal/environment/envtest", "internal/environment/fakeenv", "internal/resource/fakeresource", "internal/resource/gpu"},
 	"internal/environment/slurm": {
 		"internal/backend/cpu", "internal/environment", "internal/environment/docker/dockerfake",
 		"internal/environment/envtest", "internal/environment/fakeenv/fakeworld",
@@ -259,6 +261,7 @@ var testRules = map[string][]string{
 	"internal/remote":                     {"internal/environment/envtest"},
 	"internal/resource/gpu":               {"internal/resource/resourcetest", "internal/resource/devicestest"},
 	"internal/resource/rocm":              {"internal/resource/resourcetest", "internal/resource/devicestest"},
+	"internal/resource/neuron":            {"internal/resource/resourcetest", "internal/resource/devicestest"},
 	"internal/environment/apptainer": {
 		"internal/backend/amd", "internal/environment/allocatortest", "internal/environment/apptainer/clusterfake",
 		"internal/environment/docker/dockerfake", "internal/environment/docker/dockertest", "internal/environment/envtest",

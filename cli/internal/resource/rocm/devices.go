@@ -58,7 +58,7 @@ func (d *AMDDevices) Pool() (core.PoolID, core.GPUCount) { return d.id, d.size }
 // Container implements resource.Devices: the driver's devices, which ROCm's runtime reads whole,
 // and the variable that names the group.
 func (d *AMDDevices) Container(g core.DeviceGroup) (resource.Attachment, error) {
-	if err := resource.CheckGroup(g, d.size); err != nil {
+	if err := resource.CheckGroup(core.ResourceROCm, g, d.size); err != nil {
 		return resource.Attachment{}, invalid("%v", err)
 	}
 	return resource.Attachment{GPUs: resource.GPUs{ROCm: true}, GPUEnv: map[string]string{EnvVisibleDevices: resource.List(g)}}, nil
@@ -66,8 +66,17 @@ func (d *AMDDevices) Container(g core.DeviceGroup) (resource.Attachment, error) 
 
 // Process implements resource.Devices.
 func (d *AMDDevices) Process(g core.DeviceGroup) (map[string]string, error) {
-	if err := resource.CheckGroup(g, d.size); err != nil {
+	if err := resource.CheckGroup(core.ResourceROCm, g, d.size); err != nil {
 		return nil, invalid("%v", err)
 	}
 	return map[string]string{EnvVisibleDevices: resource.List(g)}, nil
+}
+
+// Check implements resource.Devices: none. AMD GPUs are not read for another process's use before
+// a job starts.
+func (d *AMDDevices) Check(g core.DeviceGroup) ([]string, error) {
+	if err := resource.CheckGroup(core.ResourceROCm, g, d.size); err != nil {
+		return nil, invalid("%v", err)
+	}
+	return nil, nil
 }

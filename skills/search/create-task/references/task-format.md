@@ -31,7 +31,7 @@ backends = ["cpu"]            # one backend; a "cuda" task needs the gpu resourc
 domain = "generic"            # which domain skills fit; held as data (values below)
 
 [environment]                 # optional
-needs = ["kubernetes"]        # resources a job needs: any of gpu, kubernetes, mounts
+needs = ["kubernetes"]        # resources a job needs: any of gpu, rocm, neuron, kubernetes, mounts
 
 [build]                       # optional; runs first, in the clean checkout
 command = ["make", "-j8"]
@@ -60,7 +60,8 @@ metric = "requests_per_sec"       # the top-level field of that JSON file
 - `[check]` may stand for `[accuracy]` and `[measure]` for `[benchmark]`, never both.
 - Refused by the CLI: `[evaluator]`, `entrypoint` or `args` in a command section,
   `requires_accuracy = false`, more than one backend, `[environment.modal]`, and in docker
-  `docker_in_docker = true` or an accelerator backend other than `cuda`.
+  `docker_in_docker = true` or an accelerator backend other than `cuda`, `rocm` or `trainium`
+  (which need the `gpu`, `rocm` and `neuron` resources).
 - `[agent] domain` is one of `llm-serving`, `microservices`, `database`, `kernel-writing`, `cli-tools`
   or `generic`. `optimize` reads it to find the domain skills the run loads
   ([domain-plugins](../../optimize/references/domain-plugins.md)), so set the one that fits the code

@@ -51,9 +51,11 @@ func describeGrant(g *cliv1.GpuGrant) string {
 	return fmt.Sprintf("devices %s (chosen by %s)", deviceList(g.GetDevices()), who)
 }
 
-// needsGPUs says whether the job's task needs the GPUs of a placement.
+// needsGPUs says whether the job's task needs the devices of a placement's pool: GPUs, or
+// NeuronCores.
 func needsGPUs(needs []cliv1.ResourceKind) bool {
-	return slices.Contains(needs, cliv1.ResourceKind_RESOURCE_KIND_GPU) || slices.Contains(needs, cliv1.ResourceKind_RESOURCE_KIND_ROCM)
+	return slices.Contains(needs, cliv1.ResourceKind_RESOURCE_KIND_GPU) || slices.Contains(needs, cliv1.ResourceKind_RESOURCE_KIND_ROCM) ||
+		slices.Contains(needs, cliv1.ResourceKind_RESOURCE_KIND_NEURON)
 }
 
 // describeJobGPUs says what a job asked of the GPUs and was given, or nothing for a job that has
