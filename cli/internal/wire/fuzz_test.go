@@ -241,7 +241,7 @@ func FuzzDecodeJobOutputs(f *testing.F) {
 			{Path: "dir/b.csv", Size: 0, SHA256: strings.Repeat("0f", 32)},
 		}}),
 		wire.JobOutputs(core.OutputsRefused{Reason: "the job left 2000 files"}),
-		&cliv1.JobOutputs{Record: &cliv1.JobOutputs_Kept{Kept: &cliv1.OutputFiles{Files: []*cliv1.OutputFile{{Path: "../x", Sha256: strings.Repeat("ab", 32)}}}}},
+		&cliv1.JobOutputs{Record: &cliv1.JobOutputs_Kept{Kept: &cliv1.KeptOutputs{Outputs: []*cliv1.KeptOutput{{Name: "../x", Sha256: strings.Repeat("ab", 32)}}}}},
 	)
 	f.Fuzz(func(t *testing.T, data []byte) {
 		message := &cliv1.JobOutputs{}

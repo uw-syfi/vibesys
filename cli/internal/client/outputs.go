@@ -93,7 +93,7 @@ func (c *Client) readOutputs(ctx context.Context, req *cliv1.ReadOutputsRequest,
 type outputWriter struct {
 	root  *os.Root
 	job   *cliv1.Job
-	files []*cliv1.OutputFile
+	files []*cliv1.KeptOutput
 	next  int // the index of the file being written, or of the next one
 
 	open    *os.File
@@ -109,16 +109,16 @@ func (w *outputWriter) start(job *cliv1.Job) error {
 	if _, err := wire.ToJobOutputs("job.outputs", job.GetOutputs()); err != nil {
 		return err
 	}
-	w.job, w.files = job, job.GetOutputs().GetKept().GetFiles()
+	w.job, w.files = job, job.GetOutputs().GetKept().GetOutputs()
 	return nil
 }
 
 // write adds a piece to its file, after finishing every file before it, which an empty file is.
-func (w *outputWriter) write(chunk *cliv1.OutputFileChunk) error {
+func (w *outputWriter) write(chunk *cliv1.KeptOutputChunk) error {
 	if w.job == nil {
 		return fmt.Errorf("the daemon sent a file before its job")
 	}
-	for w.open == nil || w.files[w.next].GetPath() != chunk.GetPath() {
+	for w.open == nil || w.files[w.next].GetName() != chunk.GetName() {
 		if w.open != nil {
 			if err := w.close(); err != nil {
 				return err
@@ -126,17 +126,17 @@ func (w *outputWriter) write(chunk *cliv1.OutputFileChunk) error {
 			w.next++
 		}
 		if w.next >= len(w.files) {
-			return fmt.Errorf("the daemon sent %q, which is not the next file the job kept", chunk.GetPath())
+			return fmt.Errorf("the daemon sent %q, which is not the next file the job kept", chunk.GetName())
 		}
 		if err := w.create(); err != nil {
 			return err
 		}
 	}
 	if chunk.GetOffset() != w.written {
-		return fmt.Errorf("the daemon sent %q from byte %d, and %d were written", chunk.GetPath(), chunk.GetOffset(), w.written)
+		return fmt.Errorf("the daemon sent %q from byte %d, and %d were written", chunk.GetName(), chunk.GetOffset(), w.written)
 	}
 	if w.written+uint64(len(chunk.GetData())) > w.files[w.next].GetSize() {
-		return fmt.Errorf("the daemon sent more of %q than the %d bytes the job kept", chunk.GetPath(), w.files[w.next].GetSize())
+		return fmt.Errorf("the daemon sent more of %q than the %d bytes the job kept", chunk.GetName(), w.files[w.next].GetSize())
 	}
 	if _, err := w.open.Write(chunk.GetData()); err != nil {
 		return err
@@ -166,7 +166,7 @@ func (w *outputWriter) finish() error {
 
 // create opens the file at w.next beside its place.
 func (w *outputWriter) create() error {
-	rel := w.files[w.next].GetPath()
+	rel := w.files[w.next].GetName()
 	if dir := path.Dir(rel); dir != "." {
 		if err := w.root.MkdirAll(filepath.FromSlash(dir), 0o755); err != nil {
 			return fmt.Errorf("making the directory of %q: %w", rel, err)
@@ -193,11 +193,11 @@ func (w *outputWriter) close() error {
 	if got := hex.EncodeToString(w.digest.Sum(nil)); w.written != want.GetSize() || got != want.GetSha256() {
 		_ = w.root.Remove(w.part)
 		return fmt.Errorf("%q came with %d bytes of SHA-256 %s, and the job kept %d bytes of SHA-256 %s: it changed since the job ended, and was not written",
-			want.GetPath(), w.written, got, want.GetSize(), want.GetSha256())
+			want.GetName(), w.written, got, want.GetSize(), want.GetSha256())
 	}
-	if err := w.root.Rename(w.part, filepath.FromSlash(want.GetPath())); err != nil {
+	if err := w.root.Rename(w.part, filepath.FromSlash(want.GetName())); err != nil {
 		_ = w.root.Remove(w.part)
-		return fmt.Errorf("writing %q: %w", want.GetPath(), err)
+		return fmt.Errorf("writing %q: %w", want.GetName(), err)
 	}
 	return nil
 }

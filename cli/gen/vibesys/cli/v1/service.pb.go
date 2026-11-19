@@ -3646,7 +3646,7 @@ func (x *ReadOutputsResponse) GetJob() *Job {
 	return nil
 }
 
-func (x *ReadOutputsResponse) GetChunk() *OutputFileChunk {
+func (x *ReadOutputsResponse) GetChunk() *KeptOutputChunk {
 	if x != nil {
 		if x, ok := x.Item.(*ReadOutputsResponse_Chunk); ok {
 			return x.Chunk
@@ -3665,40 +3665,40 @@ type ReadOutputsResponse_Job struct {
 }
 
 type ReadOutputsResponse_Chunk struct {
-	// A piece of one file's bytes. A file's pieces come in order, one file after another.
-	Chunk *OutputFileChunk `protobuf:"bytes,2,opt,name=chunk,proto3,oneof"`
+	// A piece of one output's bytes. An output's pieces come in order, one output after another.
+	Chunk *KeptOutputChunk `protobuf:"bytes,2,opt,name=chunk,proto3,oneof"`
 }
 
 func (*ReadOutputsResponse_Job) isReadOutputsResponse_Item() {}
 
 func (*ReadOutputsResponse_Chunk) isReadOutputsResponse_Item() {}
 
-// OutputFileChunk is a piece of one output file.
-type OutputFileChunk struct {
+// KeptOutputChunk is a piece of one kept output.
+type KeptOutputChunk struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The file's path, as the job's outputs list it.
-	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	// Where the piece starts in the file.
+	// The output's name, as the job's outputs list it.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Where the piece starts in the output.
 	Offset        uint64 `protobuf:"varint,2,opt,name=offset,proto3" json:"offset,omitempty"`
 	Data          []byte `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *OutputFileChunk) Reset() {
-	*x = OutputFileChunk{}
+func (x *KeptOutputChunk) Reset() {
+	*x = KeptOutputChunk{}
 	mi := &file_vibesys_cli_v1_service_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *OutputFileChunk) String() string {
+func (x *KeptOutputChunk) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*OutputFileChunk) ProtoMessage() {}
+func (*KeptOutputChunk) ProtoMessage() {}
 
-func (x *OutputFileChunk) ProtoReflect() protoreflect.Message {
+func (x *KeptOutputChunk) ProtoReflect() protoreflect.Message {
 	mi := &file_vibesys_cli_v1_service_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -3710,26 +3710,26 @@ func (x *OutputFileChunk) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use OutputFileChunk.ProtoReflect.Descriptor instead.
-func (*OutputFileChunk) Descriptor() ([]byte, []int) {
+// Deprecated: Use KeptOutputChunk.ProtoReflect.Descriptor instead.
+func (*KeptOutputChunk) Descriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_service_proto_rawDescGZIP(), []int{55}
 }
 
-func (x *OutputFileChunk) GetPath() string {
+func (x *KeptOutputChunk) GetName() string {
 	if x != nil {
-		return x.Path
+		return x.Name
 	}
 	return ""
 }
 
-func (x *OutputFileChunk) GetOffset() uint64 {
+func (x *KeptOutputChunk) GetOffset() uint64 {
 	if x != nil {
 		return x.Offset
 	}
 	return 0
 }
 
-func (x *OutputFileChunk) GetData() []byte {
+func (x *KeptOutputChunk) GetData() []byte {
 	if x != nil {
 		return x.Data
 	}
@@ -6968,10 +6968,10 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\acontent\x18\x03 \x01(\bR\acontent\"\x86\x01\n" +
 	"\x13ReadOutputsResponse\x12'\n" +
 	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobH\x00R\x03job\x127\n" +
-	"\x05chunk\x18\x02 \x01(\v2\x1f.vibesys.cli.v1.OutputFileChunkH\x00R\x05chunkB\r\n" +
+	"\x05chunk\x18\x02 \x01(\v2\x1f.vibesys.cli.v1.KeptOutputChunkH\x00R\x05chunkB\r\n" +
 	"\x04item\x12\x05\xbaH\x02\b\x01\"Z\n" +
-	"\x0fOutputFileChunk\x12\x1b\n" +
-	"\x04path\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04path\x12\x16\n" +
+	"\x0fKeptOutputChunk\x12\x1b\n" +
+	"\x04name\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04name\x12\x16\n" +
 	"\x06offset\x18\x02 \x01(\x04R\x06offset\x12\x12\n" +
 	"\x04data\x18\x03 \x01(\fR\x04data\"s\n" +
 	"\vShowRequest\x125\n" +
@@ -7330,7 +7330,7 @@ var file_vibesys_cli_v1_service_proto_goTypes = []any{
 	(*ReadLogsResponse)(nil),              // 57: vibesys.cli.v1.ReadLogsResponse
 	(*ReadOutputsRequest)(nil),            // 58: vibesys.cli.v1.ReadOutputsRequest
 	(*ReadOutputsResponse)(nil),           // 59: vibesys.cli.v1.ReadOutputsResponse
-	(*OutputFileChunk)(nil),               // 60: vibesys.cli.v1.OutputFileChunk
+	(*KeptOutputChunk)(nil),               // 60: vibesys.cli.v1.KeptOutputChunk
 	(*ShowRequest)(nil),                   // 61: vibesys.cli.v1.ShowRequest
 	(*ShowResponse)(nil),                  // 62: vibesys.cli.v1.ShowResponse
 	(*CompareRequest)(nil),                // 63: vibesys.cli.v1.CompareRequest
@@ -7481,7 +7481,7 @@ var file_vibesys_cli_v1_service_proto_depIdxs = []int32{
 	29,  // 57: vibesys.cli.v1.ReadLogsRequest.context:type_name -> vibesys.cli.v1.CallContext
 	29,  // 58: vibesys.cli.v1.ReadOutputsRequest.context:type_name -> vibesys.cli.v1.CallContext
 	124, // 59: vibesys.cli.v1.ReadOutputsResponse.job:type_name -> vibesys.cli.v1.Job
-	60,  // 60: vibesys.cli.v1.ReadOutputsResponse.chunk:type_name -> vibesys.cli.v1.OutputFileChunk
+	60,  // 60: vibesys.cli.v1.ReadOutputsResponse.chunk:type_name -> vibesys.cli.v1.KeptOutputChunk
 	29,  // 61: vibesys.cli.v1.ShowRequest.context:type_name -> vibesys.cli.v1.CallContext
 	128, // 62: vibesys.cli.v1.ShowResponse.results:type_name -> vibesys.cli.v1.Result
 	129, // 63: vibesys.cli.v1.ShowResponse.measurements:type_name -> vibesys.cli.v1.Measurement

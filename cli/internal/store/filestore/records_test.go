@@ -111,12 +111,12 @@ func fill(m protoreflect.Message, variant int) {
 		grant.PoolSize = 8
 	}
 	// A kept file's digest is a SHA-256, and the files are in path order, each once.
-	if md.FullName() == "vibesys.cli.v1.OutputFile" {
-		m.Interface().(*cliv1.OutputFile).Sha256 = fmt.Sprintf("%064x", variant)
+	if md.FullName() == "vibesys.cli.v1.KeptOutput" {
+		m.Interface().(*cliv1.KeptOutput).Sha256 = fmt.Sprintf("%064x", variant)
 	}
-	if md.FullName() == "vibesys.cli.v1.OutputFiles" {
-		for i, f := range m.Interface().(*cliv1.OutputFiles).Files {
-			f.Path = fmt.Sprintf("dir/file-%d", i)
+	if md.FullName() == "vibesys.cli.v1.KeptOutputs" {
+		for i, f := range m.Interface().(*cliv1.KeptOutputs).Outputs {
+			f.Name = fmt.Sprintf("dir/file-%d", i)
 		}
 	}
 	// A job's allocation is an allocation's name or any.

@@ -13,11 +13,11 @@ import (
 func JobOutputs(o core.Outputs) *cliv1.JobOutputs {
 	switch o := o.(type) {
 	case core.OutputsKept:
-		files := make([]*cliv1.OutputFile, 0, len(o.Files))
+		files := make([]*cliv1.KeptOutput, 0, len(o.Files))
 		for _, f := range o.Files {
-			files = append(files, &cliv1.OutputFile{Path: f.Path, Size: f.Size, Sha256: f.SHA256})
+			files = append(files, &cliv1.KeptOutput{Name: f.Path, Size: f.Size, Sha256: f.SHA256})
 		}
-		return &cliv1.JobOutputs{Record: &cliv1.JobOutputs_Kept{Kept: &cliv1.OutputFiles{Files: files}}}
+		return &cliv1.JobOutputs{Record: &cliv1.JobOutputs_Kept{Kept: &cliv1.KeptOutputs{Outputs: files}}}
 	case core.OutputsRefused:
 		return &cliv1.JobOutputs{Record: &cliv1.JobOutputs_Refused{Refused: o.Reason}}
 	}
@@ -37,8 +37,8 @@ func ToJobOutputs(field string, m *cliv1.JobOutputs) (core.Outputs, error) {
 	switch r := m.GetRecord().(type) {
 	case *cliv1.JobOutputs_Kept:
 		kept := core.OutputsKept{}
-		for _, f := range r.Kept.GetFiles() {
-			kept.Files = append(kept.Files, core.OutputFile{Path: f.GetPath(), Size: f.GetSize(), SHA256: f.GetSha256()})
+		for _, f := range r.Kept.GetOutputs() {
+			kept.Files = append(kept.Files, core.OutputFile{Path: f.GetName(), Size: f.GetSize(), SHA256: f.GetSha256()})
 		}
 		out = kept
 	case *cliv1.JobOutputs_Refused:

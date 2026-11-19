@@ -56,14 +56,14 @@ func describeOutputs(job *cliv1.Job, to string) string {
 	if env := job.GetEnvironment(); env != nil {
 		fmt.Fprintf(&b, "environment: %s\n", environmentName(env))
 	}
-	files := job.GetOutputs().GetKept().GetFiles()
+	files := job.GetOutputs().GetKept().GetOutputs()
 	var total uint64
 	for _, f := range files {
 		total += f.GetSize()
 	}
 	fmt.Fprintf(&b, "outputs: %s, %s\n", counted(uint64(len(files)), "file"), counted(total, "byte"))
 	for _, f := range files {
-		fmt.Fprintf(&b, "  %s\t%s\tsha256:%s\n", f.GetPath(), counted(f.GetSize(), "byte"), f.GetSha256())
+		fmt.Fprintf(&b, "  %s\t%s\tsha256:%s\n", f.GetName(), counted(f.GetSize(), "byte"), f.GetSha256())
 	}
 	if to != "" {
 		fmt.Fprintf(&b, "copied to %s\n", to)

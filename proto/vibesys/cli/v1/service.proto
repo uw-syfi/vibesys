@@ -624,16 +624,16 @@ message ReadOutputsResponse {
     option (buf.validate.oneof).required = true;
     // The first message: the job, with its outputs.
     Job job = 1;
-    // A piece of one file's bytes. A file's pieces come in order, one file after another.
-    OutputFileChunk chunk = 2;
+    // A piece of one output's bytes. An output's pieces come in order, one output after another.
+    KeptOutputChunk chunk = 2;
   }
 }
 
-// OutputFileChunk is a piece of one output file.
-message OutputFileChunk {
-  // The file's path, as the job's outputs list it.
-  string path = 1 [(buf.validate.field).string.min_len = 1];
-  // Where the piece starts in the file.
+// KeptOutputChunk is a piece of one kept output.
+message KeptOutputChunk {
+  // The output's name, as the job's outputs list it.
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  // Where the piece starts in the output.
   uint64 offset = 2;
   bytes data = 3;
 }

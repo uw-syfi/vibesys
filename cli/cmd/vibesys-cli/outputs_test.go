@@ -65,11 +65,11 @@ func TestOutputsListsAndCopiesTheFilesAJobKept(t *testing.T) {
 	var job struct {
 		Outputs struct {
 			Kept struct {
-				Files []struct{ Path string } `json:"files"`
+				Outputs []struct{ Name string } `json:"outputs"`
 			} `json:"kept"`
 		} `json:"outputs"`
 	}
-	if r.code != exitOK || json.Unmarshal([]byte(r.stdout), &job) != nil || len(job.Outputs.Kept.Files) != 2 {
+	if r.code != exitOK || json.Unmarshal([]byte(r.stdout), &job) != nil || len(job.Outputs.Kept.Outputs) != 2 {
 		t.Fatalf("outputs --json = %+v", r)
 	}
 }

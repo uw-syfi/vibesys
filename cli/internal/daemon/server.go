@@ -361,7 +361,7 @@ func (s *Server) ReadOutputs(req *cliv1.ReadOutputsRequest, stream cliv1.DaemonS
 		},
 		func(c app.OutputChunk) error {
 			return stream.Send(&cliv1.ReadOutputsResponse{Item: &cliv1.ReadOutputsResponse_Chunk{
-				Chunk: &cliv1.OutputFileChunk{Path: c.Path, Offset: c.Offset, Data: c.Data},
+				Chunk: &cliv1.KeptOutputChunk{Name: c.Path, Offset: c.Offset, Data: c.Data},
 			}})
 		})
 	return wire.Error(err)

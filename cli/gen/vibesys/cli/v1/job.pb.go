@@ -1604,7 +1604,7 @@ func (x *JobOutputs) GetRecord() isJobOutputs_Record {
 	return nil
 }
 
-func (x *JobOutputs) GetKept() *OutputFiles {
+func (x *JobOutputs) GetKept() *KeptOutputs {
 	if x != nil {
 		if x, ok := x.Record.(*JobOutputs_Kept); ok {
 			return x.Kept
@@ -1627,8 +1627,8 @@ type isJobOutputs_Record interface {
 }
 
 type JobOutputs_Kept struct {
-	// The files, in path order.
-	Kept *OutputFiles `protobuf:"bytes,1,opt,name=kept,proto3,oneof"`
+	// The outputs, in name order.
+	Kept *KeptOutputs `protobuf:"bytes,1,opt,name=kept,proto3,oneof"`
 }
 
 type JobOutputs_Refused struct {
@@ -1641,28 +1641,28 @@ func (*JobOutputs_Kept) isJobOutputs_Record() {}
 
 func (*JobOutputs_Refused) isJobOutputs_Record() {}
 
-// OutputFiles is the files a command job kept.
-type OutputFiles struct {
+// KeptOutputs is the outputs a command job kept.
+type KeptOutputs struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Files         []*OutputFile          `protobuf:"bytes,1,rep,name=files,proto3" json:"files,omitempty"`
+	Outputs       []*KeptOutput          `protobuf:"bytes,1,rep,name=outputs,proto3" json:"outputs,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *OutputFiles) Reset() {
-	*x = OutputFiles{}
+func (x *KeptOutputs) Reset() {
+	*x = KeptOutputs{}
 	mi := &file_vibesys_cli_v1_job_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *OutputFiles) String() string {
+func (x *KeptOutputs) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*OutputFiles) ProtoMessage() {}
+func (*KeptOutputs) ProtoMessage() {}
 
-func (x *OutputFiles) ProtoReflect() protoreflect.Message {
+func (x *KeptOutputs) ProtoReflect() protoreflect.Message {
 	mi := &file_vibesys_cli_v1_job_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1674,24 +1674,25 @@ func (x *OutputFiles) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use OutputFiles.ProtoReflect.Descriptor instead.
-func (*OutputFiles) Descriptor() ([]byte, []int) {
+// Deprecated: Use KeptOutputs.ProtoReflect.Descriptor instead.
+func (*KeptOutputs) Descriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{14}
 }
 
-func (x *OutputFiles) GetFiles() []*OutputFile {
+func (x *KeptOutputs) GetOutputs() []*KeptOutput {
 	if x != nil {
-		return x.Files
+		return x.Outputs
 	}
 	return nil
 }
 
-// OutputFile is one file a command job kept.
-type OutputFile struct {
+// KeptOutput is one output a command job kept.
+type KeptOutput struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Its path in the artifacts directory: slash-separated and relative, with no empty, "." or ".."
+	// Its name among the job's outputs, which is also where the job left it under its artifacts
+	// directory and where a copy puts it: slash-separated and relative, with no empty, "." or ".."
 	// element.
-	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// Its size in bytes.
 	Size uint64 `protobuf:"varint,2,opt,name=size,proto3" json:"size,omitempty"`
 	// The SHA-256 of its content, in lowercase hexadecimal.
@@ -1700,20 +1701,20 @@ type OutputFile struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *OutputFile) Reset() {
-	*x = OutputFile{}
+func (x *KeptOutput) Reset() {
+	*x = KeptOutput{}
 	mi := &file_vibesys_cli_v1_job_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *OutputFile) String() string {
+func (x *KeptOutput) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*OutputFile) ProtoMessage() {}
+func (*KeptOutput) ProtoMessage() {}
 
-func (x *OutputFile) ProtoReflect() protoreflect.Message {
+func (x *KeptOutput) ProtoReflect() protoreflect.Message {
 	mi := &file_vibesys_cli_v1_job_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1725,26 +1726,26 @@ func (x *OutputFile) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use OutputFile.ProtoReflect.Descriptor instead.
-func (*OutputFile) Descriptor() ([]byte, []int) {
+// Deprecated: Use KeptOutput.ProtoReflect.Descriptor instead.
+func (*KeptOutput) Descriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{15}
 }
 
-func (x *OutputFile) GetPath() string {
+func (x *KeptOutput) GetName() string {
 	if x != nil {
-		return x.Path
+		return x.Name
 	}
 	return ""
 }
 
-func (x *OutputFile) GetSize() uint64 {
+func (x *KeptOutput) GetSize() uint64 {
 	if x != nil {
 		return x.Size
 	}
 	return 0
 }
 
-func (x *OutputFile) GetSha256() string {
+func (x *KeptOutput) GetSha256() string {
 	if x != nil {
 		return x.Sha256
 	}
@@ -2246,16 +2247,16 @@ const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"_exit_code\"x\n" +
 	"\n" +
 	"JobOutputs\x121\n" +
-	"\x04kept\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.OutputFilesH\x00R\x04kept\x12&\n" +
+	"\x04kept\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.KeptOutputsH\x00R\x04kept\x12&\n" +
 	"\arefused\x18\x02 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80 H\x00R\arefusedB\x0f\n" +
-	"\x06record\x12\x05\xbaH\x02\b\x01\"J\n" +
-	"\vOutputFiles\x12;\n" +
-	"\x05files\x18\x01 \x03(\v2\x1a.vibesys.cli.v1.OutputFileB\t\xbaH\x06\x92\x01\x03\x10\xe8\aR\x05files\"|\n" +
+	"\x06record\x12\x05\xbaH\x02\b\x01\"N\n" +
+	"\vKeptOutputs\x12?\n" +
+	"\aoutputs\x18\x01 \x03(\v2\x1a.vibesys.cli.v1.KeptOutputB\t\xbaH\x06\x92\x01\x03\x10\xe8\aR\aoutputs\"|\n" +
 	"\n" +
-	"OutputFile\x12\x1e\n" +
-	"\x04path\x18\x01 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01(\x80\bR\x04path\x12\x1f\n" +
+	"KeptOutput\x12\x1e\n" +
+	"\x04name\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\bR\x04name\x12\x1f\n" +
 	"\x04size\x18\x02 \x01(\x04B\v\xbaH\b2\x06\x18\x80\x80\x80\x80\x01R\x04size\x12-\n" +
 	"\x06sha256\x18\x03 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\x06sha256\"\x92\x03\n" +
 	"\bGpuGrant\x12\x1e\n" +
@@ -2372,8 +2373,8 @@ var file_vibesys_cli_v1_job_proto_goTypes = []any{
 	(*Attempt)(nil),                // 18: vibesys.cli.v1.Attempt
 	(*Job)(nil),                    // 19: vibesys.cli.v1.Job
 	(*JobOutputs)(nil),             // 20: vibesys.cli.v1.JobOutputs
-	(*OutputFiles)(nil),            // 21: vibesys.cli.v1.OutputFiles
-	(*OutputFile)(nil),             // 22: vibesys.cli.v1.OutputFile
+	(*KeptOutputs)(nil),            // 21: vibesys.cli.v1.KeptOutputs
+	(*KeptOutput)(nil),             // 22: vibesys.cli.v1.KeptOutput
 	(*GpuGrant)(nil),               // 23: vibesys.cli.v1.GpuGrant
 	(*LeaseHolder)(nil),            // 24: vibesys.cli.v1.LeaseHolder
 	(*WaitHolder)(nil),             // 25: vibesys.cli.v1.WaitHolder
@@ -2417,8 +2418,8 @@ var file_vibesys_cli_v1_job_proto_depIdxs = []int32{
 	5,  // 28: vibesys.cli.v1.Job.failed_stage:type_name -> vibesys.cli.v1.JobStage
 	23, // 29: vibesys.cli.v1.Job.gpus:type_name -> vibesys.cli.v1.GpuGrant
 	20, // 30: vibesys.cli.v1.Job.outputs:type_name -> vibesys.cli.v1.JobOutputs
-	21, // 31: vibesys.cli.v1.JobOutputs.kept:type_name -> vibesys.cli.v1.OutputFiles
-	22, // 32: vibesys.cli.v1.OutputFiles.files:type_name -> vibesys.cli.v1.OutputFile
+	21, // 31: vibesys.cli.v1.JobOutputs.kept:type_name -> vibesys.cli.v1.KeptOutputs
+	22, // 32: vibesys.cli.v1.KeptOutputs.outputs:type_name -> vibesys.cli.v1.KeptOutput
 	4,  // 33: vibesys.cli.v1.GpuGrant.source:type_name -> vibesys.cli.v1.GrantSource
 	30, // 34: vibesys.cli.v1.LeaseHolder.since:type_name -> google.protobuf.Timestamp
 	0,  // 35: vibesys.cli.v1.WaitHolder.kind:type_name -> vibesys.cli.v1.JobKind
