@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-"""Run a closed-loop concurrency sweep through Request Factory."""
-
 from __future__ import annotations
 
 import argparse
@@ -19,6 +16,10 @@ from typing import Any
 _MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 _TOKENIZER_REVISION = "0e9e39f249a16976918f6564b8830bc894c89659"
 _DEFAULT_CONCURRENCIES = (1, 2, 4, 8, 16, 32, 64, 128)
+# With the default sweep, keep doubling past it while throughput is still rising, up to this cap.
+_MAX_AUTO_CONCURRENCY = 1024
+# Every extended point sends at least this many full waves of requests at its concurrency.
+_MIN_WAVES = 4
 _METRICS = {
     "aggregate_throughput": {"unit": "tok/s", "direction": "max"},
     "p99_latency_ms": {"unit": "ms", "direction": "min"},
@@ -113,7 +114,15 @@ def _metrics(summary: Mapping[str, Any], request_count: int, log_path: Path) -> 
     }
 
 
+def _request_count_for(args: argparse.Namespace, concurrency: int) -> int:
+    """Points beyond the default sweep send several full waves; every other point is unchanged."""
+    if args.auto_extend and concurrency > max(args.concurrencies):
+        return max(args.request_count, _MIN_WAVES * concurrency)
+    return args.request_count
+
+
 def _run_point(args: argparse.Namespace, concurrency: int, label: str) -> dict[str, Any]:
+    request_count = _request_count_for(args, concurrency)
     with tempfile.TemporaryDirectory(prefix="llama3-rf-point-") as directory:
         temporary = Path(directory)
         trace, summary_path, log_path = (
@@ -121,8 +130,8 @@ def _run_point(args: argparse.Namespace, concurrency: int, label: str) -> dict[s
             temporary / "summary.json",
             temporary / "requests.jsonl",
         )
-        _write_trace(trace, args.request_count, args.input_tokens, args.output_tokens)
-        token_pool_limit = max(2 * args.input_tokens, args.request_count)
+        _write_trace(trace, request_count, args.input_tokens, args.output_tokens)
+        token_pool_limit = max(2 * args.input_tokens, request_count)
         corpus = temporary / "corpus.txt"
         _write_corpus(corpus, token_pool_limit, label)
         command = [
@@ -182,11 +191,11 @@ def _run_point(args: argparse.Namespace, concurrency: int, label: str) -> dict[s
                 if json.loads(line).get("outcome", {}).get("error")
             ]
             raise ValueError(f"RF reported {common['failed_steps']} failed requests: {details[:3]}")
-        values = _metrics(summary, args.request_count, log_path)
+        values = _metrics(summary, request_count, log_path)
         return {
             "label": label,
             "concurrency": concurrency,
-            "request_count": args.request_count,
+            "request_count": request_count,
             "input_tokens": args.input_tokens,
             "output_tokens": args.output_tokens,
             "metrics": values,
@@ -217,6 +226,14 @@ def _overload(rows: list[dict[str, Any]]) -> int | None:
     return None
 
 
+def _still_rising(rows: list[dict[str, Any]]) -> bool:
+    """Whether the last point beats the best earlier point by more than 3%."""
+    if len(rows) < 2:
+        return False
+    best_prior = max(row["metrics"]["aggregate_throughput"] for row in rows[:-1])
+    return rows[-1]["metrics"]["aggregate_throughput"] > best_prior * 1.03
+
+
 def run(args: argparse.Namespace) -> int:
     output_path = Path(args.vs_output) if args.vs_output else None
     if output_path:
@@ -230,6 +247,14 @@ def run(args: argparse.Namespace) -> int:
             _run_point(args, concurrency, f"coarse-c{concurrency}")
             for concurrency in args.concurrencies
         ]
+        if args.auto_extend:
+            while (
+                _overload(rows) is None
+                and _still_rising(rows)
+                and rows[-1]["concurrency"] * 2 <= args.concurrency_cap
+            ):
+                concurrency = rows[-1]["concurrency"] * 2
+                rows.append(_run_point(args, concurrency, f"extend-c{concurrency}"))
         first_overload = _overload(rows)
         if first_overload is not None:
             if first_overload == 0:
@@ -243,11 +268,10 @@ def run(args: argparse.Namespace) -> int:
                 concurrency = rows[index]["concurrency"]
                 rows.append(_run_point(args, concurrency, f"confirm-c{concurrency}"))
         else:
-            prior_rows = rows[:-1] or rows
-            best_prior = max(row["metrics"]["aggregate_throughput"] for row in prior_rows)
-            if len(rows) > 1 and rows[-1]["metrics"]["aggregate_throughput"] > best_prior * 1.03:
+            if _still_rising(rows):
                 raise ValueError(
-                    "concurrency sweep ended while throughput was still rising by more than 3%"
+                    "concurrency sweep ended while throughput was still rising by more than 3% "
+                    f"at concurrency {rows[-1]['concurrency']}"
                 )
             best_row = max(rows, key=lambda row: row["metrics"]["aggregate_throughput"])
             best_index = rows.index(best_row)
@@ -319,17 +343,34 @@ def main() -> int:
     parser.add_argument("--url", default="http://127.0.0.1:8000")
     parser.add_argument("--model", default=_MODEL)
     parser.add_argument("--tokenizer")
-    parser.add_argument("--request-count", type=int, default=512)
+    parser.add_argument(
+        "--request-count",
+        type=int,
+        default=512,
+        help="requests per point; auto-extended points send at least 4x their concurrency",
+    )
     parser.add_argument("--input-tokens", type=int, default=256)
     parser.add_argument("--output-tokens", type=int, default=128)
     parser.add_argument(
         "--concurrencies",
         type=lambda raw: tuple(int(v) for v in raw.split(",")),
-        default=_DEFAULT_CONCURRENCIES,
+        default=None,
+        help="explicit sweep, never extended (default: 1,2,4,...,128, then auto-extended)",
+    )
+    parser.add_argument(
+        "--concurrency-cap",
+        type=int,
+        default=_MAX_AUTO_CONCURRENCY,
+        help="highest concurrency the default sweep may be extended to",
     )
     parser.add_argument("--output-json")
     parser.add_argument("--vs-output")
     args = parser.parse_args()
+    args.auto_extend = args.concurrencies is None
+    if args.auto_extend:
+        args.concurrencies = _DEFAULT_CONCURRENCIES
+    if args.concurrency_cap < 1:
+        parser.error("--concurrency-cap must be positive")
     if args.request_count < 1 or args.input_tokens < 1 or args.output_tokens < 1:
         parser.error("request and token counts must be positive")
     if (
