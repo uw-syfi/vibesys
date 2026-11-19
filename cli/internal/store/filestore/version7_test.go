@@ -60,8 +60,8 @@ func TestAStoreOfVersionSevenReadsItsJobsWithNoGPUs(t *testing.T) {
 		}
 	}
 	opened := openOn(t, image)
-	if got := formatOf(t, image); got != 9 {
-		t.Fatalf("format after the migration = %d, want 9", got)
+	if got := formatOf(t, image); got != 10 {
+		t.Fatalf("format after the migration = %d, want 10", got)
 	}
 	jobs, err := opened.Jobs(t.Context(), core.JobFilter{})
 	if err != nil || len(jobs) == 0 {

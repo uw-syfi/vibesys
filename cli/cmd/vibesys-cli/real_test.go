@@ -277,6 +277,27 @@ func TestRealCheckThatFailsFailsTheJobAndSavesNothing(t *testing.T) {
 	}
 }
 
+// A host command that declares outputs keeps what it writes under $VIBESYS_ARTIFACTS_DIR on this
+// machine's disk, and the tool as shipped lists and copies it back.
+func TestRealHostCommandKeepsItsOutputs(t *testing.T) {
+	t.Parallel()
+	m := newMachine(t)
+	m.commitTask()
+	r := m.cli("submit", "command", "--image", "harness", "--env", "host", "--outputs", "--wait", "HEAD", "--",
+		"sh", "-c", `mkdir -p "$VIBESYS_ARTIFACTS_DIR/d" && printf 'r1' > "$VIBESYS_ARTIFACTS_DIR/d/result.txt"`)
+	if r.code != exitOK {
+		t.Fatalf("submit command = %+v", r)
+	}
+	id := strings.Fields(r.stdout)[0]
+	to := filepath.Join(m.root, "out")
+	if r := m.cli("outputs", id, "--to", to); r.code != exitOK || !strings.Contains(r.stdout, "outputs: 1 file, 2 bytes") {
+		t.Fatalf("outputs --to = %+v", r)
+	}
+	if got, err := os.ReadFile(filepath.Join(to, "d", "result.txt")); err != nil || string(got) != "r1" {
+		t.Fatalf("the copy is %q, %v", got, err)
+	}
+}
+
 // dockerConfigVariable is the user's Docker client configuration, as DOCKER_CONFIG, for a tool
 // whose HOME the harness replaces. Docker finds its plugins (buildx, which a task's image is built
 // with) under the configuration of the real HOME, so a replaced HOME would hide them. A user who

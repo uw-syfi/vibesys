@@ -116,6 +116,7 @@ func JobSpec(s core.JobSpec) *cliv1.JobSpec {
 		command := &cliv1.CommandSettings{
 			Argv: append([]string(nil), settings.Argv...), Service: serviceSpec(settings.Service),
 			Candidate: commandCandidate(settings.Candidate), Image: CommandImage(settings.Image), Wrap: slices.Clone(settings.Wrap),
+			Outputs: settings.Outputs,
 		}
 		if settings.Timeout != 0 {
 			command.Timeout = durationpb.New(settings.Timeout)
@@ -211,7 +212,7 @@ func toCommandSettings(field string, c *cliv1.CommandSettings) (core.CommandSett
 	}
 	return core.CommandSettings{
 		Argv: append([]string(nil), c.GetArgv()...), Service: toServiceSpec(c.GetService()), Timeout: timeout,
-		Candidate: candidate, Image: image, Wrap: slices.Clone(c.GetWrap()),
+		Candidate: candidate, Image: image, Wrap: slices.Clone(c.GetWrap()), Outputs: c.GetOutputs(),
 	}, nil
 }
 
@@ -257,6 +258,7 @@ func Job(j core.Job) *cliv1.Job {
 	if j.GPUs != nil {
 		out.Gpus = GpuGrant(*j.GPUs)
 	}
+	out.Outputs = JobOutputs(j.Outputs)
 	return out
 }
 
@@ -403,6 +405,9 @@ func ToJob(j *cliv1.Job) (core.Job, error) {
 			return core.Job{}, err
 		}
 		out.GPUs = &grant
+	}
+	if out.Outputs, err = ToJobOutputs("job.outputs", j.GetOutputs()); err != nil {
+		return core.Job{}, err
 	}
 	return out, nil
 }

@@ -58,6 +58,8 @@ type Runtime struct {
 	Leasing app.Leasing
 	// Allocations is how the daemon keeps standing allocations; the zero value keeps none.
 	Allocations app.Allocations
+	// Outputs reads back the files command jobs kept as outputs (app.Config.Outputs).
+	Outputs app.OutputFiles
 	// Capacities measure the placements whose capacity is a cluster's, by placement name.
 	Capacities map[string]Capacity
 	// Neighbors lists the other daemons of the machine, of any user, for the status. Nil lists
@@ -169,6 +171,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		Scheduler:     cfg.Runtime.Scheduler,
 		Leasing:       cfg.Runtime.Leasing,
 		Allocations:   cfg.Runtime.Allocations,
+		Outputs:       cfg.Runtime.Outputs,
 		Logf:          cfg.Logf,
 	})
 	defer a.Close()

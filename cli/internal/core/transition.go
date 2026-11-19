@@ -114,6 +114,9 @@ func (j Job) Apply(t Transition) (Job, error) {
 	if t.CheckJob != "" {
 		out.CheckJob = t.CheckJob
 	}
+	if t.Outputs != nil {
+		out.Outputs = cloneOutputs(t.Outputs)
+	}
 	if t.Result != nil {
 		out.ResultJob = j.ID
 		if measured, ok := t.Result.Outcome.(MeasureOutcome); ok {
@@ -171,6 +174,11 @@ func checkEffects(j Job, kind JobKind, t Transition) error {
 		return failf(FailureInvalidInput, "transition: a %s job cannot succeed without a result", kind)
 	case t.To == JobSucceeded && kind == JobCommand && t.Result != nil:
 		return failf(FailureInvalidInput, "transition: a command job saves no result")
+	}
+	if t.Outputs != nil {
+		if err := checkOutputsEffect(j, t); err != nil {
+			return err
+		}
 	}
 	if t.Result == nil {
 		return nil

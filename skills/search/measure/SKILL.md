@@ -45,6 +45,9 @@ whose `--wrap '<profiler>'` starts the candidate's server under the profiler:
 your plan, so the number is read against that idea, and `--no-plan` says it tests none, as the
 baseline and a re-measure of the head do. A measure from a run that gives neither is refused,
 naming both flags; give both and it is refused too. `--plan` also links a check or a command job.
+A command whose results are files (timings, a profile) adds `--outputs` and writes them under
+`$VIBESYS_ARTIFACTS_DIR`; read them back with `vibesys-cli outputs <job> --to <dir>`
+([jobs.md](references/jobs.md#output-files-of-a-command-job)).
 GPUs: a check or command of a GPU task says `--gpus N` (the fewest the step needs; there is no
 default), and a measure takes the whole node. The task's GPU budget, how to check per-device use,
 and what to report are in [gpus.md](references/gpus.md).

@@ -155,8 +155,8 @@ func TestAStoreOfVersionFiveIsMigratedToTheCurrentVersion(t *testing.T) {
 				mem.SetFault(fsys.Fault{At: step, Kind: fsys.FaultCrash})
 				opened, err := filestore.Open(stateDir, filestore.WithFS(mem))
 				if err == nil {
-					if got := formatOf(t, mem); got != 9 {
-						t.Fatalf("format after the migration = %d, want 9", got)
+					if got := formatOf(t, mem); got != 10 {
+						t.Fatalf("format after the migration = %d, want 10", got)
 					}
 					if got := dirNames(t, mem); !slices.Equal(got, wantDirs) {
 						t.Fatalf("directories after the migration = %v, want %v", got, wantDirs)

@@ -73,6 +73,10 @@ message CommandSettings {
   // task's image of a task of two images, and otherwise in front of the service when there is one
   // and of the command when not. A stored job holds it already applied, so it is empty there.
   repeated string wrap = 7 [(buf.validate.field).repeated.items.string.min_len = 1];
+  // The command declares output files: what it leaves in its artifacts directory
+  // (VIBESYS_ARTIFACTS_DIR) is recorded with the job when its command ends, however it ends,
+  // within the bounds JobOutputs states, and read back with vibesys-cli outputs.
+  bool outputs = 8;
 }
 
 // ProfileRequest is what a retired profile submission asked for.
@@ -262,6 +266,47 @@ message Job {
   // queued job, on a job that was given none, and on a job started before this field was, whose
   // GPUs are unknown.
   GpuGrant gpus = 21;
+  // The output files of a command job that declared them (CommandSettings.outputs), recorded when
+  // its command ended. Unset on any other job, on one that has not ended, and on one whose command
+  // never ran or whose supervisor went away, which left nothing to record.
+  JobOutputs outputs = 22;
+}
+
+// JobOutputs is what a command job left in its artifacts directory when its command ended: the
+// files, which stay there and are read back against their digests, or why none was kept. A job
+// keeps at most 1000 files of at most 256 MiB in all (core.MaxOutputFiles, core.MaxOutputBytes).
+message JobOutputs {
+  oneof record {
+    option (buf.validate.oneof).required = true;
+    // The outputs, in name order.
+    KeptOutputs kept = 1;
+    // Why none was kept: past a bound (naming it and what the job left), an entry that is not a
+    // regular file or a directory, or a directory that could not be read.
+    string refused = 2 [(buf.validate.field).string = {
+      min_len: 1
+      max_bytes: 4096
+    }];
+  }
+}
+
+// KeptOutputs is the outputs a command job kept.
+message KeptOutputs {
+  repeated KeptOutput outputs = 1 [(buf.validate.field).repeated.max_items = 1000];
+}
+
+// KeptOutput is one output a command job kept.
+message KeptOutput {
+  // Its name among the job's outputs, which is also where the job left it under its artifacts
+  // directory and where a copy puts it: slash-separated and relative, with no empty, "." or ".."
+  // element.
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 1024
+  }];
+  // Its size in bytes.
+  uint64 size = 2 [(buf.validate.field).uint64.lte = 268435456];
+  // The SHA-256 of its content, in lowercase hexadecimal.
+  string sha256 = 3 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
 }
 
 // GrantSource is who chose the devices of a grant.

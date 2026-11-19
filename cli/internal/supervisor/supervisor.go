@@ -231,22 +231,46 @@ func (s *Supervisor) execute() lifecycle.Outcome {
 		// Cancelled while parked: the command never starts.
 		return commandEnded(cancelled)
 	}
-	return commandEnded(s.executeCommand(spec))
+	a, outputs := s.executeCommand(spec)
+	o := commandEnded(a)
+	o.Outputs = outputs
+	return o
 }
 
-// executeCommand runs a command job's command once and says what came of it.
-func (s *Supervisor) executeCommand(spec core.JobSpec) core.Attempt {
+// executeCommand runs a command job's command once and says what came of it, and for a command
+// that declared outputs and started, what it left in its artifacts directory.
+func (s *Supervisor) executeCommand(spec core.JobSpec) (core.Attempt, core.Outputs) {
+	command, _ := spec.Settings.(core.CommandSettings)
+	a, artifacts := s.runCommand(spec)
+	if _, never := a.(core.NotStarted); never || !command.Outputs {
+		return a, nil
+	}
+	if artifacts == "" {
+		o := core.OutputsRefused{Reason: "this daemon keeps no artifacts directory, so none was kept"}
+		_, _ = fmt.Fprint(writer{s}, outputsLine(o))
+		return a, o
+	}
+	// Collected whatever ended the command, a cancel included, so the files are read under a
+	// context that a cancel does not end.
+	o := collectOutputs(context.WithoutCancel(s.ctx), s.cfg.Host.Files, artifacts)
+	_, _ = fmt.Fprint(writer{s}, outputsLine(o))
+	return a, o
+}
+
+// runCommand runs a command job's command once and says what came of it, and the artifacts
+// directory it was given, empty for none.
+func (s *Supervisor) runCommand(spec core.JobSpec) (core.Attempt, string) {
 	command, ok := spec.Settings.(core.CommandSettings)
 	if !ok {
-		return core.NotStarted{Failure: core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("the launch of a %s job carries no plan", spec.Settings.Kind())}}
+		return core.NotStarted{Failure: core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("the launch of a %s job carries no plan", spec.Settings.Kind())}}, ""
 	}
 	env, err := s.cfg.Environments.Environment(spec.Environment, s.target())
 	if err != nil {
-		return core.NotStarted{Failure: core.AsFailure(err)}
+		return core.NotStarted{Failure: core.AsFailure(err)}, ""
 	}
 	checkout, remove, err := s.cfg.Checkouts.Checkout(s.ctx, s.cfg.Launch.Repository, spec.Commit)
 	if err != nil {
-		return environment.Finish(s.ctx, core.NotStarted{Failure: core.AsFailure(err)}, nil)
+		return environment.Finish(s.ctx, core.NotStarted{Failure: core.AsFailure(err)}, nil), ""
 	}
 	defer remove()
 	x := core.Execution{Checkout: checkout, Argv: command.Argv, Service: command.Service, Timeout: command.Timeout}
@@ -258,7 +282,7 @@ func (s *Supervisor) executeCommand(spec core.JobSpec) core.Attempt {
 		// A job of a task of two images: its candidate's image first, built from the job's commit.
 		img, err := env.Candidate(s.ctx, c.Build, writer{s})
 		if err != nil {
-			return environment.Finish(s.ctx, core.NotStarted{Failure: core.AsFailure(err)}, nil)
+			return environment.Finish(s.ctx, core.NotStarted{Failure: core.AsFailure(err)}, nil), ""
 		}
 		x.Candidate = &core.CandidateRun{Image: img.ID}
 		if c.Serve != nil {
@@ -272,13 +296,13 @@ func (s *Supervisor) executeCommand(spec core.JobSpec) core.Attempt {
 		}
 	}
 	if h := s.cfg.Host; h.Artifacts != nil && h.Files != nil {
-		x.Artifacts = flowrun.ArtifactsOf(h.Artifacts(s.cfg.Launch.Repository, s.cfg.Launch.Task, s.cfg.Launch.Job), 1, "command")
+		x.Artifacts = commandArtifacts(h, s.cfg.Launch.Repository, s.cfg.Launch.Task, s.cfg.Launch.Job)
 		if err := h.Files.MakeDir(s.ctx, x.Artifacts); err != nil {
-			return core.NotStarted{Failure: core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("making the artifacts directory: %v", err)}}
+			return core.NotStarted{Failure: core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("making the artifacts directory: %v", err)}}, ""
 		}
 		_, _ = fmt.Fprintf(writer{s}, "[command] artifacts: %s\n", x.Artifacts)
 	}
-	return env.Run(s.ctx, x, writer{s})
+	return env.Run(s.ctx, x, writer{s}), x.Artifacts
 }
 
 // imageLine says where a command job's command runs, for the head of its output.

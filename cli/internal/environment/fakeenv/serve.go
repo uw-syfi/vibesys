@@ -116,7 +116,7 @@ func (s *service) Run(ctx context.Context, x core.Execution, out io.Writer) core
 	limit, stop := e.timers.Timeout(ctx, x.Timeout)
 	defer stop()
 	var wg sync.WaitGroup
-	l := &launcher{in: &interpreter{gates: e.gates, dir: x.Checkout.Dir, files: e.files, ready: s.ready}, wg: &wg}
+	l := &launcher{in: &interpreter{gates: e.gates, dir: x.Checkout.Dir, artifacts: x.Artifacts, files: e.files, ready: s.ready}, wg: &wg}
 	ev := environment.Events{
 		Limit:       limit,
 		Cancelled:   ctx.Done(),

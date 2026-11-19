@@ -347,6 +347,26 @@ func (s *Server) ReadLogs(req *cliv1.ReadLogsRequest, stream cliv1.DaemonService
 	return wire.Error(err)
 }
 
+// ReadOutputs implements cliv1.DaemonServiceServer.
+func (s *Server) ReadOutputs(req *cliv1.ReadOutputsRequest, stream cliv1.DaemonService_ReadOutputsServer) error {
+	ctx, cancel := s.bound(stream.Context())
+	defer cancel()
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return wire.Error(err)
+	}
+	err = s.app.ReadOutputs(ctx, call.Scope, core.JobID(req.GetJobId()), req.GetContent(),
+		func(j core.Job) error {
+			return stream.Send(&cliv1.ReadOutputsResponse{Item: &cliv1.ReadOutputsResponse_Job{Job: wire.Job(j)}})
+		},
+		func(c app.OutputChunk) error {
+			return stream.Send(&cliv1.ReadOutputsResponse{Item: &cliv1.ReadOutputsResponse_Chunk{
+				Chunk: &cliv1.KeptOutputChunk{Name: c.Path, Offset: c.Offset, Data: c.Data},
+			}})
+		})
+	return wire.Error(err)
+}
+
 // heldLeases returns the contract's messages for the leases a daemon's jobs hold.
 func heldLeases(ls []app.HeldLease) []*cliv1.HeldLease {
 	var out []*cliv1.HeldLease

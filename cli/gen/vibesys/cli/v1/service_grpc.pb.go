@@ -31,6 +31,7 @@ const (
 	DaemonService_ListJobs_FullMethodName              = "/vibesys.cli.v1.DaemonService/ListJobs"
 	DaemonService_ForgetRepository_FullMethodName      = "/vibesys.cli.v1.DaemonService/ForgetRepository"
 	DaemonService_ReadLogs_FullMethodName              = "/vibesys.cli.v1.DaemonService/ReadLogs"
+	DaemonService_ReadOutputs_FullMethodName           = "/vibesys.cli.v1.DaemonService/ReadOutputs"
 	DaemonService_Show_FullMethodName                  = "/vibesys.cli.v1.DaemonService/Show"
 	DaemonService_Compare_FullMethodName               = "/vibesys.cli.v1.DaemonService/Compare"
 	DaemonService_Promote_FullMethodName               = "/vibesys.cli.v1.DaemonService/Promote"
@@ -103,6 +104,10 @@ type DaemonServiceClient interface {
 	// ReadLogs streams a job's output from an offset, and with follow keeps streaming until the job
 	// is final.
 	ReadLogs(ctx context.Context, in *ReadLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadLogsResponse], error)
+	// ReadOutputs sends a command job's recorded output files: first the job, whose outputs field
+	// lists them beside its provenance, and, with content, each file's bytes in the order listed. A
+	// job that kept none is refused, saying why.
+	ReadOutputs(ctx context.Context, in *ReadOutputsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadOutputsResponse], error)
 	Show(ctx context.Context, in *ShowRequest, opts ...grpc.CallOption) (*ShowResponse, error)
 	Compare(ctx context.Context, in *CompareRequest, opts ...grpc.CallOption) (*CompareResponse, error)
 	// Promote moves the result branch to a commit, or refuses with typed reasons. A refusal is a
@@ -334,6 +339,25 @@ func (c *daemonServiceClient) ReadLogs(ctx context.Context, in *ReadLogsRequest,
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DaemonService_ReadLogsClient = grpc.ServerStreamingClient[ReadLogsResponse]
+
+func (c *daemonServiceClient) ReadOutputs(ctx context.Context, in *ReadOutputsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadOutputsResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &DaemonService_ServiceDesc.Streams[4], DaemonService_ReadOutputs_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ReadOutputsRequest, ReadOutputsResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DaemonService_ReadOutputsClient = grpc.ServerStreamingClient[ReadOutputsResponse]
 
 func (c *daemonServiceClient) Show(ctx context.Context, in *ShowRequest, opts ...grpc.CallOption) (*ShowResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -657,6 +681,10 @@ type DaemonServiceServer interface {
 	// ReadLogs streams a job's output from an offset, and with follow keeps streaming until the job
 	// is final.
 	ReadLogs(*ReadLogsRequest, grpc.ServerStreamingServer[ReadLogsResponse]) error
+	// ReadOutputs sends a command job's recorded output files: first the job, whose outputs field
+	// lists them beside its provenance, and, with content, each file's bytes in the order listed. A
+	// job that kept none is refused, saying why.
+	ReadOutputs(*ReadOutputsRequest, grpc.ServerStreamingServer[ReadOutputsResponse]) error
 	Show(context.Context, *ShowRequest) (*ShowResponse, error)
 	Compare(context.Context, *CompareRequest) (*CompareResponse, error)
 	// Promote moves the result branch to a commit, or refuses with typed reasons. A refusal is a
@@ -768,6 +796,9 @@ func (UnimplementedDaemonServiceServer) ForgetRepository(context.Context, *Forge
 }
 func (UnimplementedDaemonServiceServer) ReadLogs(*ReadLogsRequest, grpc.ServerStreamingServer[ReadLogsResponse]) error {
 	return status.Error(codes.Unimplemented, "method ReadLogs not implemented")
+}
+func (UnimplementedDaemonServiceServer) ReadOutputs(*ReadOutputsRequest, grpc.ServerStreamingServer[ReadOutputsResponse]) error {
+	return status.Error(codes.Unimplemented, "method ReadOutputs not implemented")
 }
 func (UnimplementedDaemonServiceServer) Show(context.Context, *ShowRequest) (*ShowResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Show not implemented")
@@ -1061,6 +1092,17 @@ func _DaemonService_ReadLogs_Handler(srv interface{}, stream grpc.ServerStream) 
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DaemonService_ReadLogsServer = grpc.ServerStreamingServer[ReadLogsResponse]
+
+func _DaemonService_ReadOutputs_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(ReadOutputsRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DaemonServiceServer).ReadOutputs(m, &grpc.GenericServerStream[ReadOutputsRequest, ReadOutputsResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DaemonService_ReadOutputsServer = grpc.ServerStreamingServer[ReadOutputsResponse]
 
 func _DaemonService_Show_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ShowRequest)
@@ -1737,6 +1779,11 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "ReadLogs",
 			Handler:       _DaemonService_ReadLogs_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "ReadOutputs",
+			Handler:       _DaemonService_ReadOutputs_Handler,
 			ServerStreams: true,
 		},
 	},

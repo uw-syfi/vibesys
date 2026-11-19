@@ -139,6 +139,7 @@ func (g *gen) settings() core.Settings {
 			Timeout: time.Duration(1 + g.r.Int64N(1<<40)),
 			Image:   core.CommandImages()[g.pick(2)],
 			Wrap:    g.strs(),
+			Outputs: true,
 			Candidate: &core.CommandCandidate{
 				Build: core.CandidateBuild{Dockerfile: g.text(), Context: g.text(), AllowedBases: g.strs()},
 				Serve: &core.CandidateServe{Argv: g.strs(), Ready: "/" + g.text(), StartupTimeout: time.Duration(1 + g.r.Int64N(1<<40))},
@@ -296,8 +297,28 @@ func (g *gen) job() core.Job {
 		Notes: []core.Note{g.note(), g.note()}, Plans: []core.PlanNumber{core.PlanNumber(1 + g.r.Uint32()), 2},
 		SubmittedAt: g.instant(), StartedAt: &started, FinishedAt: &finished, CancelReason: g.text(), ExitCode: &code,
 		ResultJob: core.JobID(g.name()), CheckJob: core.JobID(g.name()), Attempts: g.attempts(), Submitters: g.submitters(),
-		Needs: g.needs(), TaskVersion: g.name(), FailedStage: core.StageCheck, GPUs: g.grant(),
+		Needs: g.needs(), TaskVersion: g.name(), FailedStage: core.StageCheck, GPUs: g.grant(), Outputs: g.outputs(),
 	}
+}
+
+// outputs is a record of a command job's outputs that a job may hold: files kept, or a refusal.
+func (g *gen) outputs() core.Outputs {
+	if g.pick(3) == 0 {
+		reason := g.text()
+		if len(reason) > 4096 { // the most a refusal holds
+			reason = reason[:4096]
+		}
+		return core.OutputsRefused{Reason: reason}
+	}
+	var kept core.OutputsKept
+	for i := range 1 + g.pick(4) {
+		kept.Files = append(kept.Files, core.OutputFile{
+			Path:   fmt.Sprintf("d%d/%s.json", i, g.name()),
+			Size:   uint64(g.pick(core.MaxOutputBytes / 8)),
+			SHA256: fmt.Sprintf("%016x%016x%016x%016x", g.r.Uint64(), g.r.Uint64(), g.r.Uint64(), g.r.Uint64()),
+		})
+	}
+	return kept
 }
 
 // gpus is a count of GPUs, 1 to the largest pool.
@@ -481,6 +502,14 @@ func (g *gen) transitionFor(job core.Job, at time.Time) core.Transition {
 	}
 	if (tr.To == core.JobQueued && g.pick(6) != 0) || g.pick(12) == 0 {
 		tr.Cut = g.cut()
+	}
+	if (tr.From == core.JobRunning && tr.To.Final() && g.pick(3) != 0) || g.pick(15) == 0 {
+		// Outputs, which only a command job that declared them records as its command ends; now
+		// and then a record a job cannot hold.
+		tr.Outputs = g.outputs()
+		if g.pick(10) == 0 {
+			tr.Outputs = core.OutputsKept{Files: []core.OutputFile{{Path: "../escape", SHA256: "nothex"}}}
+		}
 	}
 	if g.pick(25) == 0 {
 		tr.At = time.Time{}

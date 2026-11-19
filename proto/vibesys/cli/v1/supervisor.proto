@@ -254,6 +254,9 @@ message SupervisorOutcome {
   // The standing allocations where processes of a container this supervisor ran were not
   // confirmed killed, and may still run beside the next job: the daemon ends and releases each.
   repeated ProcessesLeft processes_left = 8 [(buf.validate.field).repeated.max_items = 64];
+  // The output files of a command job that declared them, collected once its command ended.
+  // Unset for any other job, and for one whose command never started.
+  JobOutputs outputs = 9;
 }
 
 // ProcessesLeft names a standing allocation where processes may survive a container's removal.
