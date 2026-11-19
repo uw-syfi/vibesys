@@ -11,6 +11,8 @@
 //
 //	print TEXT...      write the text and a newline to the output
 //	emit TEXT...       write the text, with no newline, to the output file the command was given
+//	artifact PATH TEXT...  write the text, with no newline, to PATH in the execution's artifacts
+//	                   directory, as a command writes under $VIBESYS_ARTIFACTS_DIR (see WithFiles)
 //	hold GATE          wait until the gate is released; a cancel ends the run, cancelled
 //	exit N             end the run, exited with code N
 //	timeout            end the run, timed out

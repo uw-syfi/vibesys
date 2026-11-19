@@ -61,6 +61,10 @@ service DaemonService {
   // ReadLogs streams a job's output from an offset, and with follow keeps streaming until the job
   // is final.
   rpc ReadLogs(ReadLogsRequest) returns (stream ReadLogsResponse);
+  // ReadOutputs sends a command job's recorded output files: first the job, whose outputs field
+  // lists them beside its provenance, and, with content, each file's bytes in the order listed. A
+  // job that kept none is refused, saying why.
+  rpc ReadOutputs(ReadOutputsRequest) returns (stream ReadOutputsResponse);
 
   rpc Show(ShowRequest) returns (ShowResponse);
   rpc Compare(CompareRequest) returns (CompareResponse);
@@ -606,6 +610,32 @@ message ReadLogsResponse {
   bytes data = 1;
   // Where the next read continues.
   uint64 next_offset = 2;
+}
+
+message ReadOutputsRequest {
+  CallContext context = 1;
+  string job_id = 2 [(buf.validate.field).string.min_len = 1];
+  // Send the files' bytes after the job.
+  bool content = 3;
+}
+
+message ReadOutputsResponse {
+  oneof item {
+    option (buf.validate.oneof).required = true;
+    // The first message: the job, with its outputs.
+    Job job = 1;
+    // A piece of one file's bytes. A file's pieces come in order, one file after another.
+    OutputFileChunk chunk = 2;
+  }
+}
+
+// OutputFileChunk is a piece of one output file.
+message OutputFileChunk {
+  // The file's path, as the job's outputs list it.
+  string path = 1 [(buf.validate.field).string.min_len = 1];
+  // Where the piece starts in the file.
+  uint64 offset = 2;
+  bytes data = 3;
 }
 
 message ShowRequest {

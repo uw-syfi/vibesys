@@ -57,8 +57,8 @@ func TestAStoreOfVersionEightReadsItsPlansWithNoKindOrDependencies(t *testing.T)
 		}
 	}
 	opened := openOn(t, image)
-	if got := formatOf(t, image); got != 9 {
-		t.Fatalf("format after the migration = %d, want 9", got)
+	if got := formatOf(t, image); got != 10 {
+		t.Fatalf("format after the migration = %d, want 10", got)
 	}
 	plans, err := opened.Plans(t.Context(), core.PlanFilter{})
 	if err != nil || len(plans) == 0 {
@@ -90,8 +90,8 @@ func TestAStoreOfVersionEightReadsItsPlansWithNoKindOrDependencies(t *testing.T)
 	if err := opened.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if f := planFile(t, image, 2); f.GetFormat() != 9 {
-		t.Errorf("plan 2 is written at format %d, want 9", f.GetFormat())
+	if f := planFile(t, image, 2); f.GetFormat() != 10 {
+		t.Errorf("plan 2 is written at format %d, want 10", f.GetFormat())
 	}
 	again := openOn(t, image.CrashImage(false))
 	got, err := again.Plans(t.Context(), core.PlanFilter{})

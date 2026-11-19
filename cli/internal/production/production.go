@@ -213,6 +213,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 			Scheduler:       wired.Scheduler,
 			Leasing:         p.leasingOf(op, scope, wired.claims, clk, logf),
 			Allocations:     wired.Allocations,
+			Outputs:         jobHost(clk),
 			Capacities:      wired.Capacities,
 			Neighbors:       neighborsOf,
 		},
@@ -380,12 +381,18 @@ func (p Process) RunSupervisor(ctx context.Context, runDir string, ready io.Writ
 	return host.Serve(ctx, runDir, host.Deps{
 		Environments:  machines.environments,
 		Checkouts:     gitwork.Checkouts{},
-		Host:          supervisor.Host{Files: hostfs.OS{}, Clock: clk, Artifacts: filestore.ArtifactsDir},
+		Host:          jobHost(clk),
 		BinaryVersion: p.Version,
 		// Each supervisor runs one job: what its engines hold of processes not confirmed killed
 		// was left by its job, and the outcome tells the daemon, which releases the allocation.
 		ProcessesLeft: machines.processesLeft,
 	}, ready)
+}
+
+// jobHost is the machine's files as a job's supervisor writes them and the daemon reads its outputs
+// back: the real file system, with each job's artifacts beside its store.
+func jobHost(clk clock.Clock) supervisor.Host {
+	return supervisor.Host{Files: hostfs.OS{}, Clock: clk, Artifacts: filestore.ArtifactsDir}
 }
 
 // cacheRoot is where docker jobs on this machine keep their caches: vibesys-cli in XDG_CACHE_HOME,

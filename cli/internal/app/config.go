@@ -77,6 +77,10 @@ type Config struct {
 	// placements it may run on (core.CheckGPUAsk).
 	HostPool core.GPUCount
 
+	// Outputs reads back the files command jobs kept as their outputs. Without it the daemon lists
+	// a job's outputs and refuses to send their content, as unavailable.
+	Outputs OutputFiles
+
 	// Allocations is how the daemon keeps standing allocations; the zero value keeps none.
 	Allocations Allocations
 

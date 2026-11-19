@@ -87,9 +87,31 @@ vibesys-cli submit command <sha> --image harness --service '<server argv>' --pro
 This is for a task without `[candidate]`, or a command in the candidate's image (`--image
 candidate`). On a task with `[candidate]`, `--image harness` already runs the command beside the
 candidate's server, as the benchmark does, and refuses `--service`. The CLI starts the service, waits for the probe, runs the client, and stops the whole process
-group on every exit. Keep the service in the foreground; disable daemonizing. Output you need
-afterwards: print it and read it with `vibesys-cli logs <job>`; a file only helps where the
-environment can write it.
+group on every exit. Keep the service in the foreground; disable daemonizing. Text you need
+afterwards: print it and read it with `vibesys-cli logs <job>`. Files you need afterwards: see
+the next section.
+
+## Output files of a command job
+
+A command job that produces structured results (per-shape kernel timings, a profile, a probe's
+per-request results) declares them with `--outputs` and writes them under `$VIBESYS_ARTIFACTS_DIR`,
+which every command job has, on the host and in a container alike. The argv is not run by a shell,
+so name the variable through one or read it in your script:
+
+```
+vibesys-cli submit command <sha> --image harness --outputs --wait -- \
+  sh -c 'python3 bench.py --out "$VIBESYS_ARTIFACTS_DIR/timings.json"'
+vibesys-cli outputs <job>                 # the job, where it ran, each file's size and SHA-256
+vibesys-cli outputs <job> --to <dir>      # copy them into <dir>, which you can write
+```
+
+The CLI records the files with the job when its command ends, success or failure, beside the
+commit, environment and GPUs it ran with, so they are evidence of that commit. A job keeps at most
+1000 files and 256 MiB in all, and only regular files: past a bound, or with a symbolic link in the
+directory, it keeps none, and `outputs` says why, naming the bound and the size the job left. Write
+only the results you need there (not a whole trace directory), and keep large captures out of it.
+`outputs` refuses a job submitted without `--outputs` (exit 2) and one that has not ended (exit 1).
+The CLI does not read the files; what they mean is your script's or the domain skill's format.
 
 ## First submit of a task with a Dockerfile
 

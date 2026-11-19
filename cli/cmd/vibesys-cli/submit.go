@@ -124,6 +124,7 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 		plan    = fs.Uint("plan", 0, "the number of a plan to link the job to")
 		wait    = fs.Bool("wait", false, "block until the job is final, then exit as `wait` does")
 		gpus    = fs.Uint("gpus", 0, gpusUsage)
+		outputs = fs.Bool("outputs", false, "record the files the command leaves in its artifacts directory ($VIBESYS_ARTIFACTS_DIR) with the job when it ends, at most 1000 files and 256 MiB; read them with vibesys-cli outputs <job>")
 	)
 	positional, err := parse(fs, flagArgs)
 	if err != nil {
@@ -179,7 +180,7 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 
 	// The daemon puts the wrapper where it goes, as only it reads the task: in front of the
 	// candidate's server, the service or the command.
-	settings := &cliv1.CommandSettings{Argv: argv, Image: imageKind, Wrap: prefix}
+	settings := &cliv1.CommandSettings{Argv: argv, Image: imageKind, Wrap: prefix, Outputs: *outputs}
 	if *timeout > 0 {
 		settings.Timeout = durationpb.New(*timeout)
 	}

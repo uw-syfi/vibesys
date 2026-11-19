@@ -113,7 +113,10 @@ type interpreter struct {
 	gates Gates
 	// dir is the working directory the `dir` step prints.
 	dir string
-	// files is where the `emit` step writes; nil when the machine has no such files.
+	// artifacts is the execution's artifacts directory, where the `artifact` step writes; empty
+	// for none.
+	artifacts string
+	// files is where the `emit` and `artifact` steps write; nil when the machine has no such files.
 	files Files
 	// lostOnEnd is the error of a wait that its group ended, and nil for the default, a cancelled
 	// command: a machine whose processes die with it cannot say how they ended.
@@ -178,6 +181,12 @@ func (in *interpreter) runWith(g *group, steps []step, out io.Writer, file strin
 				return exited(127)
 			}
 			in.files.Put(file, []byte(strings.Join(w[1:], " ")))
+		case "artifact":
+			// As a command writes a file under $VIBESYS_ARTIFACTS_DIR: a relative path that stays in it.
+			if in.files == nil || in.artifacts == "" || len(w) < 2 || path.IsAbs(w[1]) || path.Clean(w[1]) != w[1] || strings.HasPrefix(w[1], "..") {
+				return exited(127)
+			}
+			in.files.Put(path.Join(in.artifacts, w[1]), []byte(strings.Join(w[2:], " ")))
 		case "dir":
 			if _, err := fmt.Fprintln(out, in.dir); err != nil {
 				return core.ExecOutcome{}, err

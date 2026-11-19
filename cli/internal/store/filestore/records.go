@@ -75,7 +75,12 @@ import (
 // Open migrates a store of 2 to 8 the same way, writing the format file at version 9 last. A plan
 // saved before has no kind and no dependencies, and none is invented for it: it reads as a plan whose
 // planner stated neither, and is ready while it is open.
-const formatVersion = 9
+//
+// Version 10 adds a command job's declaration of output files (CommandSettings.outputs) and the
+// record of what it kept (Job.outputs), which a version 9 program would refuse as unknown. It only
+// adds, so this program reads versions 2 to 10, and Open migrates a store of 2 to 9 the same way,
+// writing the format file at version 10 last. A job saved before declared no outputs and has none.
+const formatVersion = 10
 
 // rekeyedBefore is the first version whose results carry keys of the current rule: a result of a
 // record older than it is rekeyed when it is read.
@@ -273,6 +278,7 @@ func settingsFromMessage(s *cliv1.JobSpec) (core.Settings, error) {
 			return nil, err
 		}
 		out.Wrap = slices.Clone(settings.Command.GetWrap())
+		out.Outputs = settings.Command.GetOutputs()
 		if out.Candidate, err = wire.ToCommandCandidate("command.candidate", settings.Command.GetCandidate()); err != nil {
 			return nil, err
 		}
@@ -360,6 +366,10 @@ func jobFromMessage(m *cliv1.Job) (core.Job, error) {
 			return fail(err)
 		}
 		j.GPUs = &grant
+	}
+	// A job saved before format 10 declared no outputs and kept none.
+	if j.Outputs, err = wire.ToJobOutputs("outputs", m.GetOutputs()); err != nil {
+		return fail(err)
 	}
 	return j, nil
 }
