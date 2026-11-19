@@ -29,6 +29,14 @@ steer agents toward the stacks a task replaces.
 | `neuron-nki-profile-querying` | Query NEFF/NTFF profiles to localize bottlenecks. |
 | `neuron-explorer-profile-schema` | What the neuron-explorer profile tables and columns mean. |
 
+## First-party: `neuron-safeguards`
+
+`neuron-safeguards/` is **not** vendored. It is a VibeSys skill holding the
+required-safeguards checklist for Neuron work, which the `optimize` lead copies
+into implement and combine briefs and `plan-hypotheses` checks before a plan is
+written. It sits beside `skills/`, so `./update.sh` leaves it alone, and the
+sidecar scopes it to `trainium` like the vendored skills.
+
 ## Provenance
 
 - Upstream: https://github.com/aws-neuron/neuron-agentic-development
@@ -36,7 +44,7 @@ steer agents toward the stacks a task replaces.
   neuron-agentic-development 1.4)
 - License: Apache-2.0
 
-**Do not hand-edit** these files — they are a vendored copy. Re-vendor with
+**Do not hand-edit** the files under `skills/` — they are a vendored copy. Re-vendor with
 `./update.sh` to pull a newer upstream revision. The script applies one
 fix-up: a note at the top of `neuron-nki-debugging/SKILL.md` saying its
 `torch_xla` harness snippets predate native TorchNeuron.

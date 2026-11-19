@@ -50,6 +50,7 @@ NKI_SKILL_NAMES = {
     "neuron-nki-profile-querying",
     "neuron-nki-profiling",
     "neuron-nki-writing",
+    "neuron-safeguards",
 }
 DIAL9_PACK_DIR = PROJECT_ROOT / "skills" / "domains" / "dial9-tokio"
 DIAL9_SKILL_NAMES = {
@@ -762,6 +763,31 @@ def test_docs_that_name_a_domain_skill_by_path_give_the_path_of_a_vendored_pack_
             else f"{skill.as_posix()}/SKILL.md"
         )
         assert pattern in text, f"{doc} does not give the path {pattern} of {skill}"
+
+
+_NEURON_SAFEGUARDS = "neuron-agentic-development/neuron-safeguards/SKILL.md"
+_SAFEGUARD_CITERS = (
+    Path("skills") / "search" / "optimize" / "references" / "briefs.md",
+    Path("skills") / "search" / "plan-hypotheses" / "SKILL.md",
+)
+_DOMAIN_SKILL_PATH = re.compile(r"`([a-z0-9-]+(?:/[a-z0-9-]+)+/SKILL\.md)`")
+
+
+@pytest.mark.parametrize("doc", _SAFEGUARD_CITERS, ids=str)
+def test_neuron_safeguards_cited_by_search_skills_resolve(doc: Path) -> None:
+    """The briefs and the planner point at the Neuron safeguards checklist by a path that exists.
+
+    A lead copies the checklist into Trainium briefs by that path, so a moved or renamed skill
+    would leave every Neuron brief without it.
+    """
+    domains = PROJECT_ROOT / "skills" / "domains"
+    cited = _DOMAIN_SKILL_PATH.findall((PROJECT_ROOT / doc).read_text(encoding="utf-8"))
+
+    assert _NEURON_SAFEGUARDS in cited
+    for path in cited:
+        skill_file = domains / path
+        assert skill_file.is_file(), f"{doc} cites {path}, which is not under {domains}"
+        assert load_skill_frontmatter(skill_file.parent)["name"] == skill_file.parent.name
 
 
 _DIAL9_RANK_SKILL = "dial9-rank-bottlenecks"

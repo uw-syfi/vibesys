@@ -1,3 +1,7 @@
 [[rule]]
 path = "skills"
 backends = ["trainium"]
+
+[[rule]]
+path = "neuron-safeguards"
+backends = ["trainium"]

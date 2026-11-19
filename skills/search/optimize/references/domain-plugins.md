@@ -18,11 +18,13 @@ A `cli-tools` task targets the `cpu` backend, so it needs `vibesys-cli-tools` an
 plugin. A `llm-serving` task on backend `trainium` needs both `vibesys-llm-serving` and
 `vibesys-kernels-trainium`, and on backend `rocm` both `vibesys-llm-serving` and
 `vibesys-kernels-rocm`, because `serving-systems` captures ROCm profiles with the
-`kernel-rocprof-analysis` skill. A `kernel-writing` task on a backend with no kernels plugin of its
+`kernel-rocprof-analysis` skill. Any task on backend `trainium` also needs the `neuron-safeguards`
+skill of `vibesys-kernels-trainium`, whatever its domain: its checklist goes into every implement
+and combine brief. A `kernel-writing` task on a backend with no kernels plugin of its
 own (`cpu`, `metal`) still uses the backend-neutral `kernel-correctness` and `kernel-performance`,
 which every kernels plugin lists: name only those two in briefs, since the plugin's analysis skills
 are for its own backend. `generic` on any backend, and a listed domain on a backend the table does
-not pair it with, need no domain plugin. A domain that appears nowhere in this table and is not
+not pair it with, need no other domain plugin. A domain that appears nowhere in this table and is not
 `generic` is one this plugin version does not know: carry on, and say in your first report that no
 domain skill was found for it.
 
@@ -32,7 +34,8 @@ bare name. It is also available when the user or the operator's instructions nam
 that holds it (such as a vibesys checkout's `skills/domains/<skill>/SKILL.md`; the skills of the
 two vendored packs sit one folder further down: `dial9-tokio/skills/<skill>/SKILL.md`, and
 `dial9-tokio/dial9-rank-bottlenecks/SKILL.md` for the workflow skill, and
-`neuron-agentic-development/skills/<skill>/SKILL.md`): then point every
+`neuron-agentic-development/skills/<skill>/SKILL.md`, and
+`neuron-agentic-development/neuron-safeguards/SKILL.md` for the safeguards skill): then point every
 brief at that file by its absolute path instead of the plugin name, so a fix to the skill reaches
 the next subagent. Otherwise do not search the filesystem for it.
 

@@ -43,6 +43,11 @@ or the bare `kernel-performance` where the harness has no plugin prefix). A skil
 operator's instructions named by its directory goes by the absolute path of its `SKILL.md`, never
 by a plugin name: no such plugin is installed.
 
+Neuron safeguards: on backend `trainium`, copy the checklist of the `neuron-safeguards` domain
+skill whole into every implement and combine brief, after the rules. It is
+`vibesys-kernels-trainium:neuron-safeguards` where the harness offers it, and
+`neuron-agentic-development/neuron-safeguards/SKILL.md` under the domain skills folder otherwise.
+
 ## Implement
 
 Add:
@@ -57,6 +62,7 @@ First step: <the smallest change to the claim that you can finish, commit and me
   turn>. Do it and measure it before anything larger.
 Parent: <base commit, or the candidate commit you build on and its measured value>
 Measure: <whether you submit the measure yourself, or return `ready for measurement`>
+Safeguards: <on backend trainium, the neuron-safeguards checklist, copied whole; else omit>
 Hand back: claim, commit SHA, job ids and the compare output, what you learned, the next step
   you propose.
 ```
@@ -85,6 +91,7 @@ Main commit: <SHA>      Apply in this order, each as the diff from where it was 
   2. ...
 How to combine them: <which side wins a conflict; what must survive>
 Watch for: <where the parts interact>
+Safeguards: <on backend trainium, the neuron-safeguards checklist, copied whole; else omit>
 Hand back: the commit, the parts you could not apply and why, the checks you ran.
 ```
 
