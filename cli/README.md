@@ -144,7 +144,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/backend/amd/` | The AMD GPU facts of a machine (model, count, the amdgpu driver's version) for a fingerprint, read with `rocminfo` or `amd-smi` and `/sys/module/amdgpu/version`. |
 | `internal/resource/rocm/` | The `rocm` resource: the machine's AMD GPUs, and a check, run in the container before the command, that the image's ROCm runtime sees them. |
 | `internal/backend/neuron/` | The Neuron facts of a machine (model, devices, NeuronCores per device and in all, the logical core config, the neuron driver's version) for a fingerprint and the check of a pool, read with `neuron-ls --json-output` and the driver's sysfs. |
-| `internal/resource/neuron/` | The `neuron` resource: the machine's AWS Neuron devices, a pool of NeuronCores whose role gives a job the `/dev/neuron*` devices of its range and `NEURON_RT_VISIBLE_CORES`, and a check, run before the job's commands, that its cores hold no other process's device memory. |
+| `internal/resource/neuron/` | The `neuron` resource: the machine's AWS Neuron devices, a pool of NeuronCores whose role gives a job the `/dev/neuron*` devices of its range and `NEURON_RT_VISIBLE_CORES`, and a check, run before the job's commands, that no other process holds its cores. |
 | `internal/tomlproto/` | Decoding TOML into a proto message by its field names, refusing an unknown key by name, and a key newer than the schema version the file declares (`task_schema_since_minor`). The task manifest and the operator config are read with it. |
 | `internal/operator/` | The operator config (`cli.toml`), decoded into `OperatorConfig` in `operator.proto` with unknown keys refused by name: its version (`0.2`, the only one read; every key of the earlier shape refused by name), its named placements, each placement's kind and sections, its GPU pools, and the defaults the file leaves out. What a kind's section means is that kind's package's business. |
 | `internal/resource/` | `Resource`: what a placement gives every container (`Kind`, `Claims` for scheduling, `Fingerprint`, and `Attach`, the mounts, variables, network and GPUs a container is made with), and the contract suite in `resourcetest/` every resource passes, with the Fake in `fakeresource/` (tests only). |
@@ -725,8 +725,9 @@ refused with the reason.
   checkout and the job's scratch directory are mounted at their own paths, so a path a command is
   given means the same inside. A task with `docker_in_docker = true` is refused: the container has
   no container runtime. A task for the `cuda` backend runs when its placement has a `gpu`
-  resource, and a task for the `rocm` backend when it has a `rocm` resource; each is refused
-  otherwise, with the resource it lacks named. Other accelerator backends are refused.
+  resource, a task for the `rocm` backend when it has a `rocm` resource, and a task for the
+  `trainium` backend when it has a `neuron` resource; each is refused otherwise, with the resource
+  it lacks named. Other accelerator backends (`metal`) are refused in a container.
 - A container also gets the cache directory of the task's image at `/vibesys/cache`, kept across
   commits and jobs, and an empty `/vibesys/artifacts` that is kept with the job; the variables
   `VIBESYS_CACHE_DIR` and `VIBESYS_ARTIFACTS_DIR` name them. Why the task environment is shaped this
@@ -739,11 +740,11 @@ refused with the reason.
   | `gpu` | The GPUs, by `--gpus all`, or by the runtime with `NVIDIA_VISIBLE_DEVICES`. When the table has a `count`, the devices of the job's own group instead, by number: `--gpus '"device=2,3"'`, quoted as docker needs a list, or the runtime's variable, and `VIBESYS_GPUS` and `VIBESYS_GPU_DEVICES` (see "GPU pools"). |
   | `kubernetes` | The kubeconfig, read-only, at `/vibesys/kubeconfig`, with `KUBECONFIG` naming it; the network mode (`docker run --network`), such as `host` for a cluster whose API server listens on the machine's loopback address; `VIBESYS_K8S_REGISTRY` and `VIBESYS_K8S_BUILDER` when the config names them. The task deploys to the cluster and cleans up after itself; the daemon does not manage the cluster. |
   | `mounts` | Each directory, read-only, at `/vibesys/mounts/<name>`, with `VIBESYS_MOUNTS` listing the names. |
-  | `neuron` | The `/dev/neuron*` devices that hold the job's range of NeuronCores, by `--device`, with `NEURON_RT_VISIBLE_CORES` naming the range, and `VIBESYS_GPUS` and `VIBESYS_GPU_DEVICES` (see "GPU pools"). Before the command, the container checks that the cores hold no other process's device memory; when they do, the job fails before its command, naming the device. In a task of two images the devices are the server's. |
+  | `neuron` | The `/dev/neuron*` devices that hold the job's range of NeuronCores, by `--device`, with `NEURON_RT_VISIBLE_CORES` naming the range, and `VIBESYS_GPUS` and `VIBESYS_GPU_DEVICES` (see "GPU pools"). Before the command, the container checks that no other process holds the cores; when one does, the job fails before its command, naming the device and the holders it can see. In a task of two images the devices are the server's. |
   | `rocm` | The machine's AMD GPUs: `--device /dev/kfd --device /dev/dri --group-add video` under docker, `--rocm` under Apptainer, and each of `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`, `GPU_DEVICE_ORDINAL` and `CUDA_VISIBLE_DEVICES` that Slurm set. When the table has a `count`, the devices are the same, and `ROCR_VISIBLE_DEVICES` names the job's group (see "GPU pools"). Before the command, the container checks that its ROCm runtime sees a GPU; when it does not, the job fails before its command with why, naming the image's ROCm version and the machine's amdgpu driver version. In a task of two images the GPUs are the server's. |
 
   A task names the resources its jobs need in its manifest, `[environment] needs = ["kubernetes"]`
-  (any of `gpu`, `kubernetes`, `mounts`, `rocm`). A job runs only on a placement that gives them all, and
+  (any of `gpu`, `kubernetes`, `mounts`, `rocm`, `neuron`). A job runs only on a placement that gives them all, and
   one restricted to a placement that lacks one is refused before anything is built, with
   `placement "<name>" has no resource "<kind>"`.
 - A result's environment fingerprint records where it was taken, for telling where a number came
@@ -979,7 +980,7 @@ core each can share a device. Everything below holds for it with "GPU" read as "
 two differences. A job is given a contiguous range of cores, since the Neuron runtime refuses a
 `NEURON_RT_VISIBLE_CORES` with a gap ("Logical Neuron cores are not contiguous"): a job whose count
 of cores is free but not in a row waits for a range. And before a job's commands run, its
-environment checks that its cores hold no other process's device memory (below).
+environment checks that no other process holds its cores (below).
 
 - **Claims.** A check or command job of a task that needs GPUs claims as many devices of the pool as
   its `--gpus N` says, and a measure takes the whole pool, alone, with its placement, as it takes
@@ -1029,20 +1030,26 @@ environment checks that its cores hold no other process's device memory (below).
   another device, and `NEURON_RT_VISIBLE_CORES` names its cores, by the machine's numbering; the
   cores of its devices that are not its own are kept from it by that variable alone. A host process
   gets the variable alone.
-- **Device memory another process holds.** A Neuron runtime that ends uncleanly, as after profiling,
-  can leave device memory allocated, and a process the pool does not know of can hold cores. So
-  before a job of a Neuron pool runs its commands, in its container or on the host, it runs a
-  check that reads the device memory the driver counts on each physical core in sysfs
-  (`/sys/class/neuron_device/neuron<d>/neuron_core<p>/stats/memory_usage/device_mem/present`),
-  never the scheduler's record. The job fails before its commands (`UNAVAILABLE`), naming the
-  device and the physical cores, when more physical cores of one of its devices hold more than
-  1 MiB than the cores it was not given are made of: then some of that memory is on its own cores.
-  sysfs does not say which physical cores make up which logical NeuronCore (on a trn2.3xlarge,
-  logical core 0 is counted on physical core 4), so the check counts: it is exact for a job given a
-  whole device, as a measure is, which any memory on the device refuses, and for a job given part of
-  a device it refuses only what the count proves. `neuron-ls` lists the processes that hold a
-  device; memory with no process is stale, and the next Neuron runtime that opens those cores frees
-  it. A check that cannot read sysfs fails the job too.
+- **Cores another process holds.** A process the pool does not know of (a probe, a profiler, a
+  server left running) can hold NeuronCores, and a job whose runtime then opens them fails with
+  `Logical Neuron Core(s) not available ... (cores busy)`, which looks like a fault of the code
+  under test. So before a job of a Neuron pool runs its commands, in its container or on the host,
+  it runs a check that reads, in sysfs, the device memory live runtimes hold on each physical core
+  (`/sys/class/neuron_device/neuron<d>/neuron_core<p>/stats/memory_usage/device_mem/total`), never
+  the scheduler's record. A runtime holds memory there on every physical core of each logical core
+  it opens, from the moment it opens them (2.5 MB on each after `nrt_init` alone), and the driver
+  frees it when the process exits, killed or not. The `present` counters beside it are no signal:
+  they stay at a page while a process holds a gigabyte, and keep 64 MiB after it is gone. The job
+  fails before its commands (`UNAVAILABLE`), naming the device, the held physical cores and the
+  processes `neuron-ls` lists on the device when it can see them (`held by pid 4242 (python
+  holder.py)`), when more physical cores of one of its devices are held than the cores it was not
+  given are made of: then some held core is its own. sysfs does not say which physical cores make
+  up which logical NeuronCore (on a trn2.3xlarge, logical core 0 is physical cores 4 and 5), so the
+  check counts: it is exact for a job given a whole device, as a measure is, which any held core
+  refuses; for a job given part of a device it refuses only what the count proves, and a foreign
+  process on exactly the job's own cores is then reported by the job's runtime. A check that cannot
+  read sysfs fails the job too. A job refused this way can be submitted again once `neuron-ls`
+  shows the device free.
 - **Host jobs** take their GPUs from the pool of the local placement that declares this machine's
   GPUs, and its slot, so a host job and a docker job of this machine never share a GPU. A machine
   with no container runtime declares `kind = "local"` with a `count` (the second example below)

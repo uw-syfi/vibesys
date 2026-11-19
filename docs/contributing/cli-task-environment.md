@@ -575,15 +575,18 @@ but not in a row waits for one. The operator config states `count` and
 `cores_per_device` (which places core `c` on `/dev/neuron<c / cores_per_device>`),
 and the daemon checks both against `neuron-ls`.
 
-A runtime that ended uncleanly can leave device memory allocated, and a process
-the scheduler does not know of can hold cores, so the scheduler's own record of
-who holds which core is not evidence that a core is free. Before a job's
-commands, in its container or on the host, a POSIX shell check reads the device
-memory the driver counts per physical core in sysfs and fails the job, naming
-the device, when more physical cores hold memory than the cores the job was not
-given are made of. sysfs does not say which physical cores back which logical
-core, so the check counts rather than maps: exact for a whole device, as a
-measure holds, and sound but weaker for part of one.
+A process the scheduler does not know of can hold cores, and a job whose
+runtime then opens them fails as if its code were broken, so the scheduler's own
+record of who holds which core is not evidence that a core is free. Before a
+job's commands, in its container or on the host, a POSIX shell check reads the
+device memory live runtimes hold on each physical core in sysfs
+(`device_mem/total`, which a runtime fills on every core it opens and the driver
+empties when the process exits; the `present` counters beside it do not follow
+use) and fails the job, naming the device and the holders `neuron-ls` can see,
+when more physical cores are held than the cores the job was not given are made
+of. sysfs does not say which physical cores back which logical core, so the
+check counts rather than maps: exact for a whole device, as a measure holds, and
+sound but weaker for part of one.
 
 ### Apptainer: a multi-node cluster without Docker
 

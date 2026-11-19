@@ -145,8 +145,8 @@ Ask the user for each fact; never invent one.
 - A job reads `VIBESYS_GPUS` and `VIBESYS_GPU_DEVICES`, and the vendor's own variable
   (`CUDA_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES`, `NEURON_RT_VISIBLE_CORES`). On a Neuron pool
   `--gpus N` counts NeuronCores, and a job gets N in a row.
-- A Neuron job does not start while device memory is held on its cores, by another process or left
-  by one that ended uncleanly: it fails naming the device. `neuron-ls` shows which processes hold
+- A Neuron job does not start while another process holds its cores: it fails naming the device
+  and, when it can see them, the holders' pids. `neuron-ls` shows which processes hold
   the device. Tell the user; do not kill processes you did not start.
 - Confinement is best effort. A Docker job gets its NVIDIA devices by number, so it cannot see
   the others. A host job and an AMD job get variables only: a process that ignores them can open any

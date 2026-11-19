@@ -13,41 +13,43 @@ import (
 // machine is core c mod cores_per_device of /dev/neuron<c / cores_per_device>.
 const EnvVisibleCores = "NEURON_RT_VISIBLE_CORES"
 
-// HeldBytes is how much device memory the driver may count on one physical core of an idle device:
-// more is memory that a Neuron runtime allocated and has not freed. An idle core counts 4096 bytes
-// on a trn2 host; a runtime that has opened a core and allocated nothing counts none more.
-const HeldBytes = 1 << 20
-
 // Sysfs is where the neuron driver lists its devices, each as neuron<d>, with its physical core count
-// (core_count) and, per physical core p, the device memory it counts
-// (neuron_core<p>/stats/memory_usage/device_mem/present).
+// (core_count) and, per physical core p, the device memory live runtimes hold on it
+// (neuron_core<p>/stats/memory_usage/device_mem/total).
 const Sysfs = "/sys/class/neuron_device"
 
 // BusyScript is the check a job's environment runs before its commands (NeuronDevices.Check), with
 // /bin/sh: its first argument is the driver's sysfs directory (Sysfs), its second the logical
 // NeuronCores of a device, and each one after them is "<device>:<cores of that device the job was
-// not given>", one per device that holds the job's cores. For each such device it reads the device
-// memory the driver counts on each physical core and fails, naming the device and the cores, when
-// more physical cores hold more than HeldBytes than the cores the job was not given are made of
-// (each logical core is made of core_count / cores_per_device physical ones): then some of that
-// memory is on the job's cores, whoever holds it.
+// not given>", one per device that holds the job's cores.
 //
-// Which physical cores make up which logical NeuronCore is the runtime's choice, which sysfs does not
-// say (on a trn2.3xlarge, logical core 0 is counted on physical core 4), so a core's memory cannot be
-// read alone. The count is exact for a job given a whole device, as a measure is, which any memory
-// on the device refuses; for a job given part of one it refuses only what the count proves. It
-// fails too when sysfs cannot be read, since then nothing is known.
+// The signal is the device memory the driver counts as held on each physical core,
+// device_mem/total. A Neuron runtime that opens a logical core holds memory on each of its physical
+// cores (a runtime that only initialised holds 2.5 MB on each of the two), and the driver frees it
+// when the process exits, cleanly or killed. On a trn2.3xlarge with driver 2.31.7, every core read
+// 0 when no runtime was open. The neighbouring files are no signal: device_mem/present stayed at
+// 4096 bytes while another process held 1.2 GB of tensors on the core, and the per-category present
+// counters kept 64 MiB after their process was killed.
+//
+// sysfs does not say which physical cores make up which logical NeuronCore: on that host logical
+// core 0 is physical cores 4 and 5, and 3 is 0 and 1. So the check counts. A held logical core holds
+// memory on at most core_count / cores_per_device physical cores, so when more physical cores of a
+// device are held than the cores the job was not given are made of, some are the job's. The check
+// then fails, naming the device, the held cores and the processes neuron-ls lists on the device when
+// it can see them. The count is exact for a job given a whole device, as a measure is, which any
+// held core refuses; for a job given part of one it refuses only what the count proves, and a
+// process that holds exactly the job's own cores is found by the job's runtime instead ("Logical
+// Neuron Core(s) not available"). A check that cannot read sysfs fails, since then nothing is known.
 const BusyScript = `root=$1
 per=$2
 shift 2
-limit=1048576
 for spec in "$@"; do
   dev=${spec%%:*}
   others=${spec#*:}
   dir=$root/neuron$dev
   physical=$(cat "$dir/core_count" 2>/dev/null)
   if [ -z "$physical" ]; then
-    echo "neuron: cannot read $dir/core_count, so whether /dev/neuron$dev holds another process's device memory is not known"
+    echo "neuron: cannot read $dir/core_count, so whether another process holds cores of /dev/neuron$dev is not known"
     exit 1
   fi
   lnc=$((physical / per))
@@ -56,20 +58,32 @@ for spec in "$@"; do
   n=0
   c=0
   while [ "$c" -lt "$physical" ]; do
-    f=$dir/neuron_core$c/stats/memory_usage/device_mem/present
+    f=$dir/neuron_core$c/stats/memory_usage/device_mem/total
     v=$(cat "$f" 2>/dev/null)
-    if [ -z "$v" ]; then
-      echo "neuron: cannot read $f, so whether /dev/neuron$dev holds another process's device memory is not known"
-      exit 1
-    fi
-    if [ "$v" -gt "$limit" ]; then
+    case "$v" in
+      '' | *[!0-9]*)
+        echo "neuron: cannot read $f, so whether another process holds cores of /dev/neuron$dev is not known"
+        exit 1
+        ;;
+    esac
+    if [ "$v" -gt 0 ]; then
       held="$held neuron_core$c=$v"
       n=$((n + 1))
     fi
     c=$((c + 1))
   done
   if [ "$n" -gt $((others * lnc)) ]; then
-    echo "neuron: /dev/neuron$dev holds device memory on $n of its $physical physical cores (bytes:$held), more than its $others NeuronCores this job was not given account for, so some is on this job's NeuronCores: a process holds them (neuron-ls lists the processes of each device), or one that ended uncleanly left its memory, which the next Neuron runtime to open those cores frees"
+    who=""
+    ls=$(command -v neuron-ls 2>/dev/null || ls /opt/aws/neuron/bin/neuron-ls 2>/dev/null)
+    if [ -n "$ls" ] && command -v awk >/dev/null 2>&1; then
+      who=$("$ls" --json-output 2>/dev/null | awk -v d="$dev" '
+        /"neuron_device":/ { v = $2; gsub(/[^0-9]/, "", v); cur = v }
+        /"pid":/ { v = $2; gsub(/[^0-9]/, "", v); pid = v }
+        /"command":/ && cur == d { c = $0; sub(/^[^:]*: *"/, "", c); sub(/",? *$/, "", c); out = out (out == "" ? "" : ", ") "pid " pid (c == "" ? "" : " (" c ")") }
+        END { print out }')
+    fi
+    [ -n "$who" ] || who="no process neuron-ls can see from here (it may run in another container or as another user)"
+    echo "neuron: /dev/neuron$dev is in use: $n of its $physical physical cores hold device memory (bytes:$held), more than its $others NeuronCores this job was not given account for, so another process holds some of this job's NeuronCores; held by $who"
     exit 1
   fi
 done

@@ -5,10 +5,9 @@
 // hold the range under docker, and NEURON_RT_VISIBLE_CORES, in a container and on the host.
 //
 // Before a job's commands run, its environment runs the role's check (BusyScript), which reads the
-// device memory the driver counts per physical core in sysfs, never the scheduler's record of who
-// holds the cores, and refuses to start the job, naming the device, when some of that memory must
-// be on the job's cores: a process the scheduler does not know of holds them, or one that ended
-// uncleanly left its memory behind.
+// device memory live runtimes hold per physical core in sysfs, never the scheduler's record of who
+// holds the cores, and refuses to start the job, naming the device and the holders neuron-ls can
+// see, when some held core must be the job's: a process the scheduler does not know of holds it.
 package neuron
 
 import (
