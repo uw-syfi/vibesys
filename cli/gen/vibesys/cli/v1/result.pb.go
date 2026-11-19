@@ -411,9 +411,11 @@ func (x *ObjectiveNoise) GetRelativeNoise() float64 {
 // ObjectiveMinGain is the smallest relative gain that counts as better on one objective, set in the
 // task's objectives.toml as that objective's min_gain.
 type ObjectiveMinGain struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	MinGain       float64                `protobuf:"fixed64,2,opt,name=min_gain,json=minGain,proto3" json:"min_gain,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The objective's name, as objectives.toml declares it.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// At least 0 and less than 1, as objectives.toml requires; a NaN fails both bounds.
+	MinGain       float64 `protobuf:"fixed64,2,opt,name=min_gain,json=minGain,proto3" json:"min_gain,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -960,10 +962,10 @@ const file_vibesys_cli_v1_result_proto_rawDesc = "" +
 	"\bmin_gain\x18\x04 \x03(\v2 .vibesys.cli.v1.ObjectiveMinGainR\aminGain\"K\n" +
 	"\x0eObjectiveNoise\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
-	"\x0erelative_noise\x18\x02 \x01(\x01R\rrelativeNoise\"A\n" +
-	"\x10ObjectiveMinGain\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
-	"\bmin_gain\x18\x02 \x01(\x01R\aminGain\"D\n" +
+	"\x0erelative_noise\x18\x02 \x01(\x01R\rrelativeNoise\"c\n" +
+	"\x10ObjectiveMinGain\x12\x1b\n" +
+	"\x04name\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04name\x122\n" +
+	"\bmin_gain\x18\x02 \x01(\x01B\x17\xbaH\x14\x12\x12\x11\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00R\aminGain\"D\n" +
 	"\vCheckResult\x125\n" +
 	"\bduration\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\bduration\"\xed\x04\n" +
 	"\rMeasureResult\x12.\n" +

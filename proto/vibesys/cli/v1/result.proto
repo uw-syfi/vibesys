@@ -70,8 +70,13 @@ message ObjectiveNoise {
 // ObjectiveMinGain is the smallest relative gain that counts as better on one objective, set in the
 // task's objectives.toml as that objective's min_gain.
 message ObjectiveMinGain {
-  string name = 1;
-  double min_gain = 2;
+  // The objective's name, as objectives.toml declares it.
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  // At least 0 and less than 1, as objectives.toml requires; a NaN fails both bounds.
+  double min_gain = 2 [(buf.validate.field).double = {
+    gte: 0.0
+    lt: 1.0
+  }];
 }
 
 // CheckResult is a passed correctness check. A failed check saves no result: its job is `failed`
