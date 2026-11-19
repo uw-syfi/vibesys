@@ -63,8 +63,12 @@ per-worktree and chains to the repository's own hooks, so the user's checkout is
 One hypothesis per plan. The title is the claim; the body is the planner's proposal; every later
 word is a comment. The CLI numbers plans and stores them as given.
 
-Statuses: `open` (proposed, undecided), `chosen` (a worker is on it), `won` (promoted),
-`parked` (worth revisiting; say what would change the answer), `rejected` (ruled out; say why).
+Statuses: `open` (proposed, undecided), `chosen` (a worker is on it, or it is accepted and an
+integration holds it), `won` (promoted), `parked` (worth revisiting; say what would change the
+answer), `rejected` (ruled out; say why). A plan accepted on cheap evidence has no status of its
+own: it stays `chosen` with an `accepted:` comment until an integration plan (kind
+`integration`, depending on the plans it merges) measures it; the optimize skill's
+integration reference has the whole way.
 
 | Writer | Writes |
 | --- | --- |

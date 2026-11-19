@@ -95,6 +95,27 @@ Safeguards: <on backend trainium, the neuron-safeguards checklist, copied whole;
 Hand back: the commit, the parts you could not apply and why, the checks you ran.
 ```
 
+## Integrate
+
+The Combine template, for plans accepted on cheap evidence
+([integration.md](integration.md)). Dispatch it as a combiner on the integration plan's
+branch, `vibesys-work/<task>/plan-<I>`, with `Plan: <I>` in the header.
+
+```
+Integration plan: <I>      Main commit: <head SHA>
+Apply in this order, most proven first, each as the diff from where it was built, with a full
+commit after each:
+  1. plan <n> at <accepted SHA>, built on <parent SHA>
+  2. ...
+How to combine them: <which side wins a conflict in a shared file; what must survive>
+Watch for: <where the parts interact>
+Samples: <the task's declared samples>      Checks: at most <1 + ceil(log2 N) + parts that fail>
+Measure: one, of the top of the chain that passes its check, linked to plan <I> and each part.
+On a failed check: bisect, name the part at fault and whether it fails alone, finish without it.
+Hand back: the chain, the candidate and the parts it holds, every check with its result and job
+  id, the measure job id and compare output against the head.
+```
+
 ## Profile
 
 Read-only worktree of the revision, placed and removed as for the judge. When the question needs the program to
