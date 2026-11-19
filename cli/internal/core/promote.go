@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"slices"
 	"time"
 )
@@ -208,6 +209,9 @@ func verdictRefusal(verdict Verdict, objectives []ObjectiveVerdict) (PromoteRefu
 		text = "the candidate is worse than the commit to beat"
 	case WithinNoise:
 		text = "the candidate is within noise of the commit to beat"
+		if verdict.DecidedBy == BoundMinGain {
+			text = fmt.Sprintf("the candidate's gain over the commit to beat passes the noise test but not the task's min_gain of %g", verdict.MinGain)
+		}
 	case Inconclusive:
 		text = "the samples cannot say whether the candidate beats the commit to beat (" + string(verdict.Reason) + ")"
 	case Tradeoff:

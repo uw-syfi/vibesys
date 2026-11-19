@@ -23,6 +23,11 @@ var verdictKinds = map[core.VerdictKind]cliv1.VerdictKind{
 	core.Tradeoff:     cliv1.VerdictKind_VERDICT_KIND_TRADEOFF,
 }
 
+var verdictBounds = map[core.VerdictBound]cliv1.VerdictBound{
+	core.BoundNoise:   cliv1.VerdictBound_VERDICT_BOUND_NOISE,
+	core.BoundMinGain: cliv1.VerdictBound_VERDICT_BOUND_MIN_GAIN,
+}
+
 var inconclusiveReasons = map[core.InconclusiveReason]cliv1.InconclusiveReason{
 	core.ReasonTooFewSamples:       cliv1.InconclusiveReason_INCONCLUSIVE_REASON_TOO_FEW_SAMPLES,
 	core.ReasonConstantSamples:     cliv1.InconclusiveReason_INCONCLUSIVE_REASON_CONSTANT_SAMPLES,
@@ -229,18 +234,24 @@ func Verdict(v core.Verdict) *cliv1.Verdict {
 		BaseMean:         v.BaseMean,
 		Ratio:            v.Ratio,
 		Noise:            v.Noise,
+		RelativeNoise:    v.RelativeNoise,
+		MinGain:          v.MinGain,
+		DecidedBy:        verdictBounds[v.DecidedBy],
 	}
 }
 
 // Objectives returns the contract's message for a measurement's objectives, and nil for the zero
 // Objectives of a single-metric task, so that its result is the message it always was.
 func Objectives(o core.Objectives) *cliv1.Objectives {
-	if len(o.Metrics) == 0 && o.RelativeNoise == 0 && len(o.Noise) == 0 {
+	if !o.Declared() {
 		return nil
 	}
 	out := &cliv1.Objectives{RelativeNoise: o.RelativeNoise}
 	for _, n := range o.Noise {
 		out.Noise = append(out.Noise, &cliv1.ObjectiveNoise{Name: n.Name, RelativeNoise: n.RelativeNoise})
+	}
+	for _, g := range o.MinGains {
+		out.MinGain = append(out.MinGain, &cliv1.ObjectiveMinGain{Name: g.Name, MinGain: g.MinGain})
 	}
 	for _, m := range o.Metrics {
 		out.Metrics = append(out.Metrics, &cliv1.Metric{Name: m.Name, Direction: direction(m.Direction), Unit: m.Unit})
@@ -257,6 +268,9 @@ func toObjectives(field string, o *cliv1.Objectives, toDirection func(string, cl
 	out := core.Objectives{RelativeNoise: o.GetRelativeNoise()}
 	for _, n := range o.GetNoise() {
 		out.Noise = append(out.Noise, core.ObjectiveNoise{Name: n.GetName(), RelativeNoise: n.GetRelativeNoise()})
+	}
+	for _, g := range o.GetMinGain() {
+		out.MinGains = append(out.MinGains, core.ObjectiveMinGain{Name: g.GetName(), MinGain: g.GetMinGain()})
 	}
 	for i, m := range o.GetMetrics() {
 		d, err := toDirection(fmt.Sprintf("%s.metrics[%d].direction", field, i), m.GetDirection())

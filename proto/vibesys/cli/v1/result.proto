@@ -39,11 +39,14 @@ message Observation {
   string unit = 4 [(buf.validate.field).string.max_bytes = 64];
 }
 
-// Objectives is what a measurement of a multi-objective (Pareto) task is judged on: a task whose
-// objectives.toml has a [pareto] section and more than one objective.
+// Objectives is what a measurement is judged on, as the task declared it when the measurement was
+// taken: every objective of a multi-objective (Pareto) task, one whose objectives.toml has a
+// [pareto] section and more than one objective; or the one scored objective of a single-metric task
+// that declares a relative_noise or a min_gain for it. Absent for any other measurement.
 message Objectives {
-  // Every objective, in the order the task declares them. The scored metric is one of them; the
-  // samples of each other one are the observation of its name.
+  // Every objective, in the order the task declares them, or the scored one alone for a
+  // single-metric task. The scored metric is one of them; the samples of each other one are the
+  // observation of its name.
   repeated Metric metrics = 1;
   // The task's [pareto] relative_noise, the noise floor every objective is compared under. Zero
   // means none.
@@ -52,6 +55,9 @@ message Objectives {
   // that objective (zero is a floor of none). An objective absent here uses relative_noise. Each
   // names an objective of metrics, once.
   repeated ObjectiveNoise noise = 3;
+  // The objectives that declare a min_gain, the smallest relative gain that counts as better on
+  // them. An objective absent here declares none. Each names an objective of metrics, once.
+  repeated ObjectiveMinGain min_gain = 4;
 }
 
 // ObjectiveNoise is the noise floor one objective is compared under, set in the task's
@@ -59,6 +65,13 @@ message Objectives {
 message ObjectiveNoise {
   string name = 1;
   double relative_noise = 2;
+}
+
+// ObjectiveMinGain is the smallest relative gain that counts as better on one objective, set in the
+// task's objectives.toml as that objective's min_gain.
+message ObjectiveMinGain {
+  string name = 1;
+  double min_gain = 2;
 }
 
 // CheckResult is a passed correctness check. A failed check saves no result: its job is `failed`
@@ -83,7 +96,8 @@ message MeasureResult {
   // The headline number of the measurement: the aggregate of the samples that compare uses (their
   // mean). The daemon computes it, so no reader recomputes it.
   double value = 5;
-  // Set for a measurement of a multi-objective task, and absent otherwise.
+  // Set for a measurement of a multi-objective task, or of a single-metric task that declares a
+  // relative_noise or a min_gain for its scored objective, and absent otherwise.
   Objectives objectives = 6;
   // For a task with a job-scoped server ([service] in its manifest), the server each sample ran on,
   // in the order of samples: one per sample. Empty for any other task, and in a result saved before

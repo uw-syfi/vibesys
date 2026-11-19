@@ -21,24 +21,28 @@ func anyVerdict(r interface {
 		Kind:             kinds[r.IntN(len(kinds))],
 		CandidateSamples: uint32(r.IntN(20)), BaseSamples: uint32(r.IntN(20)),
 		CandidateMean: r.Float64() * 1e6, BaseMean: r.Float64() * 1e6, Noise: r.Float64(),
+		RelativeNoise: r.Float64(), MinGain: r.Float64(),
 	}
 	v.Ratio = v.CandidateMean / v.BaseMean
 	if v.Kind == core.Inconclusive {
 		reasons := []core.InconclusiveReason{core.ReasonTooFewSamples, core.ReasonConstantSamples, core.ReasonMetricMismatch, core.ReasonTaskVersionMismatch}
 		v.Reason = reasons[r.IntN(len(reasons))]
+	} else {
+		v.DecidedBy = []core.VerdictBound{core.BoundNoise, core.BoundMinGain}[r.IntN(2)]
 	}
 	return v
 }
 
 // A verdict goes over the wire as it is: the same bits in every number, never rounded, and a
-// kind and a reason the contract names.
+// kind, a reason and a deciding bound the contract names.
 func TestVerdictCrossesTheWireUnrounded(t *testing.T) {
 	for seed := uint64(0); seed < 300; seed++ {
 		v := anyVerdict(newRand(seed))
 		got := wire.Verdict(v)
 		same := func(a, b float64) bool { return math.Float64bits(a) == math.Float64bits(b) }
 		if !same(got.GetRatio(), v.Ratio) || !same(got.GetNoise(), v.Noise) || !same(got.GetCandidateMean(), v.CandidateMean) ||
-			!same(got.GetBaseMean(), v.BaseMean) || got.GetCandidateSamples() != v.CandidateSamples || got.GetBaseSamples() != v.BaseSamples {
+			!same(got.GetBaseMean(), v.BaseMean) || got.GetCandidateSamples() != v.CandidateSamples || got.GetBaseSamples() != v.BaseSamples ||
+			!same(got.GetRelativeNoise(), v.RelativeNoise) || !same(got.GetMinGain(), v.MinGain) {
 			t.Fatalf("seed %d: %+v became %+v", seed, v, got)
 		}
 		if got.GetKind() == cliv1.VerdictKind_VERDICT_KIND_UNSPECIFIED {
@@ -46,6 +50,9 @@ func TestVerdictCrossesTheWireUnrounded(t *testing.T) {
 		}
 		if (v.Kind == core.Inconclusive) != (got.GetReason() != cliv1.InconclusiveReason_INCONCLUSIVE_REASON_UNSPECIFIED) {
 			t.Fatalf("seed %d: kind %q with reason %q became reason %s", seed, v.Kind, v.Reason, got.GetReason())
+		}
+		if (v.Kind == core.Inconclusive) != (got.GetDecidedBy() == cliv1.VerdictBound_VERDICT_BOUND_UNSPECIFIED) {
+			t.Fatalf("seed %d: kind %q decided by %q became %s", seed, v.Kind, v.DecidedBy, got.GetDecidedBy())
 		}
 	}
 }

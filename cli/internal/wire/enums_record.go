@@ -31,6 +31,14 @@ func ToVerdictKind(field string, k cliv1.VerdictKind) (core.VerdictKind, error) 
 	return toEnum(field, verdictKinds, k)
 }
 
+// VerdictBound returns the contract's value for the bound that decided a verdict.
+func VerdictBound(b core.VerdictBound) cliv1.VerdictBound { return verdictBounds[b] }
+
+// ToVerdictBound returns the domain bound for the contract's value.
+func ToVerdictBound(field string, b cliv1.VerdictBound) (core.VerdictBound, error) {
+	return toEnum(field, verdictBounds, b)
+}
+
 // InconclusiveReason returns the contract's value for a reason.
 func InconclusiveReason(r core.InconclusiveReason) cliv1.InconclusiveReason {
 	return inconclusiveReasons[r]

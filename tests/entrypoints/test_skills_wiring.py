@@ -794,3 +794,25 @@ def test_selected_dial9_ranker_is_installed_with_its_skill(tmp_path: Path) -> No
     assert extractor.is_file()
     toolkit = extractor.parent.parent.parent.parent / "dial9-toolkit" / "scripts"
     assert all((toolkit / name).is_file() for name in _DIAL9_TOOLKIT_FILES)
+
+
+_MEASURE_WITH_A_COUNT = re.compile(r"submit measure\b[^`\n]*--samples[ =]+\d")
+
+
+def test_no_skill_hard_codes_a_measure_sample_count() -> None:
+    """A measure takes the task's sample count, so no skill names one (#4324).
+
+    `samples` in a task's `objectives.toml` sets how many samples `submit measure` takes without
+    `--samples`. A skill that writes `--samples 5` overrides it for every task, including one whose
+    one sample costs an hour. A placeholder such as `--samples <k>` is fine.
+    """
+    skills = PROJECT_ROOT / "skills"
+    offenders = [
+        f"{path.relative_to(PROJECT_ROOT)}:{number}: {line.strip()}"
+        for path in sorted(skills.rglob("*.md"))
+        if "repos" not in path.relative_to(skills).parts
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+        if _MEASURE_WITH_A_COUNT.search(line)
+    ]
+
+    assert offenders == []

@@ -47,7 +47,7 @@ func submitFlow(ctx context.Context, d deps, kind string, args []string) int {
 		plan    = fs.Uint("plan", 0, "the number of a plan to link the job to")
 		noPlan  = fs.Bool("no-plan", false, "measure: the job tests no plan, as for the baseline or a re-measure of the head; not with --plan")
 		wait    = fs.Bool("wait", false, "block until the job is final, then exit as `wait` does")
-		samples = fs.Uint("samples", 0, "measure: how many benchmark samples are needed (default: the task's)")
+		samples = fs.Uint("samples", 0, "measure: how many benchmark samples are needed (default: the task's, samples in objectives.toml, else 5)")
 		recheck = fs.Bool("recheck", false, "measure: run the check again even when a saved pass exists")
 		gpus    = fs.Uint("gpus", 0, gpusUsage)
 	)

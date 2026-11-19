@@ -299,6 +299,15 @@ func describeVerdict(v *cliv1.Verdict) string {
 			number(v.GetRatio()), number(v.GetNoise()), number(v.GetCandidateMean()), number(v.GetBaseMean()),
 			v.GetCandidateSamples(), v.GetBaseSamples())
 	}
+	if v.GetRelativeNoise() != 0 {
+		fmt.Fprintf(&b, ", declared noise floor %s", number(v.GetRelativeNoise()))
+	}
+	if v.GetMinGain() != 0 {
+		fmt.Fprintf(&b, ", min_gain %s", number(v.GetMinGain()))
+	}
+	if v.GetDecidedBy() == cliv1.VerdictBound_VERDICT_BOUND_MIN_GAIN {
+		b.WriteString(", decided by min_gain")
+	}
 	if v.GetReason() != cliv1.InconclusiveReason_INCONCLUSIVE_REASON_UNSPECIFIED {
 		fmt.Fprintf(&b, " [%s]", lower("INCONCLUSIVE_REASON_", v.GetReason().String()))
 	}

@@ -9,13 +9,16 @@ import (
 // A task is multi-objective (Pareto) when its objectives.toml has a [pareto] section and declares
 // more than one objective. Its measurements say so: each holds the task's Objectives, so a
 // comparison is decided from what was saved and never from a task read again later. Every other
-// task's measurements hold the zero Objectives and are compared on their one metric, as before.
+// task's measurements are compared on their one metric. They hold Objectives of that one metric
+// when the task declares a noise floor or a minimum gain for it, so those are saved the same way,
+// and the zero Objectives otherwise, as before.
 
-// Objectives is what a measurement of a multi-objective task is judged on.
+// Objectives is what a measurement is judged on: every objective of a multi-objective task, or
+// the scored one alone with what a single-metric task declares for it.
 type Objectives struct {
-	// Metrics are every objective, in the order the task declares them. The measurement's scored
-	// Metric is one of them, and its samples are the measurement's Samples; the samples of every
-	// other one are the Observation of its name.
+	// Metrics are every objective, in the order the task declares them, or the scored one alone.
+	// The measurement's scored Metric is one of them, and its samples are the measurement's
+	// Samples; the samples of every other one are the Observation of its name.
 	Metrics []Metric
 	// RelativeNoise is the task's [pareto] relative_noise: the noise floor every objective is
 	// compared under. Zero means the task declares none, and Welch's t test decides.
@@ -24,6 +27,9 @@ type Objectives struct {
 	// them, each naming one of Metrics once. An objective not listed is compared under
 	// RelativeNoise.
 	Noise []ObjectiveNoise
+	// MinGains are the objectives that declare a minimum gain, in the order the task declares
+	// them, each naming one of Metrics once. An objective not listed declares none.
+	MinGains []ObjectiveMinGain
 }
 
 // ObjectiveNoise is the noise floor one objective declares, overriding the task's [pareto]
@@ -31,6 +37,28 @@ type Objectives struct {
 type ObjectiveNoise struct {
 	Name          string
 	RelativeNoise float64
+}
+
+// ObjectiveMinGain is the smallest relative gain that counts as better on one objective.
+type ObjectiveMinGain struct {
+	Name    string
+	MinGain float64
+}
+
+// Declared reports whether the objectives hold anything: the zero Objectives is a single-metric
+// measurement of a task that declares nothing for its metric.
+func (o Objectives) Declared() bool {
+	return len(o.Metrics) > 0 || o.RelativeNoise != 0 || len(o.Noise) > 0 || len(o.MinGains) > 0
+}
+
+// MinGainFor is the minimum gain the named objective declares, zero when it declares none.
+func (o Objectives) MinGainFor(name string) float64 {
+	for _, g := range o.MinGains {
+		if g.Name == name {
+			return g.MinGain
+		}
+	}
+	return 0
 }
 
 // NoiseFor is the noise floor the named objective is compared under: its own when it declares
@@ -49,7 +77,8 @@ func (o Objectives) Pareto() bool { return len(o.Metrics) > 1 }
 
 // Equal reports whether two measurements were judged on the same objectives.
 func (o Objectives) Equal(p Objectives) bool {
-	return slices.Equal(o.Metrics, p.Metrics) && o.RelativeNoise == p.RelativeNoise && slices.Equal(o.Noise, p.Noise)
+	return slices.Equal(o.Metrics, p.Metrics) && o.RelativeNoise == p.RelativeNoise && slices.Equal(o.Noise, p.Noise) &&
+		slices.Equal(o.MinGains, p.MinGains)
 }
 
 // ObjectiveVerdict is the verdict on one objective of a multi-objective comparison.
@@ -102,7 +131,7 @@ func compareObjectives(candidate, base []Result, o Objectives) (Verdict, []Objec
 		if err != nil {
 			return Verdict{}, nil, err
 		}
-		v, err := Compare(CompareInput{Direction: m.Direction, Candidate: c, Base: b, RelativeNoise: o.NoiseFor(m.Name)})
+		v, err := Compare(CompareInput{Direction: m.Direction, Candidate: c, Base: b, RelativeNoise: o.NoiseFor(m.Name), MinGain: o.MinGainFor(m.Name)})
 		if err != nil {
 			var f *Failure
 			if errors.As(err, &f) {

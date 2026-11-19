@@ -272,12 +272,15 @@ func (x *Observation) GetUnit() string {
 	return ""
 }
 
-// Objectives is what a measurement of a multi-objective (Pareto) task is judged on: a task whose
-// objectives.toml has a [pareto] section and more than one objective.
+// Objectives is what a measurement is judged on, as the task declared it when the measurement was
+// taken: every objective of a multi-objective (Pareto) task, one whose objectives.toml has a
+// [pareto] section and more than one objective; or the one scored objective of a single-metric task
+// that declares a relative_noise or a min_gain for it. Absent for any other measurement.
 type Objectives struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Every objective, in the order the task declares them. The scored metric is one of them; the
-	// samples of each other one are the observation of its name.
+	// Every objective, in the order the task declares them, or the scored one alone for a
+	// single-metric task. The scored metric is one of them; the samples of each other one are the
+	// observation of its name.
 	Metrics []*Metric `protobuf:"bytes,1,rep,name=metrics,proto3" json:"metrics,omitempty"`
 	// The task's [pareto] relative_noise, the noise floor every objective is compared under. Zero
 	// means none.
@@ -285,7 +288,10 @@ type Objectives struct {
 	// The objectives that declare a relative_noise of their own, which overrides the one above for
 	// that objective (zero is a floor of none). An objective absent here uses relative_noise. Each
 	// names an objective of metrics, once.
-	Noise         []*ObjectiveNoise `protobuf:"bytes,3,rep,name=noise,proto3" json:"noise,omitempty"`
+	Noise []*ObjectiveNoise `protobuf:"bytes,3,rep,name=noise,proto3" json:"noise,omitempty"`
+	// The objectives that declare a min_gain, the smallest relative gain that counts as better on
+	// them. An objective absent here declares none. Each names an objective of metrics, once.
+	MinGain       []*ObjectiveMinGain `protobuf:"bytes,4,rep,name=min_gain,json=minGain,proto3" json:"min_gain,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -337,6 +343,13 @@ func (x *Objectives) GetRelativeNoise() float64 {
 func (x *Objectives) GetNoise() []*ObjectiveNoise {
 	if x != nil {
 		return x.Noise
+	}
+	return nil
+}
+
+func (x *Objectives) GetMinGain() []*ObjectiveMinGain {
+	if x != nil {
+		return x.MinGain
 	}
 	return nil
 }
@@ -395,6 +408,60 @@ func (x *ObjectiveNoise) GetRelativeNoise() float64 {
 	return 0
 }
 
+// ObjectiveMinGain is the smallest relative gain that counts as better on one objective, set in the
+// task's objectives.toml as that objective's min_gain.
+type ObjectiveMinGain struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	MinGain       float64                `protobuf:"fixed64,2,opt,name=min_gain,json=minGain,proto3" json:"min_gain,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ObjectiveMinGain) Reset() {
+	*x = ObjectiveMinGain{}
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ObjectiveMinGain) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ObjectiveMinGain) ProtoMessage() {}
+
+func (x *ObjectiveMinGain) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ObjectiveMinGain.ProtoReflect.Descriptor instead.
+func (*ObjectiveMinGain) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ObjectiveMinGain) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ObjectiveMinGain) GetMinGain() float64 {
+	if x != nil {
+		return x.MinGain
+	}
+	return 0
+}
+
 // CheckResult is a passed correctness check. A failed check saves no result: its job is `failed`
 // and its output is in the job's logs.
 type CheckResult struct {
@@ -406,7 +473,7 @@ type CheckResult struct {
 
 func (x *CheckResult) Reset() {
 	*x = CheckResult{}
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[4]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -418,7 +485,7 @@ func (x *CheckResult) String() string {
 func (*CheckResult) ProtoMessage() {}
 
 func (x *CheckResult) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[4]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -431,7 +498,7 @@ func (x *CheckResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckResult.ProtoReflect.Descriptor instead.
 func (*CheckResult) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *CheckResult) GetDuration() *durationpb.Duration {
@@ -453,7 +520,8 @@ type MeasureResult struct {
 	// The headline number of the measurement: the aggregate of the samples that compare uses (their
 	// mean). The daemon computes it, so no reader recomputes it.
 	Value float64 `protobuf:"fixed64,5,opt,name=value,proto3" json:"value,omitempty"`
-	// Set for a measurement of a multi-objective task, and absent otherwise.
+	// Set for a measurement of a multi-objective task, or of a single-metric task that declares a
+	// relative_noise or a min_gain for its scored objective, and absent otherwise.
 	Objectives *Objectives `protobuf:"bytes,6,opt,name=objectives,proto3" json:"objectives,omitempty"`
 	// For a task with a job-scoped server ([service] in its manifest), the server each sample ran on,
 	// in the order of samples: one per sample. Empty for any other task, and in a result saved before
@@ -466,7 +534,7 @@ type MeasureResult struct {
 
 func (x *MeasureResult) Reset() {
 	*x = MeasureResult{}
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -478,7 +546,7 @@ func (x *MeasureResult) String() string {
 func (*MeasureResult) ProtoMessage() {}
 
 func (x *MeasureResult) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -491,7 +559,7 @@ func (x *MeasureResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MeasureResult.ProtoReflect.Descriptor instead.
 func (*MeasureResult) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *MeasureResult) GetMetric() *Metric {
@@ -561,7 +629,7 @@ type Measurement struct {
 
 func (x *Measurement) Reset() {
 	*x = Measurement{}
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -573,7 +641,7 @@ func (x *Measurement) String() string {
 func (*Measurement) ProtoMessage() {}
 
 func (x *Measurement) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -586,7 +654,7 @@ func (x *Measurement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Measurement.ProtoReflect.Descriptor instead.
 func (*Measurement) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Measurement) GetCommit() string {
@@ -655,7 +723,7 @@ type Result struct {
 
 func (x *Result) Reset() {
 	*x = Result{}
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -667,7 +735,7 @@ func (x *Result) String() string {
 func (*Result) ProtoMessage() {}
 
 func (x *Result) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -680,7 +748,7 @@ func (x *Result) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Result.ProtoReflect.Descriptor instead.
 func (*Result) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Result) GetJobId() string {
@@ -820,7 +888,7 @@ type JobGpus struct {
 
 func (x *JobGpus) Reset() {
 	*x = JobGpus{}
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -832,7 +900,7 @@ func (x *JobGpus) String() string {
 func (*JobGpus) ProtoMessage() {}
 
 func (x *JobGpus) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -845,7 +913,7 @@ func (x *JobGpus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobGpus.ProtoReflect.Descriptor instead.
 func (*JobGpus) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *JobGpus) GetJobId() string {
@@ -883,15 +951,19 @@ const file_vibesys_cli_v1_result_proto_rawDesc = "" +
 	"\x06values\x18\x02 \x03(\x01R\x06values\x12\x19\n" +
 	"\x05value\x18\x03 \x01(\x01H\x00R\x05value\x88\x01\x01\x12\x1b\n" +
 	"\x04unit\x18\x04 \x01(\tB\a\xbaH\x04r\x02(@R\x04unitB\b\n" +
-	"\x06_value\"\x9b\x01\n" +
+	"\x06_value\"\xd8\x01\n" +
 	"\n" +
 	"Objectives\x120\n" +
 	"\ametrics\x18\x01 \x03(\v2\x16.vibesys.cli.v1.MetricR\ametrics\x12%\n" +
 	"\x0erelative_noise\x18\x02 \x01(\x01R\rrelativeNoise\x124\n" +
-	"\x05noise\x18\x03 \x03(\v2\x1e.vibesys.cli.v1.ObjectiveNoiseR\x05noise\"K\n" +
+	"\x05noise\x18\x03 \x03(\v2\x1e.vibesys.cli.v1.ObjectiveNoiseR\x05noise\x12;\n" +
+	"\bmin_gain\x18\x04 \x03(\v2 .vibesys.cli.v1.ObjectiveMinGainR\aminGain\"K\n" +
 	"\x0eObjectiveNoise\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
-	"\x0erelative_noise\x18\x02 \x01(\x01R\rrelativeNoise\"D\n" +
+	"\x0erelative_noise\x18\x02 \x01(\x01R\rrelativeNoise\"A\n" +
+	"\x10ObjectiveMinGain\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
+	"\bmin_gain\x18\x02 \x01(\x01R\aminGain\"D\n" +
 	"\vCheckResult\x125\n" +
 	"\bduration\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\bduration\"\xed\x04\n" +
 	"\rMeasureResult\x12.\n" +
@@ -958,7 +1030,7 @@ func file_vibesys_cli_v1_result_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_cli_v1_result_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vibesys_cli_v1_result_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_vibesys_cli_v1_result_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_vibesys_cli_v1_result_proto_goTypes = []any{
 	(Direction)(0),                 // 0: vibesys.cli.v1.Direction
 	(SampleService)(0),             // 1: vibesys.cli.v1.SampleService
@@ -966,41 +1038,43 @@ var file_vibesys_cli_v1_result_proto_goTypes = []any{
 	(*Observation)(nil),            // 3: vibesys.cli.v1.Observation
 	(*Objectives)(nil),             // 4: vibesys.cli.v1.Objectives
 	(*ObjectiveNoise)(nil),         // 5: vibesys.cli.v1.ObjectiveNoise
-	(*CheckResult)(nil),            // 6: vibesys.cli.v1.CheckResult
-	(*MeasureResult)(nil),          // 7: vibesys.cli.v1.MeasureResult
-	(*Measurement)(nil),            // 8: vibesys.cli.v1.Measurement
-	(*Result)(nil),                 // 9: vibesys.cli.v1.Result
-	(*JobGpus)(nil),                // 10: vibesys.cli.v1.JobGpus
-	(*durationpb.Duration)(nil),    // 11: google.protobuf.Duration
-	(*EnvironmentFingerprint)(nil), // 12: vibesys.cli.v1.EnvironmentFingerprint
-	(*MachineFacts)(nil),           // 13: vibesys.cli.v1.MachineFacts
-	(*MachineLoad)(nil),            // 14: vibesys.cli.v1.MachineLoad
-	(*timestamppb.Timestamp)(nil),  // 15: google.protobuf.Timestamp
-	(*GpuGrant)(nil),               // 16: vibesys.cli.v1.GpuGrant
+	(*ObjectiveMinGain)(nil),       // 6: vibesys.cli.v1.ObjectiveMinGain
+	(*CheckResult)(nil),            // 7: vibesys.cli.v1.CheckResult
+	(*MeasureResult)(nil),          // 8: vibesys.cli.v1.MeasureResult
+	(*Measurement)(nil),            // 9: vibesys.cli.v1.Measurement
+	(*Result)(nil),                 // 10: vibesys.cli.v1.Result
+	(*JobGpus)(nil),                // 11: vibesys.cli.v1.JobGpus
+	(*durationpb.Duration)(nil),    // 12: google.protobuf.Duration
+	(*EnvironmentFingerprint)(nil), // 13: vibesys.cli.v1.EnvironmentFingerprint
+	(*MachineFacts)(nil),           // 14: vibesys.cli.v1.MachineFacts
+	(*MachineLoad)(nil),            // 15: vibesys.cli.v1.MachineLoad
+	(*timestamppb.Timestamp)(nil),  // 16: google.protobuf.Timestamp
+	(*GpuGrant)(nil),               // 17: vibesys.cli.v1.GpuGrant
 }
 var file_vibesys_cli_v1_result_proto_depIdxs = []int32{
 	0,  // 0: vibesys.cli.v1.Metric.direction:type_name -> vibesys.cli.v1.Direction
 	2,  // 1: vibesys.cli.v1.Objectives.metrics:type_name -> vibesys.cli.v1.Metric
 	5,  // 2: vibesys.cli.v1.Objectives.noise:type_name -> vibesys.cli.v1.ObjectiveNoise
-	11, // 3: vibesys.cli.v1.CheckResult.duration:type_name -> google.protobuf.Duration
-	2,  // 4: vibesys.cli.v1.MeasureResult.metric:type_name -> vibesys.cli.v1.Metric
-	3,  // 5: vibesys.cli.v1.MeasureResult.observations:type_name -> vibesys.cli.v1.Observation
-	4,  // 6: vibesys.cli.v1.MeasureResult.objectives:type_name -> vibesys.cli.v1.Objectives
-	1,  // 7: vibesys.cli.v1.MeasureResult.sample_services:type_name -> vibesys.cli.v1.SampleService
-	12, // 8: vibesys.cli.v1.Measurement.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
-	7,  // 9: vibesys.cli.v1.Measurement.measure:type_name -> vibesys.cli.v1.MeasureResult
-	12, // 10: vibesys.cli.v1.Result.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
-	13, // 11: vibesys.cli.v1.Result.machine:type_name -> vibesys.cli.v1.MachineFacts
-	14, // 12: vibesys.cli.v1.Result.load:type_name -> vibesys.cli.v1.MachineLoad
-	15, // 13: vibesys.cli.v1.Result.recorded_at:type_name -> google.protobuf.Timestamp
-	6,  // 14: vibesys.cli.v1.Result.check:type_name -> vibesys.cli.v1.CheckResult
-	7,  // 15: vibesys.cli.v1.Result.measure:type_name -> vibesys.cli.v1.MeasureResult
-	16, // 16: vibesys.cli.v1.JobGpus.grant:type_name -> vibesys.cli.v1.GpuGrant
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	6,  // 3: vibesys.cli.v1.Objectives.min_gain:type_name -> vibesys.cli.v1.ObjectiveMinGain
+	12, // 4: vibesys.cli.v1.CheckResult.duration:type_name -> google.protobuf.Duration
+	2,  // 5: vibesys.cli.v1.MeasureResult.metric:type_name -> vibesys.cli.v1.Metric
+	3,  // 6: vibesys.cli.v1.MeasureResult.observations:type_name -> vibesys.cli.v1.Observation
+	4,  // 7: vibesys.cli.v1.MeasureResult.objectives:type_name -> vibesys.cli.v1.Objectives
+	1,  // 8: vibesys.cli.v1.MeasureResult.sample_services:type_name -> vibesys.cli.v1.SampleService
+	13, // 9: vibesys.cli.v1.Measurement.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
+	8,  // 10: vibesys.cli.v1.Measurement.measure:type_name -> vibesys.cli.v1.MeasureResult
+	13, // 11: vibesys.cli.v1.Result.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
+	14, // 12: vibesys.cli.v1.Result.machine:type_name -> vibesys.cli.v1.MachineFacts
+	15, // 13: vibesys.cli.v1.Result.load:type_name -> vibesys.cli.v1.MachineLoad
+	16, // 14: vibesys.cli.v1.Result.recorded_at:type_name -> google.protobuf.Timestamp
+	7,  // 15: vibesys.cli.v1.Result.check:type_name -> vibesys.cli.v1.CheckResult
+	8,  // 16: vibesys.cli.v1.Result.measure:type_name -> vibesys.cli.v1.MeasureResult
+	17, // 17: vibesys.cli.v1.JobGpus.grant:type_name -> vibesys.cli.v1.GpuGrant
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_result_proto_init() }
@@ -1011,18 +1085,18 @@ func file_vibesys_cli_v1_result_proto_init() {
 	file_vibesys_cli_v1_environment_proto_init()
 	file_vibesys_cli_v1_job_proto_init()
 	file_vibesys_cli_v1_result_proto_msgTypes[1].OneofWrappers = []any{}
-	file_vibesys_cli_v1_result_proto_msgTypes[7].OneofWrappers = []any{
+	file_vibesys_cli_v1_result_proto_msgTypes[8].OneofWrappers = []any{
 		(*Result_Check)(nil),
 		(*Result_Measure)(nil),
 	}
-	file_vibesys_cli_v1_result_proto_msgTypes[8].OneofWrappers = []any{}
+	file_vibesys_cli_v1_result_proto_msgTypes[9].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_result_proto_rawDesc), len(file_vibesys_cli_v1_result_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

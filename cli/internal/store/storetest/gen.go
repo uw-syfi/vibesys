@@ -195,7 +195,10 @@ func (g *gen) metric() core.Metric {
 // name: a store does not judge them.
 func (g *gen) objectives() core.Objectives {
 	metrics := []core.Metric{g.metric(), g.metric()}
-	return core.Objectives{Metrics: metrics, RelativeNoise: g.float(), Noise: []core.ObjectiveNoise{{Name: metrics[1].Name, RelativeNoise: g.float()}}}
+	return core.Objectives{
+		Metrics: metrics, RelativeNoise: g.float(), Noise: []core.ObjectiveNoise{{Name: metrics[1].Name, RelativeNoise: g.float()}},
+		MinGains: []core.ObjectiveMinGain{{Name: metrics[0].Name, MinGain: g.float()}},
+	}
 }
 
 func (g *gen) objectiveVerdicts() []core.ObjectiveVerdict {
@@ -235,6 +238,7 @@ func (g *gen) verdict() core.Verdict {
 		Kind:             []core.VerdictKind{core.Better, core.Worse, core.WithinNoise, core.Inconclusive, core.Tradeoff}[g.pick(5)],
 		Reason:           []core.InconclusiveReason{core.ReasonTooFewSamples, core.ReasonConstantSamples, core.ReasonMetricMismatch, core.ReasonTaskVersionMismatch}[g.pick(4)],
 		CandidateSamples: 1 + g.r.Uint32(), BaseSamples: 1 + g.r.Uint32(), CandidateMean: g.float(), BaseMean: g.float(), Ratio: g.float(), Noise: g.float(),
+		RelativeNoise: g.float(), MinGain: g.float(), DecidedBy: []core.VerdictBound{core.BoundNoise, core.BoundMinGain}[g.pick(2)],
 	}
 }
 

@@ -12,9 +12,13 @@ fewest the check can run on (a refusal names the allowed sizes), and a measure t
 
 ```
 vibesys-cli submit check <base> --wait --json
-vibesys-cli submit measure <base> --samples 5 --no-plan --wait --json
+vibesys-cli submit measure <base> --samples <k> --no-plan --wait --json
 vibesys-cli show <base> --json
 ```
+
+`<k>` is how many same-code samples you take to measure the noise: five when one sample takes
+seconds to minutes; when one takes most of an hour, at least three, after asking the user for the
+hours. It is only for this recipe: the optimization's count is `samples` in `objectives.toml`.
 
 - A check that fails on the base is a task bug, or a real bug in the code: read
   `vibesys-cli logs <job>`, and ask the user before you call the code wrong.
@@ -26,6 +30,10 @@ vibesys-cli show <base> --json
 - Set `relative_noise` in `objectives.toml` to the spread you saw, rounded up, if you declare it.
   For several objectives, read the spread of each from `show` and give each objective its own
   `relative_noise`, with the `[pareto]` one as the default for those that declare none. That edit changes the task's version: measure the base again after it.
+- Declare `samples` from the cost of one sample: leave it out (5) when a sample is cheap, and
+  declare `samples = 1` when one sample costs most of an hour or the whole machine, together with
+  the `relative_noise` you measured here, since without a floor `compare` needs three samples a
+  side. Declare `min_gain` when the user names the smallest gain worth having (task-format.md).
 - A service-style task also shows its cleanup here: after the check and the samples, nothing the
   wrapper created (a namespace, a pod, a process) is left running.
 
@@ -57,8 +65,8 @@ Delete the mutant branches when done (`git branch -D`). Their jobs stay in the s
 ## Sensitivity
 
 Commit a deliberate slowdown of about twice the spread (an extra pass over the data, a sleep of
-that size in the hot path) on a throwaway branch, measure it with five samples
-(`submit measure <slow> --samples 5 --no-plan`, since it tests no idea), and run
+that size in the hot path) on a throwaway branch, measure it at the task's sample count
+(`submit measure <slow> --no-plan`, since it tests no idea), and run
 `vibesys-cli compare <slow> --against <base> --json`. The verdict must be `worse`. If it is
 `within_noise` or `inconclusive`, the optimization cannot see a gain of that size either: reduce
 the noise or tell the user how large a gain must be to count.

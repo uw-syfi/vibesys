@@ -60,6 +60,7 @@ type axis struct {
 	direction core.Direction
 	unit      string   // what the objective is counted in, empty when it declares none
 	noise     *float64 // the objective's own relative_noise, nil when it declares none
+	minGain   float64  // the objective's min_gain, zero when it declares none
 }
 
 // axesOf is the objectives of a valid file, in the order it lists them.
@@ -70,7 +71,7 @@ func axesOf(o *cliv1.TaskObjectives) []axis {
 		if obj.GetDirection() == cliv1.TaskObjectiveDirection_TASK_OBJECTIVE_DIRECTION_MIN {
 			d = core.Minimize
 		}
-		axes = append(axes, axis{name: obj.GetName(), direction: d, unit: obj.GetUnit(), noise: obj.RelativeNoise})
+		axes = append(axes, axis{name: obj.GetName(), direction: d, unit: obj.GetUnit(), noise: obj.RelativeNoise, minGain: obj.GetMinGain()})
 	}
 	return axes
 }
