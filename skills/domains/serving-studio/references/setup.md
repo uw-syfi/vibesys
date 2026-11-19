@@ -39,8 +39,8 @@ servingstudio-sim = "<ServingStudioSim commit>"
 ```
 
 The run checks the table (a lower-case tool name, a 7 to 64 character hexadecimal commit) and
-does nothing else with it. Only task schema 0.1 has it: vibesys-cli refuses the table in a
-`version = "0.2"` manifest. Tasks that need different revisions need one checkout each.
+does nothing else with it, in task schema 0.1 and 0.2 alike. Tasks that need different
+revisions need one checkout each.
 
 ```bash
 PIN=<the task's servingstudio-sim, or a commit from assets/pins.toml>

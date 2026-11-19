@@ -1413,7 +1413,11 @@ type TaskAgentV02 struct {
 	// The domain, which chooses the domain plugins.
 	Domain string `protobuf:"bytes,1,opt,name=domain,proto3" json:"domain,omitempty"`
 	// How the evaluator reaches the candidate: inprocess or service. Empty leaves it to the flag.
-	Interface     string `protobuf:"bytes,2,opt,name=interface,proto3" json:"interface,omitempty"`
+	Interface string `protobuf:"bytes,2,opt,name=interface,proto3" json:"interface,omitempty"`
+	// [agent.tool_revisions]: the commit of each domain tool the task needs, by the tool's name
+	// (servingstudio-sim = "<commit>"). Held as data for the domain skill that uses the tool, which
+	// reads it before its own default pin; vibesys-cli checks it and reads nothing else from it.
+	ToolRevisions map[string]string `protobuf:"bytes,3,rep,name=tool_revisions,json=toolRevisions,proto3" json:"tool_revisions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1460,6 +1464,13 @@ func (x *TaskAgentV02) GetInterface() string {
 		return x.Interface
 	}
 	return ""
+}
+
+func (x *TaskAgentV02) GetToolRevisions() map[string]string {
+	if x != nil {
+		return x.ToolRevisions
+	}
+	return nil
 }
 
 // TaskObjectives is objectives.toml, beside a task's manifest, of every task schema: what a
@@ -1820,10 +1831,14 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\x12TaskEnvironmentV02\x12\"\n" +
 	"\x05needs\x18\x01 \x03(\tB\f\xbaH\x05\x92\x01\x02\x18\x01\xd0\xf3\x18\x02R\x05needs\x12.\n" +
 	"\x10docker_in_docker\x18\x02 \x01(\bB\x04\xd0\xf3\x18\x02R\x0edockerInDocker\x123\n" +
-	"\x05modal\x18\x03 \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\x05modal\"t\n" +
+	"\x05modal\x18\x03 \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\x05modal\"\xd7\x02\n" +
 	"\fTaskAgentV02\x12#\n" +
 	"\x06domain\x18\x01 \x01(\tB\v\xbaH\x04r\x02\x10\x01\xd0\xf3\x18\x02R\x06domain\x12?\n" +
-	"\tinterface\x18\x02 \x01(\tB!\xbaH\x1ar\x182\x16^(inprocess|service)?$\xd0\xf3\x18\x02R\tinterface\"\xc0\x03\n" +
+	"\tinterface\x18\x02 \x01(\tB!\xbaH\x1ar\x182\x16^(inprocess|service)?$\xd0\xf3\x18\x02R\tinterface\x12\x9e\x01\n" +
+	"\x0etool_revisions\x18\x03 \x03(\v2/.vibesys.cli.v1.TaskAgentV02.ToolRevisionsEntryBF\xbaH?\x9a\x01<\"!r\x1f2\x1d^[a-z][a-z0-9]*(-[a-z0-9]+)*$*\x17r\x152\x13^[0-9a-fA-F]{7,64}$\xd0\xf3\x18\x02R\rtoolRevisions\x1a@\n" +
+	"\x12ToolRevisionsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc0\x03\n" +
 	"\x0eTaskObjectives\x12;\n" +
 	"\tobjective\x18\x01 \x03(\v2\x1d.vibesys.cli.v1.TaskObjectiveR\tobjective\x122\n" +
 	"\x06pareto\x18\x02 \x01(\v2\x1a.vibesys.cli.v1.TaskParetoR\x06pareto\x12)\n" +
@@ -1887,7 +1902,7 @@ func file_vibesys_cli_v1_task_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_cli_v1_task_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_vibesys_cli_v1_task_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_vibesys_cli_v1_task_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_vibesys_cli_v1_task_proto_goTypes = []any{
 	(TaskDomain)(0),                     // 0: vibesys.cli.v1.TaskDomain
 	(ModelMaker)(0),                     // 1: vibesys.cli.v1.ModelMaker
@@ -1911,11 +1926,12 @@ var file_vibesys_cli_v1_task_proto_goTypes = []any{
 	(*TaskObjectives)(nil),              // 19: vibesys.cli.v1.TaskObjectives
 	(*TaskObjective)(nil),               // 20: vibesys.cli.v1.TaskObjective
 	(*TaskPareto)(nil),                  // 21: vibesys.cli.v1.TaskPareto
-	(*structpb.Struct)(nil),             // 22: google.protobuf.Struct
-	(AcceleratorVendor)(0),              // 23: vibesys.cli.v1.AcceleratorVendor
-	(*AcceleratorNeed)(nil),             // 24: vibesys.cli.v1.AcceleratorNeed
-	(*descriptorpb.MessageOptions)(nil), // 25: google.protobuf.MessageOptions
-	(*descriptorpb.FieldOptions)(nil),   // 26: google.protobuf.FieldOptions
+	nil,                                 // 22: vibesys.cli.v1.TaskAgentV02.ToolRevisionsEntry
+	(*structpb.Struct)(nil),             // 23: google.protobuf.Struct
+	(AcceleratorVendor)(0),              // 24: vibesys.cli.v1.AcceleratorVendor
+	(*AcceleratorNeed)(nil),             // 25: vibesys.cli.v1.AcceleratorNeed
+	(*descriptorpb.MessageOptions)(nil), // 26: google.protobuf.MessageOptions
+	(*descriptorpb.FieldOptions)(nil),   // 27: google.protobuf.FieldOptions
 }
 var file_vibesys_cli_v1_task_proto_depIdxs = []int32{
 	11, // 0: vibesys.cli.v1.TaskManifestV02.candidate:type_name -> vibesys.cli.v1.TaskCandidateV02
@@ -1927,38 +1943,39 @@ var file_vibesys_cli_v1_task_proto_depIdxs = []int32{
 	13, // 6: vibesys.cli.v1.TaskManifestV02.check:type_name -> vibesys.cli.v1.TaskCommandV02
 	15, // 7: vibesys.cli.v1.TaskManifestV02.measure:type_name -> vibesys.cli.v1.TaskBenchmarkV02
 	18, // 8: vibesys.cli.v1.TaskManifestV02.agent:type_name -> vibesys.cli.v1.TaskAgentV02
-	22, // 9: vibesys.cli.v1.TaskManifestV02.profile_guided:type_name -> google.protobuf.Struct
-	22, // 10: vibesys.cli.v1.TaskManifestV02.resources:type_name -> google.protobuf.Struct
-	22, // 11: vibesys.cli.v1.TaskManifestV02.workspace:type_name -> google.protobuf.Struct
-	22, // 12: vibesys.cli.v1.TaskManifestV02.plan:type_name -> google.protobuf.Struct
-	22, // 13: vibesys.cli.v1.TaskManifestV02.catalogue:type_name -> google.protobuf.Struct
-	22, // 14: vibesys.cli.v1.TaskManifestV02.comparison:type_name -> google.protobuf.Struct
+	23, // 9: vibesys.cli.v1.TaskManifestV02.profile_guided:type_name -> google.protobuf.Struct
+	23, // 10: vibesys.cli.v1.TaskManifestV02.resources:type_name -> google.protobuf.Struct
+	23, // 11: vibesys.cli.v1.TaskManifestV02.workspace:type_name -> google.protobuf.Struct
+	23, // 12: vibesys.cli.v1.TaskManifestV02.plan:type_name -> google.protobuf.Struct
+	23, // 13: vibesys.cli.v1.TaskManifestV02.catalogue:type_name -> google.protobuf.Struct
+	23, // 14: vibesys.cli.v1.TaskManifestV02.comparison:type_name -> google.protobuf.Struct
 	12, // 15: vibesys.cli.v1.TaskManifestV02.service:type_name -> vibesys.cli.v1.TaskServiceV02
 	0,  // 16: vibesys.cli.v1.TaskCatalogueV02.domain:type_name -> vibesys.cli.v1.TaskDomain
 	6,  // 17: vibesys.cli.v1.TaskCatalogueV02.hardware:type_name -> vibesys.cli.v1.TaskHardwareV02
 	7,  // 18: vibesys.cli.v1.TaskCatalogueV02.model:type_name -> vibesys.cli.v1.TaskServedModelV02
 	8,  // 19: vibesys.cli.v1.TaskCatalogueV02.workload:type_name -> vibesys.cli.v1.TaskWorkloadV02
-	23, // 20: vibesys.cli.v1.TaskHardwareV02.vendor:type_name -> vibesys.cli.v1.AcceleratorVendor
+	24, // 20: vibesys.cli.v1.TaskHardwareV02.vendor:type_name -> vibesys.cli.v1.AcceleratorVendor
 	1,  // 21: vibesys.cli.v1.TaskServedModelV02.maker:type_name -> vibesys.cli.v1.ModelMaker
 	0,  // 22: vibesys.cli.v1.TaskCard.domain:type_name -> vibesys.cli.v1.TaskDomain
-	24, // 23: vibesys.cli.v1.TaskCard.hardware:type_name -> vibesys.cli.v1.AcceleratorNeed
+	25, // 23: vibesys.cli.v1.TaskCard.hardware:type_name -> vibesys.cli.v1.AcceleratorNeed
 	1,  // 24: vibesys.cli.v1.TaskCard.model_maker:type_name -> vibesys.cli.v1.ModelMaker
 	10, // 25: vibesys.cli.v1.TaskCard.objectives:type_name -> vibesys.cli.v1.CardObjective
 	2,  // 26: vibesys.cli.v1.CardObjective.direction:type_name -> vibesys.cli.v1.TaskObjectiveDirection
 	13, // 27: vibesys.cli.v1.TaskServiceV02.reset:type_name -> vibesys.cli.v1.TaskCommandV02
 	16, // 28: vibesys.cli.v1.TaskBenchmarkV02.result:type_name -> vibesys.cli.v1.TaskResultV02
-	22, // 29: vibesys.cli.v1.TaskEnvironmentV02.modal:type_name -> google.protobuf.Struct
-	20, // 30: vibesys.cli.v1.TaskObjectives.objective:type_name -> vibesys.cli.v1.TaskObjective
-	21, // 31: vibesys.cli.v1.TaskObjectives.pareto:type_name -> vibesys.cli.v1.TaskPareto
-	2,  // 32: vibesys.cli.v1.TaskObjective.direction:type_name -> vibesys.cli.v1.TaskObjectiveDirection
-	25, // 33: vibesys.cli.v1.task_schema:extendee -> google.protobuf.MessageOptions
-	26, // 34: vibesys.cli.v1.task_schema_since_minor:extendee -> google.protobuf.FieldOptions
-	3,  // 35: vibesys.cli.v1.task_schema:type_name -> vibesys.cli.v1.TaskSchema
-	36, // [36:36] is the sub-list for method output_type
-	36, // [36:36] is the sub-list for method input_type
-	35, // [35:36] is the sub-list for extension type_name
-	33, // [33:35] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	23, // 29: vibesys.cli.v1.TaskEnvironmentV02.modal:type_name -> google.protobuf.Struct
+	22, // 30: vibesys.cli.v1.TaskAgentV02.tool_revisions:type_name -> vibesys.cli.v1.TaskAgentV02.ToolRevisionsEntry
+	20, // 31: vibesys.cli.v1.TaskObjectives.objective:type_name -> vibesys.cli.v1.TaskObjective
+	21, // 32: vibesys.cli.v1.TaskObjectives.pareto:type_name -> vibesys.cli.v1.TaskPareto
+	2,  // 33: vibesys.cli.v1.TaskObjective.direction:type_name -> vibesys.cli.v1.TaskObjectiveDirection
+	26, // 34: vibesys.cli.v1.task_schema:extendee -> google.protobuf.MessageOptions
+	27, // 35: vibesys.cli.v1.task_schema_since_minor:extendee -> google.protobuf.FieldOptions
+	3,  // 36: vibesys.cli.v1.task_schema:type_name -> vibesys.cli.v1.TaskSchema
+	37, // [37:37] is the sub-list for method output_type
+	37, // [37:37] is the sub-list for method input_type
+	36, // [36:37] is the sub-list for extension type_name
+	34, // [34:36] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_task_proto_init() }
@@ -1976,7 +1993,7 @@ func file_vibesys_cli_v1_task_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_task_proto_rawDesc), len(file_vibesys_cli_v1_task_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   19,
+			NumMessages:   20,
 			NumExtensions: 2,
 			NumServices:   0,
 		},
