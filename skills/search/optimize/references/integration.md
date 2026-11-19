@@ -62,8 +62,11 @@ A part that states no prediction leaves the integration with none; say so on the
 ## The brief, and what you write after
 
 Dispatch a combiner with the Integrate template of [briefs.md](briefs.md): the parts in order,
-most proven first, so the longest prefix that passes holds the safest work. Budget one measure,
-and checks for one bisection: `1 + ceil(log2 N)`, plus one per part that fails a check.
+most proven first, so the longest prefix that passes holds the safest work. Budget one measure, the task's
+check size `G` for every check (`--gpus G` on a task with a device pool), and checks for each
+part you expect to fail: `1 + F * (ceil(log2 N) + 2)` for `F` parts at fault among `N`, as the
+combiner's integrating reference counts them (five for three parts and one at fault). Say whether
+it may bisect in parallel on the pool: fewer rounds of waiting, for more check jobs.
 
 From the handoff, write on every part plan the integration plan, the candidate SHA, the check
 and measure job ids, the `compare` verdict against the head, and the composed prediction beside

@@ -30,13 +30,20 @@ top of the chain is the candidate.
 
 ## Check and measure once, linked to every plan
 
-Check the top, `CN`, once, linked to the integration plan, and wait for it:
-`vibesys-cli submit check <CN> --plan <I> --wait`. On a pass, link the check to every part by
-submitting it again once per part (`submit check <CN> --plan <Pi>`): a saved pass is reused, so
-each repeat prints the same job, runs nothing, and the part's `plan view` lists it. Never repeat a
-check that failed: a failure saves no result, so a repeat runs the check again.
+On a task that needs GPUs or other devices from a pool, every `submit check` below takes
+`--gpus <G>`, the task's check size: the fewest devices its check runs on, which your brief gives
+(`vibesys:measure`). Use the same `G` on every check of the integration. A check is saved for the
+device count it ran on, so a repeat meant to reuse a check must give the same `G`; another count
+is a new check. A task with no device pool takes no `--gpus`.
 
-Then measure the same way: `vibesys-cli submit measure <CN> --samples <S> --plan <I>`, where `S`
+Check the top, `CN`, once, linked to the integration plan, and wait for it:
+`vibesys-cli submit check <CN> --gpus <G> --plan <I> --wait`. On a pass, link the check to every
+part by submitting it again once per part (`submit check <CN> --gpus <G> --plan <Pi>`): a saved
+pass is reused, so each repeat prints the same job, runs nothing, and the part's `plan view` lists
+it. Never repeat a check that failed: a failure saves no result, so a repeat runs the check again.
+
+Then measure it, on the pass the check gave: a measure takes the whole node and no `--gpus`.
+Measure the same way: `vibesys-cli submit measure <CN> --samples <S> --plan <I>`, where `S`
 is the task's declared samples (your brief gives it), then the same command with `--plan <Pi>`
 for each part, which joins the job in flight or reuses its result, then `vibesys-cli wait <job>`
 and `vibesys-cli compare <CN> --against <head SHA>`. A repeat that prints a new job id means a
@@ -53,7 +60,7 @@ and stop. Otherwise bisect over the prefixes, with checks only, never a measure:
 lo = 0 (passes: the head)      hi = N (fails: the top)
 while hi - lo > 1:
     mid = (lo + hi) // 2
-    vibesys-cli submit check <C_mid> --plan <I> --wait
+    vibesys-cli submit check <C_mid> --gpus <G> --plan <I> --wait
     pass -> lo = mid      fail -> hi = mid
 the part at fault is P_hi; C_lo is the longest prefix that passes
 ```
@@ -65,6 +72,18 @@ This takes `ceil(log2 N)` checks: one for two parts, two for three or four, thre
 eight. It needs no new commit, since each prefix exists. When it ends, `C_lo` has a passing check
 (or is the head), which the next step builds on.
 
+### In parallel, where the pool allows
+
+Written above, the bisection is one check at a time: the fewest device jobs, in `ceil(log2 N)`
+rounds of waiting. When the pool holds several checks at once, you may check several prefixes in
+one round instead: submit them all without `--wait`, then `vibesys-cli wait` on every job. All of
+`C1`..`C(N-1)` at once names the part in one round with `N - 1` checks; the two midpoints of a
+three-way split take two checks a round and `ceil(log3 N)` rounds. That is fewer rounds for more
+jobs, so do it only when waiting costs more than the extra jobs: a long check on an idle pool.
+A smaller `--gpus` than the task's check size lets more checks fit in the pool, but only if the
+check is valid at that size; such a check is a different check, so its pass is not reused at
+`G`, and the candidate still needs its own check at `G`. Still checks only, never a measure.
+
 ### One part at fault, or two together
 
 The bisection names the first part whose addition breaks the check. That part fails on its own,
@@ -72,7 +91,8 @@ or only beside an earlier part. Tell which before you hand it back:
 
 - `hi = 1`: `C1` is the head plus `P1` alone, so `P1` fails on its own. No check needed.
 - Otherwise, if `P_hi`'s accepted commit was built on the current head, check it
-  (`submit check <its SHA> --plan <P_hi> --wait`; a saved result is reused for free). Built on
+  (`submit check <its SHA> --gpus <G> --plan <P_hi> --wait`; a saved pass at `G` is reused for
+  free). Built on
   another commit, apply its diff alone on the head in a scratch commit and check that.
 - A fail: the part is at fault alone. A pass: the failure needs `P_hi` and some of `P1`..`P(hi-1)`.
   That is an interaction; report both. To name the partner, bisect again over prefixes of
@@ -92,6 +112,15 @@ Leave the part at fault out and finish the integration without it: on `C_lo`, ap
 the new chain the same way, from `C_lo`. When the part at fault was the last one, `C(N-1)` is the
 candidate and already passed. Stop when your check budget runs out and hand back the longest
 prefix that passed.
+
+### The check budget
+
+Every integration checks its top once. Each part at fault then costs at most `ceil(log2 N) + 2`
+more checks: the bisection, the check of the part alone (none when it is `P1`), and the check of
+the rebuilt top (none when it was the last part). With `F` parts at fault, at most
+`1 + F * (ceil(log2 N) + 2)`: one for a clean integration, five for three parts with one at
+fault. Finding an interaction's partner, and the parallel rounds above, cost more than this, and
+only within the brief's budget.
 
 ## Hand back
 

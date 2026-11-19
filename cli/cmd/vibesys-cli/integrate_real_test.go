@@ -211,6 +211,11 @@ func TestRealIntegrationBisectionNamesThePlanThatBreaksTheCheck(t *testing.T) {
 				}
 			}
 			m.integratedOnce(top, integration, held)
+			// The skill's budget: 1 + F*(ceil(log2 N) + 2) checks, with one part at fault among
+			// three, beside the head's own check.
+			if used := m.checksRun() - 1; used > 1+1*(2+2) {
+				t.Errorf("the integration ran %d checks, over the budget of 5 the skill states", used)
+			}
 		})
 	}
 }

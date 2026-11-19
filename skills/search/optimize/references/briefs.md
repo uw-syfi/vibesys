@@ -109,8 +109,10 @@ commit after each:
   2. ...
 How to combine them: <which side wins a conflict in a shared file; what must survive>
 Watch for: <where the parts interact>
-Samples: <the task's declared samples>      Checks: at most <1 + ceil(log2 N) + parts that fail>
+Samples: <the task's declared samples>      Check size: --gpus <G>, or none without a device pool
+Checks: at most <1 + F * (ceil(log2 N) + 2)>, for F parts at fault      Parallel bisection: yes | no
 Measure: one, of the top of the chain that passes its check, linked to plan <I> and each part.
+  Every check and every repeat of one takes the same --gpus <G>.
 On a failed check: bisect, name the part at fault and whether it fails alone, finish without it.
 Hand back: the chain, the candidate and the parts it holds, every check with its result and job
   id, the measure job id and compare output against the head.

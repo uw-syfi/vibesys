@@ -44,10 +44,11 @@ evidence and not yet measured. Its steps replace Work steps 1, 4 and 5, and are 
 
 1. Apply the parts one at a time and make a full commit after each, so each prefix of the list
    is a commit: the chain the bisection walks.
-2. Check the top once and measure it once, each linked to the integration plan and, by
-   repeating the submission, to every part (the repeats run nothing).
+2. Check the top once, at the task's check size (`--gpus <G>` on a task with a device pool,
+   the same on every check and repeat), and measure it once, each linked to the integration plan
+   and, by repeating the submission, to every part (the repeats run nothing).
 3. On a failed check, bisect over the prefixes with checks only, `ceil(log2 N)` of them for N
-   parts; say whether the part named fails alone or only beside another; then finish without it
+   parts, or several prefixes a round where the pool allows and the brief says so; say whether the part named fails alone or only beside another; then finish without it
    from the longest prefix that passed, within the brief's check budget.
 
 ## Never
