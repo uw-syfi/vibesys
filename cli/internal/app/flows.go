@@ -243,9 +243,10 @@ func (a *App) refuseChangedTask(ctx context.Context, scope core.Scope, commit co
 }
 
 // planFlow makes the plan of a queued check or measure job that is about to start: the rule for
-// what the cache lets it skip, applied now and not when the job was queued (flow.Prepare). It
-// fails when the task or the environment is not what the job was keyed under.
-func (a *App) planFlow(ctx context.Context, st store.Store, scope core.Scope, job core.Job, fingerprint core.Fingerprint) (flow.Plan, error) {
+// what the cache lets it skip, applied now and not when the job was queued (flow.Prepare), given
+// the GPUs of a pool the machine chose for it (nil for none). It fails when the task or the
+// environment is not what the job was keyed under.
+func (a *App) planFlow(ctx context.Context, st store.Store, scope core.Scope, job core.Job, fingerprint core.Fingerprint, gpus *core.Grant) (flow.Plan, error) {
 	tk, err := a.taskAt(ctx, string(scope.Repository()), job.Spec.Commit, string(scope.Task()))
 	if err != nil {
 		return flow.Plan{}, err
@@ -259,7 +260,7 @@ func (a *App) planFlow(ctx context.Context, st store.Store, scope core.Scope, jo
 	if err != nil {
 		return flow.Plan{}, storeError{err}
 	}
-	return flow.Prepare(flow.Starting{Job: job, NoCache: job.NoCache, Task: tk, Environment: fingerprint, Saved: saved})
+	return flow.Prepare(flow.Starting{Job: job, NoCache: job.NoCache, Task: tk, Environment: fingerprint, Saved: saved, GPUs: gpus})
 }
 
 // taskAt reads the task as the commit has it. A daemon built without a source of tasks cannot run

@@ -658,7 +658,11 @@ and are not linked into it) and runs them on the host, or in docker for a task t
   samples are saved with the machine's facts and load. When the measure ran the check itself, that
   pass counts as a check result (`core.Result.PassKey`), so a later check is answered by the
   measure job. A measure for more samples than the cache holds takes only the
-  missing ones, and links the saved check pass instead of checking again.
+  missing ones, and links the saved check pass instead of checking again. Where the task's
+  environment has a pool of GPUs, a pass is a claim about the number of devices it ran on: a measure
+  takes the whole pool and runs its check on all of it, so it links a pass of `submit check --gpus
+  <count>` with the pool's `count` (or one a measure saved), and runs its own check after a check of
+  fewer (see "GPU pools").
 
 Each command of a job gets its own artifacts directory, numbered in the order the commands ran
 (`01-check`, `02-benchmark`, ...), in the repository's state directory
@@ -959,7 +963,13 @@ nothing, and its `count` is believed.
 
 - **Claims.** A check or command job of a task that needs GPUs claims as many devices of the pool as
   its `--gpus N` says, and a measure takes the whole pool, alone, with its placement, as it takes
-  its placement today. `--gpus N` is required of a check or command whose task needs GPUs where a placement declares a pool, and is refused (`INVALID_INPUT`, naming `--gpus` and the placements' sizes, `1 to <count>`) on a measure, for a task that needs no GPU, for a placement with no pool, and for more GPUs than any placement it may run on has; there is no default. A host command in the task's image reads no task, so it is not asked for a count. A job of a task that needs no GPU claims a slot and no device. The pool is
+  its placement today. A check's count is part of its cache key: a check that passed on 2
+  GPUs says nothing of one on 4, so checks of different counts never answer one another. A measure
+  runs its check on the whole pool, so it links the pass of a check that asked for all of it (`--gpus
+  8` of a pool of 8) and checks nothing again; after a check of fewer it runs its own. To check once
+  and measure once, check with the pool's size. A measure on a placement whose pool the CLI does
+  not count (a cluster's, see below) links only a pass saved with no count, such as an earlier
+  measure's. `--gpus N` is required of a check or command whose task needs GPUs where a placement declares a pool, and is refused (`INVALID_INPUT`, naming `--gpus` and the placements' sizes, `1 to <count>`) on a measure, for a task that needs no GPU, for a placement with no pool, and for more GPUs than any placement it may run on has; there is no default. A host command in the task's image reads no task, so it is not asked for a count. A job of a task that needs no GPU claims a slot and no device. The pool is
   a resource of `count` units that the scheduler counts like any other: a job waits when its
   devices are not free, and waits behind an earlier job that waits for more, so a job of the whole
   pool is not starved by a stream of one-GPU jobs. A job that waits for devices says how many it

@@ -29,8 +29,9 @@ const keyTagGPUs = 1
 // placement. Settings take part through their
 // kind and the fields that change what is computed, and there are none yet. The count of GPUs a
 // job asked for takes part when there is one: a check that passed on 2 GPUs says nothing of one on
-// 4. Which devices it was given never does. MeasureSettings
-// leaves out both of its fields on purpose. Samples is a quantity the cache tops up (PlanCache),
+// 4. Which devices it was given never does. A measure has no count, since it takes a whole pool;
+// the check it would run is the one of the pool's size, whose pass it links (flow.Prepare).
+// MeasureSettings leaves out both of its fields on purpose. Samples is a quantity the cache tops up (PlanCache),
 // so results taken for different counts must share a key; Recheck changes how a check is
 // obtained, never what is measured. Notes, plans and the caller never take part.
 //
