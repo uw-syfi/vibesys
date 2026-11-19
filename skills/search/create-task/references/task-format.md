@@ -117,8 +117,8 @@ When to declare each:
   count below three. Set it to the same-code spread of one run, rounded up.
 - `samples` (1 to 1000): when the default of 5 does not fit the cost of one sample. A benchmark
   that takes most of an hour or the whole machine declares `samples = 1` with a `relative_noise`;
-  a cheap but noisy one may declare more. Every `submit measure` without `--samples` takes it, so
-  the skills never name a count.
+  a cheap but noisy one may declare more. Every measure submitted without `--samples` takes it,
+  so the skills never name a count.
 - `min_gain` (at least 0, below 1): when the user names the smallest gain worth promoting, such as
   `0.02` for "only at +2% or more". `better` then needs the gain to pass the noise test and to
   exceed `min_gain`; a gain that passes the noise test but not `min_gain` is `within_noise`, and

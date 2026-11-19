@@ -197,7 +197,8 @@ func (g *gen) objectives() core.Objectives {
 	metrics := []core.Metric{g.metric(), g.metric()}
 	return core.Objectives{
 		Metrics: metrics, RelativeNoise: g.float(), Noise: []core.ObjectiveNoise{{Name: metrics[1].Name, RelativeNoise: g.float()}},
-		MinGains: []core.ObjectiveMinGain{{Name: metrics[0].Name, MinGain: g.float()}},
+		// A saved minimum gain is held to the rule objectives.toml states: at least 0, below 1.
+		MinGains: []core.ObjectiveMinGain{{Name: metrics[0].Name, MinGain: g.r.Float64() * 0.999}},
 	}
 }
 

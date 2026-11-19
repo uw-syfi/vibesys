@@ -101,6 +101,10 @@ func fill(m protoreflect.Message, variant int) {
 		v := core.Headline(ob.Values)
 		ob.Value = &v
 	}
+	// A saved minimum gain is a fraction, at least 0 and below 1, as objectives.toml requires.
+	if md.FullName() == "vibesys.cli.v1.ObjectiveMinGain" {
+		m.Interface().(*cliv1.ObjectiveMinGain).MinGain = 0.25
+	}
 	// A grant names devices of its pool.
 	if md.FullName() == "vibesys.cli.v1.GpuGrant" {
 		grant := m.Interface().(*cliv1.GpuGrant)
