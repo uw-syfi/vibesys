@@ -13,13 +13,14 @@ Three things hold for the whole run:
 
 - **Plans go to workers.** A plan is a hypothesis for a worker to try. You never try one yourself,
   not a first draft, a small one or the one that looks easy, and you never create a worktree to
-  implement in. Planners write the plans; you write none. You start a subagent with the
+  implement in. Planners write the plans; you write none but an integration plan, which only
+  merges plans already accepted ([integration.md](references/integration.md)). You start a subagent with the
   harness's subagent tool. Loading a role's skill (`plan-hypotheses`, `implement-hypothesis`,
   `judge-candidate`, `combine-candidates`, `profile-revision`) in your own context makes you do
   that role's work, so those skills are for the subagents you start.
 - **A turn ends only with something outstanding.** Before you end a turn, a subagent is running
   or a job is queued. If a plan is open or chosen and nothing is outstanding, start its worker
-  now. Nothing wakes a lead whose subagents and jobs are all done.
+  now, or for an accepted plan its integration. Nothing wakes a lead whose subagents and jobs are all done.
 - **The run ends with a final report.** When is set out in [Finish](#finish).
 
 **Which CLI.** Where this skill writes `vibesys-cli`, run `"$VIBESYS_CLI"`, never the one on
@@ -110,7 +111,12 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    each point on the run's chart is tied to its idea; `vibesysd` refuses a measure from a run that
    names neither `--plan <n>` nor `--no-plan`. Say `--no-plan` only for the baseline and for
    re-measuring the head, which test no idea. Combine parked or won plans with
-   combine-candidates, and use profile-revision when a question needs evidence. Record outcomes
+   combine-candidates, and use profile-revision when a question needs evidence. Where a measure
+   is expensive, accept a candidate on cheap evidence (tests, an on-device self-test, a
+   microbenchmark, a passing check) and measure several at once:
+   [integration.md](references/integration.md) says when to integrate accepted plans, how to
+   compose their prediction, how each plan's status moves, and what to do when the merged check
+   fails. Record outcomes
    and lessons as plan comments, link every other job to its plan too (`--plan`), and close the
    plan with its gain or its reason: `won` when promoted, `parked` or `rejected` when a
    measurement settles it, set when it happens and not at the end.
@@ -199,7 +205,8 @@ It has run its course when either holds:
    `within_noise` or `worse`, or failed their judge, and `plan check-gain --under 10%` lists no
    plan with a stated bound at or above 10%.
 
-Then bring the plans up to date and give the final report, whatever else is still open: a
+Then integrate any accepted plan that waits ([integration.md](references/integration.md)),
+bring the plans up to date and give the final report, whatever else is still open: a
 result you hold is worth more reported than improved forever. A run that stays open after a
 final report costs nothing, and one that never gives it cannot be waited on. The operator's
 steering note may state another share, which you give to `--under`.
@@ -223,6 +230,7 @@ and commit SHAs allowed here:
 
 1. Each promotion since the last report has a judge pass, and `vibesys-cli promote` printed it.
 2. The headline number is the `value` from `vibesys-cli result`.
-3. No plan is marked `chosen` without a live agent.
+3. No plan is marked `chosen` without a live agent, or, for an accepted plan, an integration that
+   holds it or is due.
 4. Idle slots have a stated reason.
 5. Every claimed gain cites a `vibesys-cli compare` verdict.
