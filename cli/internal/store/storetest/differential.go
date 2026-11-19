@@ -87,6 +87,15 @@ func (d *driver) jobID(jobs []core.Job) core.JobID {
 	return jobs[d.g.pick(len(jobs))].ID
 }
 
+// planKind is a kind, or now and then one there is not.
+func (d *driver) planKind() core.PlanKind {
+	if d.g.pick(10) == 0 {
+		return "bogus"
+	}
+	kinds := core.PlanKinds()
+	return kinds[d.g.pick(len(kinds))]
+}
+
 func (d *driver) planNumber() core.PlanNumber {
 	plans, err := d.stores[0].Plans(context.Background(), core.PlanFilter{})
 	if err != nil {
@@ -167,6 +176,12 @@ func (d *driver) step(step int) {
 		if g.pick(2) == 0 {
 			np.Workstream = core.WorkstreamNumber(g.pick(4))
 		}
+		if g.pick(2) == 0 {
+			np.Kind = d.planKind()
+		}
+		if g.pick(2) == 0 {
+			np.DependsOn = []core.PlanNumber{d.planNumber(), d.planNumber()}
+		}
 		d.do(step, "CreatePlan", func(s store.Store) (any, error) { return s.CreatePlan(ctx, np) })
 	case op == 11:
 		number, edit := d.planNumber(), core.PlanEdit{Origin: d.origin()}
@@ -184,6 +199,12 @@ func (d *driver) step(step int) {
 		}
 		if g.pick(3) == 0 {
 			edit.Workstream = ptr(core.WorkstreamNumber(g.pick(4)))
+		}
+		if g.pick(3) == 0 {
+			edit.Kind = ptr(d.planKind())
+		}
+		if g.pick(3) == 0 {
+			edit.DependsOn = ptr([]core.PlanNumber{d.planNumber(), d.planNumber()}[:g.pick(3)])
 		}
 		d.do(step, "EditPlan", func(s store.Store) (any, error) { return s.EditPlan(ctx, number, edit) })
 	case op == 12:
@@ -302,7 +323,10 @@ func (d *driver) read(step int, jobs []core.Job) {
 	case 4:
 		n := d.planNumber()
 		d.do(step, "Plan", func(s store.Store) (any, error) { return s.Plan(ctx, n) })
-		f := core.PlanFilter{Text: []string{"", "e", "a"}[g.pick(3)]}
+		f := core.PlanFilter{Text: []string{"", "e", "a"}[g.pick(3)], Ready: g.pick(2) == 0}
+		if g.pick(2) == 0 {
+			f.Kinds = []core.PlanKind{d.planKind()}
+		}
 		if g.pick(2) == 0 {
 			f.Statuses = []core.PlanStatus{core.PlanOpen, core.PlanChosen}
 		}

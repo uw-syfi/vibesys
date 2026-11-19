@@ -83,7 +83,7 @@ const eventFileName = "state/runs/run-a/1.json"
 func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 	t.Run("the layout", func(t *testing.T) {
 		mem := populated(t)
-		mem.Put("state/format", []byte(`{"format":9}`))
+		mem.Put("state/format", []byte(`{"format":10}`))
 		_, err := filestore.Open(stateDir, filestore.WithFS(mem))
 		wantFailure(t, "newer format file", err, core.FailureIncompatible, "state/format")
 	})
@@ -91,7 +91,7 @@ func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 	for _, name := range recordFiles {
 		t.Run(name, func(t *testing.T) {
 			mem := populated(t)
-			mem.Put(name, withVersion(file(t, mem, name), "9"))
+			mem.Put(name, withVersion(file(t, mem, name), "10"))
 			_, err := filestore.Open(stateDir, filestore.WithFS(mem))
 			wantFailure(t, "newer record", err, core.FailureIncompatible, name)
 		})
@@ -99,7 +99,7 @@ func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 
 	t.Run("an event, read when asked for", func(t *testing.T) {
 		mem := populated(t)
-		mem.Put(eventFileName, withVersion(file(t, mem, eventFileName), "9"))
+		mem.Put(eventFileName, withVersion(file(t, mem, eventFileName), "10"))
 		s, err := filestore.Open(stateDir, filestore.WithFS(mem))
 		if err != nil {
 			t.Fatalf("Open: %v", err)
@@ -225,6 +225,21 @@ func TestInconsistentLayoutIsRefusedWithTheFileNamed(t *testing.T) {
 		{"a plan in a workstream that does not exist", func(m *fsys.MemFS) {
 			rewritePlan(t, m, func(p *cliv1.Plan) { p.Workstream = 7 })
 		}, []string{"plan 1", "workstream 7"}},
+		{"a plan that depends on a plan that does not exist", func(m *fsys.MemFS) {
+			rewritePlan(t, m, func(p *cliv1.Plan) { p.DependsOn = []uint32{7} })
+		}, []string{"plan 1", "no plan 7"}},
+		{"a plan that depends on itself", func(m *fsys.MemFS) {
+			rewritePlan(t, m, func(p *cliv1.Plan) { p.DependsOn = []uint32{1} })
+		}, []string{"state/plans/1.json"}},
+		{"plans that depend on each other", func(m *fsys.MemFS) {
+			rewritePlan(t, m, func(p *cliv1.Plan) { p.DependsOn = []uint32{2} })
+			second := planFile(t, m, 1)
+			second.Plan.Number, second.Plan.DependsOn = 2, []uint32{1}
+			putPlanFile(t, m, second)
+		}, []string{"1 -> 2 -> 1", "cycle"}},
+		{"a plan of a kind there is not", func(m *fsys.MemFS) {
+			rewritePlan(t, m, func(p *cliv1.Plan) { p.Kind = cliv1.PlanKind(42) })
+		}, []string{"state/plans/1.json"}},
 		{"a missing bound", func(m *fsys.MemFS) { mustRemove(t, m, "state/bounds/1.json") }, []string{"state/bounds/1.json"}},
 		{"a bound under another bound's place", func(m *fsys.MemFS) { m.Put("state/bounds/2.json", file(t, m, "state/bounds/1.json")) }, []string{"state/bounds/2.json"}},
 		{"a bound that is not well formed", func(m *fsys.MemFS) {
@@ -411,11 +426,11 @@ func TestEncodingIsPinned(t *testing.T) {
 	if err := script()[0].run(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := unspaced(file(t, mem, "state/format")), `{"format":8}`; got != want {
+	if got, want := unspaced(file(t, mem, "state/format")), `{"format":9}`; got != want {
 		t.Errorf("format file = %q, want %q", got, want)
 	}
 	const wantJob = `{
-  "format": 8,
+  "format": 9,
   "job": {
     "id": "j1",
     "spec": {
@@ -453,7 +468,7 @@ func TestEncodingIsPinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	const wantPromotion = `{
-  "format": 8,
+  "format": 9,
   "seq": "1",
   "promotion": {
     "commit": "c1",
@@ -493,7 +508,7 @@ func TestThePlanFileIsPinned(t *testing.T) {
 		}
 	}
 	const want = `{
-  "format": 8,
+  "format": 9,
   "plan": {
     "number": 1,
     "title": "tile the loop",
@@ -551,7 +566,7 @@ func TestTheWorkstreamFileIsPinned(t *testing.T) {
 		}
 	}
 	const want = `{
-  "format": 8,
+  "format": 9,
   "workstream": {
     "number": 1,
     "title": "KV cache layout",
@@ -580,7 +595,7 @@ func TestTheBoundFileIsPinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	const want = `{
-  "format": 8,
+  "format": 9,
   "bound": {
     "seq": "1",
     "origin": {

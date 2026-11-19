@@ -41,6 +41,7 @@ func Run(t *testing.T, newStore New) {
 		{"frontier", testFrontier},
 		{"plans", testPlans},
 		{"plan history", testPlanHistory},
+		{"plan dependencies", testPlanDependencies},
 		{"workstreams", testWorkstreams},
 		{"bounds", testBounds},
 		{"events", testEvents},

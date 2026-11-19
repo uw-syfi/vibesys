@@ -21,7 +21,14 @@ func (s *Server) CreatePlan(ctx context.Context, req *cliv1.CreatePlanRequest) (
 	if err != nil {
 		return nil, wire.Error(err)
 	}
-	plan, err := s.app.CreatePlan(ctx, call, req.GetTitle(), req.GetBody(), bound, core.WorkstreamNumber(req.GetWorkstream()))
+	kind, err := wire.ToPlanKind("kind", req.GetKind())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	plan, err := s.app.CreatePlan(ctx, call, app.PlanDraft{
+		Title: req.GetTitle(), Body: req.GetBody(), GainBound: bound, Workstream: core.WorkstreamNumber(req.GetWorkstream()),
+		Kind: kind, DependsOn: wire.ToPlanNumbers(req.GetDependsOn()),
+	})
 	if err != nil {
 		return nil, wire.Error(err)
 	}
@@ -77,6 +84,17 @@ func (s *Server) EditPlan(ctx context.Context, req *cliv1.EditPlanRequest) (*cli
 			return nil, wire.Error(err)
 		}
 		change.Status = &status
+	}
+	if req.Kind != nil {
+		kind, err := wire.ToPlanKind("kind", req.GetKind())
+		if err != nil {
+			return nil, wire.Error(err)
+		}
+		change.Kind = &kind
+	}
+	if req.GetDependsOn() != nil {
+		deps := wire.ToPlanNumbers(req.GetDependsOn().GetPlans())
+		change.DependsOn = &deps
 	}
 	call, err := s.call(ctx, req.GetContext())
 	if err != nil {

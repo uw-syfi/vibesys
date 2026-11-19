@@ -266,8 +266,12 @@ func (g *gen) plan() core.Plan {
 	if status != core.PlanOpen {
 		transitions = append(transitions, core.PlanTransition{Status: status, Origin: g.origin()})
 	}
+	// A plan depends on plans numbered below its own, so never on itself.
+	number := core.PlanNumber(2 + g.pick(1<<20))
+	deps := core.NormalizeDependsOn([]core.PlanNumber{core.PlanNumber(1 + g.pick(int(number-1))), core.PlanNumber(1 + g.pick(int(number-1)))})
+	kinds := core.PlanKinds()
 	return core.Plan{
-		Number: core.PlanNumber(1 + g.r.Uint32()), Title: g.text(), Body: g.text(), Status: status,
+		Number: number, Title: g.text(), Body: g.text(), Status: status, Kind: kinds[g.pick(len(kinds))], DependsOn: deps,
 		Comments: []core.PlanComment{g.comment(), g.comment()}, CreatedAt: g.instant(), UpdatedAt: g.instant(),
 		GainBound:  &core.GainBound{Share: []float64{0.05, 0.1, 3}[g.pick(3)], RelativeTo: core.GainHeadline},
 		Workstream: core.WorkstreamNumber(1 + g.pick(5)), Origin: &origin, Transitions: transitions,

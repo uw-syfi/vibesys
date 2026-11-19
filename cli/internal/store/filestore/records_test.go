@@ -114,6 +114,10 @@ func fill(m protoreflect.Message, variant int) {
 	if md.FullName() == "vibesys.cli.v1.Plan" {
 		plan := m.Interface().(*cliv1.Plan)
 		plan.Transitions[len(plan.Transitions)-1].Status = plan.Status
+		// A plan does not depend on itself: it depends on the plans numbered past its own.
+		for k := range plan.DependsOn {
+			plan.DependsOn[k] = plan.Number + uint32(k) + 1
+		}
 	}
 }
 
@@ -150,7 +154,7 @@ func TestNoFieldOfAStoredMessageIsDropped(t *testing.T) {
 			event := &cliv1.Event{}
 			fill(event.ProtoReflect(), variant)
 			event.Sequence, event.RunId = 1, "run-a"
-			want := &cliv1.EventFile{Format: 8, Event: event}
+			want := &cliv1.EventFile{Format: 9, Event: event}
 			data, err := protojson.Marshal(want)
 			if err != nil {
 				t.Fatal(err)

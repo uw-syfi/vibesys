@@ -83,6 +83,76 @@ func (PlanStatus) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_plan_proto_rawDescGZIP(), []int{0}
 }
 
+// PlanKind is what kind of change a plan makes, as its planner states it. The CLI stores it and
+// filters by it (plan list --kind), and decides nothing from it.
+type PlanKind int32
+
+const (
+	// No kind stated: every plan saved before store format 9, and one whose planner gives none.
+	PlanKind_PLAN_KIND_UNSPECIFIED PlanKind = 0
+	// Changes one kernel or operator.
+	PlanKind_PLAN_KIND_KERNEL PlanKind = 1
+	// Changes how the system runs work: scheduling, batching, memory management.
+	PlanKind_PLAN_KIND_SYSTEM PlanKind = 2
+	// Changes how data is laid out in memory or across devices.
+	PlanKind_PLAN_KIND_LAYOUT PlanKind = 3
+	// Builds or changes a model or simulator that predicts what other plans gain.
+	PlanKind_PLAN_KIND_SIMULATOR PlanKind = 4
+	// Measures or profiles to answer a question, and changes nothing that ships.
+	PlanKind_PLAN_KIND_PROBE PlanKind = 5
+	// Merges the work of other plans into one change.
+	PlanKind_PLAN_KIND_INTEGRATION PlanKind = 6
+)
+
+// Enum value maps for PlanKind.
+var (
+	PlanKind_name = map[int32]string{
+		0: "PLAN_KIND_UNSPECIFIED",
+		1: "PLAN_KIND_KERNEL",
+		2: "PLAN_KIND_SYSTEM",
+		3: "PLAN_KIND_LAYOUT",
+		4: "PLAN_KIND_SIMULATOR",
+		5: "PLAN_KIND_PROBE",
+		6: "PLAN_KIND_INTEGRATION",
+	}
+	PlanKind_value = map[string]int32{
+		"PLAN_KIND_UNSPECIFIED": 0,
+		"PLAN_KIND_KERNEL":      1,
+		"PLAN_KIND_SYSTEM":      2,
+		"PLAN_KIND_LAYOUT":      3,
+		"PLAN_KIND_SIMULATOR":   4,
+		"PLAN_KIND_PROBE":       5,
+		"PLAN_KIND_INTEGRATION": 6,
+	}
+)
+
+func (x PlanKind) Enum() *PlanKind {
+	p := new(PlanKind)
+	*p = x
+	return p
+}
+
+func (x PlanKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PlanKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_cli_v1_plan_proto_enumTypes[1].Descriptor()
+}
+
+func (PlanKind) Type() protoreflect.EnumType {
+	return &file_vibesys_cli_v1_plan_proto_enumTypes[1]
+}
+
+func (x PlanKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PlanKind.Descriptor instead.
+func (PlanKind) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_plan_proto_rawDescGZIP(), []int{1}
+}
+
 // PlanGainReference is what a plan's gain bound is a share of.
 type PlanGainReference int32
 
@@ -117,11 +187,11 @@ func (x PlanGainReference) String() string {
 }
 
 func (PlanGainReference) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_cli_v1_plan_proto_enumTypes[1].Descriptor()
+	return file_vibesys_cli_v1_plan_proto_enumTypes[2].Descriptor()
 }
 
 func (PlanGainReference) Type() protoreflect.EnumType {
-	return &file_vibesys_cli_v1_plan_proto_enumTypes[1]
+	return &file_vibesys_cli_v1_plan_proto_enumTypes[2]
 }
 
 func (x PlanGainReference) Number() protoreflect.EnumNumber {
@@ -130,7 +200,7 @@ func (x PlanGainReference) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use PlanGainReference.Descriptor instead.
 func (PlanGainReference) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_plan_proto_rawDescGZIP(), []int{1}
+	return file_vibesys_cli_v1_plan_proto_rawDescGZIP(), []int{2}
 }
 
 // PlanGainAnswer is whether every plan that counts states a bound below the share.
@@ -169,11 +239,11 @@ func (x PlanGainAnswer) String() string {
 }
 
 func (PlanGainAnswer) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_cli_v1_plan_proto_enumTypes[2].Descriptor()
+	return file_vibesys_cli_v1_plan_proto_enumTypes[3].Descriptor()
 }
 
 func (PlanGainAnswer) Type() protoreflect.EnumType {
-	return &file_vibesys_cli_v1_plan_proto_enumTypes[2]
+	return &file_vibesys_cli_v1_plan_proto_enumTypes[3]
 }
 
 func (x PlanGainAnswer) Number() protoreflect.EnumNumber {
@@ -182,7 +252,7 @@ func (x PlanGainAnswer) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use PlanGainAnswer.Descriptor instead.
 func (PlanGainAnswer) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_plan_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_cli_v1_plan_proto_rawDescGZIP(), []int{3}
 }
 
 // PlanGainBound is the most a plan could gain, as its planner states it: a share of a reference,
@@ -380,7 +450,15 @@ type Plan struct {
 	// edit or close that set a status the plan did not have. Setting the status it has changes
 	// nothing and adds none. Empty on a plan saved before store format 6; such a plan's first
 	// transition is its first status change after that, so its history before is not known.
-	Transitions   []*PlanTransition `protobuf:"bytes,11,rep,name=transitions,proto3" json:"transitions,omitempty"`
+	Transitions []*PlanTransition `protobuf:"bytes,11,rep,name=transitions,proto3" json:"transitions,omitempty"`
+	// What kind of change the plan makes, UNSPECIFIED when its planner states none. Set with --kind on
+	// plan create and plan edit; replaced, never cleared.
+	Kind PlanKind `protobuf:"varint,12,opt,name=kind,proto3,enum=vibesys.cli.v1.PlanKind" json:"kind,omitempty"`
+	// The plans this one builds on, by number, ascending and each once: plans of the same task, never
+	// this one, and never in a cycle, which vibesysd refuses. Set with --depends-on on plan create and
+	// plan edit. The plan is ready (plan list --ready) while it is open and every one of these is won.
+	// Empty on a plan saved before store format 9.
+	DependsOn     []uint32 `protobuf:"varint,13,rep,packed,name=depends_on,json=dependsOn,proto3" json:"depends_on,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -492,6 +570,89 @@ func (x *Plan) GetTransitions() []*PlanTransition {
 	return nil
 }
 
+func (x *Plan) GetKind() PlanKind {
+	if x != nil {
+		return x.Kind
+	}
+	return PlanKind_PLAN_KIND_UNSPECIFIED
+}
+
+func (x *Plan) GetDependsOn() []uint32 {
+	if x != nil {
+		return x.DependsOn
+	}
+	return nil
+}
+
+// PlanSummary names another plan in a plan's view: one it depends on, or one that depends on it.
+type PlanSummary struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Number        uint32                 `protobuf:"varint,1,opt,name=number,proto3" json:"number,omitempty"`
+	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Status        PlanStatus             `protobuf:"varint,3,opt,name=status,proto3,enum=vibesys.cli.v1.PlanStatus" json:"status,omitempty"`
+	Kind          PlanKind               `protobuf:"varint,4,opt,name=kind,proto3,enum=vibesys.cli.v1.PlanKind" json:"kind,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlanSummary) Reset() {
+	*x = PlanSummary{}
+	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlanSummary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlanSummary) ProtoMessage() {}
+
+func (x *PlanSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlanSummary.ProtoReflect.Descriptor instead.
+func (*PlanSummary) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_plan_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *PlanSummary) GetNumber() uint32 {
+	if x != nil {
+		return x.Number
+	}
+	return 0
+}
+
+func (x *PlanSummary) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *PlanSummary) GetStatus() PlanStatus {
+	if x != nil {
+		return x.Status
+	}
+	return PlanStatus_PLAN_STATUS_UNSPECIFIED
+}
+
+func (x *PlanSummary) GetKind() PlanKind {
+	if x != nil {
+		return x.Kind
+	}
+	return PlanKind_PLAN_KIND_UNSPECIFIED
+}
+
 // LinkedJob is a job a plan was linked to, with its commit's verdict against the current result
 // branch when one exists.
 type LinkedJob struct {
@@ -504,7 +665,7 @@ type LinkedJob struct {
 
 func (x *LinkedJob) Reset() {
 	*x = LinkedJob{}
-	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[4]
+	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -516,7 +677,7 @@ func (x *LinkedJob) String() string {
 func (*LinkedJob) ProtoMessage() {}
 
 func (x *LinkedJob) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[4]
+	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -529,7 +690,7 @@ func (x *LinkedJob) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LinkedJob.ProtoReflect.Descriptor instead.
 func (*LinkedJob) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_plan_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_cli_v1_plan_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *LinkedJob) GetJob() *Job {
@@ -547,16 +708,20 @@ func (x *LinkedJob) GetVerdict() *Verdict {
 }
 
 type PlanView struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Plan          *Plan                  `protobuf:"bytes,1,opt,name=plan,proto3" json:"plan,omitempty"`
-	Jobs          []*LinkedJob           `protobuf:"bytes,2,rep,name=jobs,proto3" json:"jobs,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Plan  *Plan                  `protobuf:"bytes,1,opt,name=plan,proto3" json:"plan,omitempty"`
+	Jobs  []*LinkedJob           `protobuf:"bytes,2,rep,name=jobs,proto3" json:"jobs,omitempty"`
+	// The plans in plan.depends_on, by number, with where each stands.
+	DependsOn []*PlanSummary `protobuf:"bytes,3,rep,name=depends_on,json=dependsOn,proto3" json:"depends_on,omitempty"`
+	// The plans whose depends_on names this one, by number.
+	Dependents    []*PlanSummary `protobuf:"bytes,4,rep,name=dependents,proto3" json:"dependents,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PlanView) Reset() {
 	*x = PlanView{}
-	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -568,7 +733,7 @@ func (x *PlanView) String() string {
 func (*PlanView) ProtoMessage() {}
 
 func (x *PlanView) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -581,7 +746,7 @@ func (x *PlanView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanView.ProtoReflect.Descriptor instead.
 func (*PlanView) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_plan_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_cli_v1_plan_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *PlanView) GetPlan() *Plan {
@@ -594,6 +759,20 @@ func (x *PlanView) GetPlan() *Plan {
 func (x *PlanView) GetJobs() []*LinkedJob {
 	if x != nil {
 		return x.Jobs
+	}
+	return nil
+}
+
+func (x *PlanView) GetDependsOn() []*PlanSummary {
+	if x != nil {
+		return x.DependsOn
+	}
+	return nil
+}
+
+func (x *PlanView) GetDependents() []*PlanSummary {
+	if x != nil {
+		return x.Dependents
 	}
 	return nil
 }
@@ -617,7 +796,7 @@ type PlanGainCheck struct {
 
 func (x *PlanGainCheck) Reset() {
 	*x = PlanGainCheck{}
-	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -629,7 +808,7 @@ func (x *PlanGainCheck) String() string {
 func (*PlanGainCheck) ProtoMessage() {}
 
 func (x *PlanGainCheck) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -642,7 +821,7 @@ func (x *PlanGainCheck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanGainCheck.ProtoReflect.Descriptor instead.
 func (*PlanGainCheck) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_plan_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_cli_v1_plan_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *PlanGainCheck) GetShare() float64 {
@@ -688,7 +867,7 @@ type PlanGainBlocker struct {
 
 func (x *PlanGainBlocker) Reset() {
 	*x = PlanGainBlocker{}
-	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -700,7 +879,7 @@ func (x *PlanGainBlocker) String() string {
 func (*PlanGainBlocker) ProtoMessage() {}
 
 func (x *PlanGainBlocker) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_plan_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -713,7 +892,7 @@ func (x *PlanGainBlocker) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanGainBlocker.ProtoReflect.Descriptor instead.
 func (*PlanGainBlocker) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_plan_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_cli_v1_plan_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *PlanGainBlocker) GetNumber() uint32 {
@@ -761,7 +940,7 @@ const file_vibesys_cli_v1_plan_proto_rawDesc = "" +
 	"\x0ePlanTransition\x12>\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x1a.vibesys.cli.v1.PlanStatusB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06status\x12<\n" +
-	"\x06origin\x18\x02 \x01(\v2\x1c.vibesys.cli.v1.RecordOriginB\x06\xbaH\x03\xc8\x01\x01R\x06origin\"\xd0\x05\n" +
+	"\x06origin\x18\x02 \x01(\v2\x1c.vibesys.cli.v1.RecordOriginB\x06\xbaH\x03\xc8\x01\x01R\x06origin\"\x9a\a\n" +
 	"\x04Plan\x12\x16\n" +
 	"\x06number\x18\x01 \x01(\rR\x06number\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x12\n" +
@@ -779,14 +958,29 @@ const file_vibesys_cli_v1_plan_proto_rawDesc = "" +
 	"workstream\x124\n" +
 	"\x06origin\x18\n" +
 	" \x01(\v2\x1c.vibesys.cli.v1.RecordOriginR\x06origin\x12@\n" +
-	"\vtransitions\x18\v \x03(\v2\x1e.vibesys.cli.v1.PlanTransitionR\vtransitions:\xcc\x01\xbaH\xc8\x01\x1a\xc5\x01\n" +
-	"\"plan.status_is_the_last_transition\x12:a plan that has transitions has the status of the last one\x1acthis.transitions.size() == 0 || this.transitions[this.transitions.size() - 1].status == this.status\"e\n" +
+	"\vtransitions\x18\v \x03(\v2\x1e.vibesys.cli.v1.PlanTransitionR\vtransitions\x126\n" +
+	"\x04kind\x18\f \x01(\x0e2\x18.vibesys.cli.v1.PlanKindB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04kind\x12-\n" +
+	"\n" +
+	"depends_on\x18\r \x03(\rB\x0e\xbaH\v\x92\x01\b\x18\x01\"\x04*\x02 \x00R\tdependsOn:\xaf\x02\xbaH\xab\x02\x1a\xc5\x01\n" +
+	"\"plan.status_is_the_last_transition\x12:a plan that has transitions has the status of the last one\x1acthis.transitions.size() == 0 || this.transitions[this.transitions.size() - 1].status == this.status\x1aa\n" +
+	"\x1aplan.depends_not_on_itself\x12 a plan does not depend on itself\x1a!!(this.number in this.depends_on)\"\xbc\x01\n" +
+	"\vPlanSummary\x12\x1f\n" +
+	"\x06number\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\x06number\x12\x14\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\x12>\n" +
+	"\x06status\x18\x03 \x01(\x0e2\x1a.vibesys.cli.v1.PlanStatusB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06status\x126\n" +
+	"\x04kind\x18\x04 \x01(\x0e2\x18.vibesys.cli.v1.PlanKindB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04kind\"e\n" +
 	"\tLinkedJob\x12%\n" +
 	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobR\x03job\x121\n" +
-	"\averdict\x18\x02 \x01(\v2\x17.vibesys.cli.v1.VerdictR\averdict\"c\n" +
+	"\averdict\x18\x02 \x01(\v2\x17.vibesys.cli.v1.VerdictR\averdict\"\xdc\x01\n" +
 	"\bPlanView\x12(\n" +
 	"\x04plan\x18\x01 \x01(\v2\x14.vibesys.cli.v1.PlanR\x04plan\x12-\n" +
-	"\x04jobs\x18\x02 \x03(\v2\x19.vibesys.cli.v1.LinkedJobR\x04jobs\"\x83\x05\n" +
+	"\x04jobs\x18\x02 \x03(\v2\x19.vibesys.cli.v1.LinkedJobR\x04jobs\x12:\n" +
+	"\n" +
+	"depends_on\x18\x03 \x03(\v2\x1b.vibesys.cli.v1.PlanSummaryR\tdependsOn\x12;\n" +
+	"\n" +
+	"dependents\x18\x04 \x03(\v2\x1b.vibesys.cli.v1.PlanSummaryR\n" +
+	"dependents\"\x83\x05\n" +
 	"\rPlanGainCheck\x12&\n" +
 	"\x05share\x18\x01 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\x05share\x12B\n" +
 	"\x06answer\x18\x02 \x01(\x0e2\x1e.vibesys.cli.v1.PlanGainAnswerB\n" +
@@ -809,7 +1003,15 @@ const file_vibesys_cli_v1_plan_proto_rawDesc = "" +
 	"\x12PLAN_STATUS_CHOSEN\x10\x02\x12\x13\n" +
 	"\x0fPLAN_STATUS_WON\x10\x03\x12\x16\n" +
 	"\x12PLAN_STATUS_PARKED\x10\x04\x12\x18\n" +
-	"\x14PLAN_STATUS_REJECTED\x10\x05*Z\n" +
+	"\x14PLAN_STATUS_REJECTED\x10\x05*\xb0\x01\n" +
+	"\bPlanKind\x12\x19\n" +
+	"\x15PLAN_KIND_UNSPECIFIED\x10\x00\x12\x14\n" +
+	"\x10PLAN_KIND_KERNEL\x10\x01\x12\x14\n" +
+	"\x10PLAN_KIND_SYSTEM\x10\x02\x12\x14\n" +
+	"\x10PLAN_KIND_LAYOUT\x10\x03\x12\x17\n" +
+	"\x13PLAN_KIND_SIMULATOR\x10\x04\x12\x13\n" +
+	"\x0fPLAN_KIND_PROBE\x10\x05\x12\x19\n" +
+	"\x15PLAN_KIND_INTEGRATION\x10\x06*Z\n" +
 	"\x11PlanGainReference\x12#\n" +
 	"\x1fPLAN_GAIN_REFERENCE_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cPLAN_GAIN_REFERENCE_HEADLINE\x10\x01*v\n" +
@@ -830,50 +1032,57 @@ func file_vibesys_cli_v1_plan_proto_rawDescGZIP() []byte {
 	return file_vibesys_cli_v1_plan_proto_rawDescData
 }
 
-var file_vibesys_cli_v1_plan_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_vibesys_cli_v1_plan_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_vibesys_cli_v1_plan_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_vibesys_cli_v1_plan_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_vibesys_cli_v1_plan_proto_goTypes = []any{
 	(PlanStatus)(0),               // 0: vibesys.cli.v1.PlanStatus
-	(PlanGainReference)(0),        // 1: vibesys.cli.v1.PlanGainReference
-	(PlanGainAnswer)(0),           // 2: vibesys.cli.v1.PlanGainAnswer
-	(*PlanGainBound)(nil),         // 3: vibesys.cli.v1.PlanGainBound
-	(*PlanComment)(nil),           // 4: vibesys.cli.v1.PlanComment
-	(*PlanTransition)(nil),        // 5: vibesys.cli.v1.PlanTransition
-	(*Plan)(nil),                  // 6: vibesys.cli.v1.Plan
-	(*LinkedJob)(nil),             // 7: vibesys.cli.v1.LinkedJob
-	(*PlanView)(nil),              // 8: vibesys.cli.v1.PlanView
-	(*PlanGainCheck)(nil),         // 9: vibesys.cli.v1.PlanGainCheck
-	(*PlanGainBlocker)(nil),       // 10: vibesys.cli.v1.PlanGainBlocker
-	(*timestamppb.Timestamp)(nil), // 11: google.protobuf.Timestamp
-	(*RecordOrigin)(nil),          // 12: vibesys.cli.v1.RecordOrigin
-	(*Job)(nil),                   // 13: vibesys.cli.v1.Job
-	(*Verdict)(nil),               // 14: vibesys.cli.v1.Verdict
+	(PlanKind)(0),                 // 1: vibesys.cli.v1.PlanKind
+	(PlanGainReference)(0),        // 2: vibesys.cli.v1.PlanGainReference
+	(PlanGainAnswer)(0),           // 3: vibesys.cli.v1.PlanGainAnswer
+	(*PlanGainBound)(nil),         // 4: vibesys.cli.v1.PlanGainBound
+	(*PlanComment)(nil),           // 5: vibesys.cli.v1.PlanComment
+	(*PlanTransition)(nil),        // 6: vibesys.cli.v1.PlanTransition
+	(*Plan)(nil),                  // 7: vibesys.cli.v1.Plan
+	(*PlanSummary)(nil),           // 8: vibesys.cli.v1.PlanSummary
+	(*LinkedJob)(nil),             // 9: vibesys.cli.v1.LinkedJob
+	(*PlanView)(nil),              // 10: vibesys.cli.v1.PlanView
+	(*PlanGainCheck)(nil),         // 11: vibesys.cli.v1.PlanGainCheck
+	(*PlanGainBlocker)(nil),       // 12: vibesys.cli.v1.PlanGainBlocker
+	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
+	(*RecordOrigin)(nil),          // 14: vibesys.cli.v1.RecordOrigin
+	(*Job)(nil),                   // 15: vibesys.cli.v1.Job
+	(*Verdict)(nil),               // 16: vibesys.cli.v1.Verdict
 }
 var file_vibesys_cli_v1_plan_proto_depIdxs = []int32{
-	1,  // 0: vibesys.cli.v1.PlanGainBound.relative_to:type_name -> vibesys.cli.v1.PlanGainReference
-	11, // 1: vibesys.cli.v1.PlanComment.at:type_name -> google.protobuf.Timestamp
+	2,  // 0: vibesys.cli.v1.PlanGainBound.relative_to:type_name -> vibesys.cli.v1.PlanGainReference
+	13, // 1: vibesys.cli.v1.PlanComment.at:type_name -> google.protobuf.Timestamp
 	0,  // 2: vibesys.cli.v1.PlanTransition.status:type_name -> vibesys.cli.v1.PlanStatus
-	12, // 3: vibesys.cli.v1.PlanTransition.origin:type_name -> vibesys.cli.v1.RecordOrigin
+	14, // 3: vibesys.cli.v1.PlanTransition.origin:type_name -> vibesys.cli.v1.RecordOrigin
 	0,  // 4: vibesys.cli.v1.Plan.status:type_name -> vibesys.cli.v1.PlanStatus
-	4,  // 5: vibesys.cli.v1.Plan.comments:type_name -> vibesys.cli.v1.PlanComment
-	11, // 6: vibesys.cli.v1.Plan.created_at:type_name -> google.protobuf.Timestamp
-	11, // 7: vibesys.cli.v1.Plan.updated_at:type_name -> google.protobuf.Timestamp
-	3,  // 8: vibesys.cli.v1.Plan.gain_bound:type_name -> vibesys.cli.v1.PlanGainBound
-	12, // 9: vibesys.cli.v1.Plan.origin:type_name -> vibesys.cli.v1.RecordOrigin
-	5,  // 10: vibesys.cli.v1.Plan.transitions:type_name -> vibesys.cli.v1.PlanTransition
-	13, // 11: vibesys.cli.v1.LinkedJob.job:type_name -> vibesys.cli.v1.Job
-	14, // 12: vibesys.cli.v1.LinkedJob.verdict:type_name -> vibesys.cli.v1.Verdict
-	6,  // 13: vibesys.cli.v1.PlanView.plan:type_name -> vibesys.cli.v1.Plan
-	7,  // 14: vibesys.cli.v1.PlanView.jobs:type_name -> vibesys.cli.v1.LinkedJob
-	2,  // 15: vibesys.cli.v1.PlanGainCheck.answer:type_name -> vibesys.cli.v1.PlanGainAnswer
-	10, // 16: vibesys.cli.v1.PlanGainCheck.blockers:type_name -> vibesys.cli.v1.PlanGainBlocker
-	0,  // 17: vibesys.cli.v1.PlanGainBlocker.status:type_name -> vibesys.cli.v1.PlanStatus
-	3,  // 18: vibesys.cli.v1.PlanGainBlocker.gain_bound:type_name -> vibesys.cli.v1.PlanGainBound
-	19, // [19:19] is the sub-list for method output_type
-	19, // [19:19] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	5,  // 5: vibesys.cli.v1.Plan.comments:type_name -> vibesys.cli.v1.PlanComment
+	13, // 6: vibesys.cli.v1.Plan.created_at:type_name -> google.protobuf.Timestamp
+	13, // 7: vibesys.cli.v1.Plan.updated_at:type_name -> google.protobuf.Timestamp
+	4,  // 8: vibesys.cli.v1.Plan.gain_bound:type_name -> vibesys.cli.v1.PlanGainBound
+	14, // 9: vibesys.cli.v1.Plan.origin:type_name -> vibesys.cli.v1.RecordOrigin
+	6,  // 10: vibesys.cli.v1.Plan.transitions:type_name -> vibesys.cli.v1.PlanTransition
+	1,  // 11: vibesys.cli.v1.Plan.kind:type_name -> vibesys.cli.v1.PlanKind
+	0,  // 12: vibesys.cli.v1.PlanSummary.status:type_name -> vibesys.cli.v1.PlanStatus
+	1,  // 13: vibesys.cli.v1.PlanSummary.kind:type_name -> vibesys.cli.v1.PlanKind
+	15, // 14: vibesys.cli.v1.LinkedJob.job:type_name -> vibesys.cli.v1.Job
+	16, // 15: vibesys.cli.v1.LinkedJob.verdict:type_name -> vibesys.cli.v1.Verdict
+	7,  // 16: vibesys.cli.v1.PlanView.plan:type_name -> vibesys.cli.v1.Plan
+	9,  // 17: vibesys.cli.v1.PlanView.jobs:type_name -> vibesys.cli.v1.LinkedJob
+	8,  // 18: vibesys.cli.v1.PlanView.depends_on:type_name -> vibesys.cli.v1.PlanSummary
+	8,  // 19: vibesys.cli.v1.PlanView.dependents:type_name -> vibesys.cli.v1.PlanSummary
+	3,  // 20: vibesys.cli.v1.PlanGainCheck.answer:type_name -> vibesys.cli.v1.PlanGainAnswer
+	12, // 21: vibesys.cli.v1.PlanGainCheck.blockers:type_name -> vibesys.cli.v1.PlanGainBlocker
+	0,  // 22: vibesys.cli.v1.PlanGainBlocker.status:type_name -> vibesys.cli.v1.PlanStatus
+	4,  // 23: vibesys.cli.v1.PlanGainBlocker.gain_bound:type_name -> vibesys.cli.v1.PlanGainBound
+	24, // [24:24] is the sub-list for method output_type
+	24, // [24:24] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_plan_proto_init() }
@@ -889,8 +1098,8 @@ func file_vibesys_cli_v1_plan_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_plan_proto_rawDesc), len(file_vibesys_cli_v1_plan_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   8,
+			NumEnums:      4,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
