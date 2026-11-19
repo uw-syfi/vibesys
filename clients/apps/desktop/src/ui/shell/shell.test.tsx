@@ -324,6 +324,24 @@ describe('the window shell', () => {
     screen.unmount();
   });
 
+  it('returns to the New run button when Escape backs out of the New run page', () => {
+    const {screen} = open();
+    const pressEscape = (): void => {
+      const View = document.defaultView as unknown as {KeyboardEvent: typeof KeyboardEvent};
+      act(() => {
+        document.dispatchEvent(new View.KeyboardEvent('keydown', {key: 'Escape'}));
+      });
+    };
+    const newRun = screen.control('New run');
+    act(() => newRun.focus());
+    screen.press(newRun);
+    expect(screen.container.querySelector('h1')?.textContent).toBe('New run');
+    pressEscape();
+    expect(screen.container.querySelector('h1')?.textContent).not.toBe('New run');
+    expect(document.activeElement?.textContent).toBe('New run');
+    screen.unmount();
+  });
+
   it('every navigation intent but the keyboard back and the ideas link is sent by a control the screens show', () => {
     const {screen, log} = open();
     const sent = (): Set<NavigationKind> => new Set(log.map(action => action.type));
