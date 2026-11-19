@@ -390,7 +390,7 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, r lifecycle.Launch
 	}
 	launch := lifecycle.Launch{Repository: string(scope.Repository()), Task: string(scope.Task()), Job: job.ID, Spec: spec, OutputBase: base, Allocation: allocation, AllocationEnterBy: enterBy, GPUs: r.GPUs}
 	if spec.Settings.Kind() != core.JobCommand {
-		plan, err := a.planFlow(ctx, st, scope, job, fingerprint)
+		plan, err := a.planFlow(ctx, st, scope, job, fingerprint, r.GPUs)
 		if err != nil {
 			return nil, false, err
 		}

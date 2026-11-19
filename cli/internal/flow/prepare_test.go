@@ -210,3 +210,73 @@ func TestAMeasureJobsPlanFollowsTheCacheRulesOverEverySavedState(t *testing.T) {
 		}
 	}
 }
+
+// A pass is a claim about the number of devices its check ran on, and a measure given the whole of
+// a pool of n runs its check on all n. Over every pool size, every count a check may ask of it and
+// every grant, a measure links a counted pass exactly when the check asked for the pool's size and
+// the measure holds that pool whole; a pass saved with no count (an earlier measure's own check)
+// it links whatever its grant; and one that rechecks links none.
+func TestAMeasureLinksACountedPassExactlyWhenItRanOnAsManyDevicesAsTheMeasuresCheckWould(t *testing.T) {
+	tk := theTask()
+	gpuCount := func(n int) core.GPUCount {
+		c, err := core.ParseGPUCount(uint32(n), "test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	passOf := func(id core.JobID, n core.GPUCount) core.Result {
+		key, err := core.NewJobKey(core.KeyInputs{
+			Kind: core.JobCheck, Commit: commit, TaskVersion: tk.Version, Environment: print_,
+			Settings: core.CheckSettings{}, SchemaVersion: core.SchemaVersion, GPUs: n,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return core.Result{Job: id, Key: key, Commit: commit, RecordedAt: epoch, Outcome: core.CheckOutcome{}}
+	}
+	uncounted := passOf("u", core.GPUCount{})
+	for size := 1; size <= core.MaxPoolSize; size++ {
+		pool := gpuCount(size)
+		all := make([]uint32, size)
+		for d := range all {
+			all[d] = uint32(d)
+		}
+		devices, err := core.ParseDeviceGroup(all, pool, "test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		grants := map[string]*core.Grant{
+			"no grant":           nil,
+			"the whole pool":     {Pool: "gpu:local", Size: pool, Devices: devices, Whole: true, Source: core.GrantByCLI},
+			"a cluster's choice": {Pool: "gpu:node", Size: pool, Whole: true, Source: core.GrantByCluster},
+		}
+		for asked := 1; asked <= size; asked++ {
+			counted := passOf("c", gpuCount(asked))
+			for name, grant := range grants {
+				for _, recheck := range []bool{false, true} {
+					job := queued(t, core.MeasureSettings{Samples: 3, Recheck: recheck}, tk, print_)
+					label := fmt.Sprintf("pool of %d, %s, a pass of --gpus %d, recheck %v", size, name, asked, recheck)
+					p, err := flow.Prepare(flow.Starting{Job: job, Task: tk, Environment: print_, Saved: []core.Result{counted}, GPUs: grant})
+					if err != nil {
+						t.Fatal(err)
+					}
+					want := core.JobID("")
+					if grant != nil && asked == size && !recheck {
+						want = "c"
+					}
+					if p.CheckPass != want {
+						t.Fatalf("%s: links %q, want %q", label, p.CheckPass, want)
+					}
+					p, err = flow.Prepare(flow.Starting{Job: job, Task: tk, Environment: print_, Saved: []core.Result{counted, uncounted}, GPUs: grant})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if want := map[bool]core.JobID{false: "u", true: ""}[recheck]; p.CheckPass != want {
+						t.Fatalf("%s, beside a pass with no count: links %q, want %q", label, p.CheckPass, want)
+					}
+				}
+			}
+		}
+	}
+}
