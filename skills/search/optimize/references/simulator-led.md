@@ -125,7 +125,7 @@ When the operator approves building it during the run:
 3. **Accept on the cheapest evidence that settles the plan**, rung by rung, as
    [acceptance-ladder.md](acceptance-ladder.md) says for the plan's kind. A rung that fails sends
    the plan back to its worker, or parks it. Do not climb past the rung that settles the plan.
-4. **Spend full measurements only on integrations.** Workers submit no `submit measure`, and no
+4. **Spend full measurements only on integrations.** Workers submit no measure job, and no
    `submit check` of the task's full check. An accepted plan reaches the head only through an
    integration plan ([integration.md](integration.md)). An integration may hold one part. Its
    measure takes the task's declared `samples` (leave out `--samples`). `compare` and `promote`
