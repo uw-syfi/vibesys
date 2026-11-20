@@ -54,6 +54,32 @@ uv run python -m launcher presets/unified_smoke.yaml --no-gpu   # three requests
 For Trainium use the `[trainium]` commit: trn2 support is on an unmerged pull request, so
 `main` cannot simulate it. Put the checkout outside every repository an agent optimizes.
 
+## Adding a model or hardware
+
+A checkout simulates only the models and hardware it has presets for. Adding one is
+ServingStudio development, done here, before the run, with the user's approval; never as a plan
+of an optimization that needs it to lead. It takes five things, and the second costs the most:
+
+1. **The model's structure:** the operations of one forward pass and their shapes, split across
+   the devices the way the engine will split them. A model close to one already supported is
+   mostly configuration; a new architecture on a new device is a new architecture module.
+2. **A measured time for every kernel at every shape the workload reaches** (batch sizes,
+   context lengths, prefill chunks): microbenchmarks of single operations on the hardware, not a
+   serving engine. The preset lists the rows it needs and refuses a workload while one is
+   missing; measure them, never guess them.
+3. **The engine's scheduling:** batching, chunked prefill, speculative decoding, KV admission.
+   Mostly settings of what the simulator already models.
+4. **The workload:** the benchmark's trace, converted to the simulator's format.
+5. **A check against measured numbers:** reproduce measured step times of some engine on this
+   hardware (an earlier port, a public engine), on points held out of any fit. That says the
+   simulator can rank designs. Its absolute numbers wait for a calibration
+   ([calibration.md](calibration.md)), which needs a measured engine; it need not be the one the
+   run will build.
+
+It is ready to lead an optimization when step 1 of the skill finds a match for the task and a
+simulation of the task's workload runs to the end with no missing row. Say which of the five is
+missing when it is not.
+
 ## Hand it to the agents
 
 Export the variables in the environment the agents inherit, as absolute values:

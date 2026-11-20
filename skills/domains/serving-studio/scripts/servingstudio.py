@@ -259,6 +259,9 @@ def _summary_requests(record: dict[str, object]) -> tuple[object, object] | None
 
 
 RECORD_KINDS = ("calibration", "study")
+# What a calibration was fitted on: an official measure of the head (the default when absent),
+# or a timed run of the head's engine on the device (a command job): a provisional record.
+FITTED_SOURCES = ("measure", "timed-run")
 RECORD_ATTEMPTS = 20
 _HEX = frozenset("0123456789abcdef")
 
@@ -338,7 +341,10 @@ def check_calibration(record: object) -> dict:
     metrics = set()
     for i, m in enumerate(_items(r["fitted_on"], "fitted_on")):
         where = f"fitted_on[{i}]"
-        _fields(m, where, {"commit", "job", "metric", "measured", "timeline"})
+        required = {"commit", "job", "metric", "measured", "timeline"}
+        _fields(m, where, required, frozenset({"source"}))
+        if m.get("source", "measure") not in FITTED_SOURCES:
+            raise RecordError(f"{where}.source: expected one of {', '.join(FITTED_SOURCES)}")
         _revision(m["commit"], f"{where}.commit")
         _text(m["job"], f"{where}.job")
         metrics.add(_text(m["metric"], f"{where}.metric"))

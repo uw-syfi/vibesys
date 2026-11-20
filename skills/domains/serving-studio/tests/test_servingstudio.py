@@ -367,6 +367,14 @@ def test_calibrations_are_appended_each_superseding_the_latest(
     assert json.loads((tmp_path / "r" / "calibration-001.json").read_text()) == CALIBRATION
 
 
+@pytest.mark.parametrize("source", ["measure", "timed-run"])
+def test_a_calibration_says_what_it_was_fitted_on(tmp_path: Path, source: str) -> None:
+    record = {**CALIBRATION, "fitted_on": [{**FITTED_ON, "source": source}]}
+
+    assert _keep(tmp_path, "calibration", record) == 0
+    assert json.loads((tmp_path / "r" / "calibration-001.json").read_text()) == record
+
+
 @given(count=st.integers(min_value=1, max_value=12))
 def test_records_are_numbered_in_order_and_never_replaced(count: int) -> None:
     with tempfile.TemporaryDirectory() as scratch:
@@ -399,6 +407,7 @@ def test_a_calibration_missing_a_key_is_refused_naming_it(
         ("calibration", {"residual_after": {}}, "residual_after"),
         ("calibration", {"simulator": {"checkout": "/s", "revision": "main"}}, "revision"),
         ("calibration", {"fitted_on": [{**FITTED_ON, "timeline": ""}]}, "fitted_on[0].timeline"),
+        ("calibration", {"fitted_on": [{**FITTED_ON, "source": "guess"}]}, "fitted_on[0].source"),
         ("study", {"axes": [{"name": "a", "values": [1, 2], "assumption": "x"}]}, "axes[0]"),
         ("study", {"axes": [{"name": "a", "values": [1], "assumption": None}]}, "no axis"),
         ("study", {"scenarios": [FASTER_MOE, FASTER_MOE]}, "today's kernels"),

@@ -35,7 +35,8 @@ So, for each disagreement the timeline shows, ask which it is:
 ## Fit
 
 After each **official measurement** of the head (the base's measure at the start, and the
-measure of each promoted candidate, which becomes the head), and only with its timeline:
+measure of each promoted candidate, which becomes the head), and only with its timeline (before
+the first one: [Before the first official measurement](#before-the-first-official-measurement)):
 
 1. Take the newest record (below) and simulate the measured commit with its factors: the
    residual of that run against the new measurement is the new record's `residual_before`. It
@@ -63,6 +64,21 @@ Re-fitting is never editing: each official measurement adds a record that names 
 supersedes, and earlier records stay as they were, so a frozen prediction's calibration can
 always be read back.
 
+## Before the first official measurement
+
+A head that has never been measured (a from-scratch engine, or a run whose first measure is hours
+away) can still have a **provisional** calibration, fitted on a timed run of its engine on the
+device: a command job that drives the engine's own decode and prefill steps at known batch
+shapes and logs each step's wall time. Fit it as above, with three differences:
+
+- Each `fitted_on` entry names the command job and says `"source": "timed-run"`; `measured` is
+  the phase total it timed, and `metric` names that phase (for example `decode_step_ms_b8`).
+- Fit only kernel-kind time scales. A timed run has no workload around it, so it says nothing
+  about queueing, admission or the host's share of a served step: those stay in the residual.
+- A prediction made with it says `provisional` in its `Model` line. The first official
+  measurement's fit supersedes it, and its `residual_before` is how the provisional model's
+  predictions are judged.
+
 ## Where records live
 
 In `SERVINGSTUDIO_RECORDS`, one directory per task, outside every repository and never under
@@ -84,7 +100,8 @@ names into `presets/` there, since a scratch directory may be cleared.
  "workload": "<the benchmark's workload, as the Prediction block's Workload line>",
  "fitted_on": [{"commit": "<measured commit>", "job": "<measure job id>",
                 "metric": "<metric>", "measured": 194.0,
-                "timeline": "<the step log or profile the factors were fitted on>"}],
+                "timeline": "<the step log or profile the factors were fitted on>",
+                "source": "measure | timed-run"}],
  "factors": {"<override path>": 1.12},
  "residual_before": {"<metric>": 0.18},
  "residual_after": {"<metric>": -0.02},
@@ -95,11 +112,11 @@ names into `presets/` there, since a scratch directory may be cleared.
 }
 ```
 
-Residuals are signed fractions, (simulated - measured) / measured, one per metric of
-`fitted_on`. `pinned_by` says which pin chose the revision (Setup); leave it out when the
-checkout is at neither. The wrapper refuses a missing or unknown key, a factor that is not a
-positive number, a residual missing for a fitted metric, and a `supersedes` that is not the
-newest calibration in the directory, naming the key.
+Residuals are signed fractions, (simulated - measured) / measured, one per metric of `fitted_on`.
+`source` is `measure` when left out. `pinned_by` says which pin chose the revision (Setup); leave
+it out when the checkout is at neither. The wrapper refuses a missing or unknown key, a factor that
+is not a positive number, a residual missing for a fitted metric, and a `supersedes` that is not
+the newest calibration in the directory, naming the key.
 
 ## Using it
 
