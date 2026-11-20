@@ -1,0 +1,16 @@
+# The ServingStudio revisions this skill was written against. A local install checks out one of
+# these; another revision works too, but every prediction then names the revision it came from.
+# ServingStudio publishes no packages or release tags, so a commit is the only stable name.
+
+[workspace]
+# The ServingStudio meta-repository: it pins compatible Sim, Agent and UI commits as submodules.
+repository = "https://github.com/SyFI-ServingStudio/ServingStudio"
+commit = "9a6654b9c1a73260624c478607359bf3ed9cf0c7"
+sim_commit = "5c7cd27b473613ea773661c6d87dd6fe757f1eed"
+
+[trainium]
+# Trainium2 (trn2) and Qwen3.8-Flash-Next live only on ServingStudioSim pull request 107, which
+# is not merged. This is its head, the revision the Trainium campaign used.
+repository = "https://github.com/SyFI-ServingStudio/ServingStudioSim"
+commit = "e3ace30520b20a116d9df497f2f56bdfca300d51"
+pull_request = 107

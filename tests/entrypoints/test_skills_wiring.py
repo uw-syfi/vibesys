@@ -351,6 +351,8 @@ def test_all_repository_skill_metadata_is_valid() -> None:
         for item in validate_skill_tree(PROJECT_ROOT / "skills" / "domains")
     }
     assert metadata["serving-systems"].domains == (DomainName.LLM_SERVING,)
+    assert metadata["serving-studio"].domains == (DomainName.LLM_SERVING,)
+    assert metadata["serving-studio"].backends is None
     assert metadata["custom-rpc-optimization"].domains == (DomainName.MICROSERVICES,)
     assert metadata["custom-rpc-optimization"].backends is None
     assert metadata["kernel-correctness"].domains == (DomainName.KERNEL_WRITING,)

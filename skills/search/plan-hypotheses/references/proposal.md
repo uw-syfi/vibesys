@@ -13,6 +13,9 @@ Expected gain: <metric change as a range, with the arithmetic: share of time tou
   removed, capped by the headroom of that part>. Say "unattributed" if the share is not measured.
 Gain bound: <the most it could gain as a share of the headline, the number you set with
   `--gain-bound`, and the headroom or ceiling it comes from>
+Prediction (only with a simulator a domain skill offers): <the simulated value of the change,
+  the head's simulated and measured values, and the provenance, in the block the domain skill
+  gives. A what-if that scales a cost is a bound, not a prediction>
 Confidence: <low | medium | high>, and why. Mark bets.
 Files touched: <so the lead can check that chosen plans do not overlap>
 Order: <must follow or precede which other plan, if they share code>

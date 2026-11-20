@@ -14,6 +14,10 @@ The domain skills ship in their own plugins. Read `[agent] domain` and `backends
 | `domain = "kernel-writing"`, any other backend | any kernels plugin, such as `vibesys-kernels-cuda` | `kernel-performance` |
 | `domain = "cli-tools"` | `vibesys-cli-tools` | `cli-tool-optimization` |
 
+`vibesys-llm-serving` also holds `serving-studio`, the ServingStudio simulator's predictions. It
+is optional: a task runs without it, and it needs a simulator set up on the host (its Setup
+section). Name it in planner and profiler briefs, not in worker, combiner or judge briefs.
+
 A `cli-tools` task targets the `cpu` backend, so it needs `vibesys-cli-tools` and no backend
 plugin. A `llm-serving` task on backend `trainium` needs both `vibesys-llm-serving` and
 `vibesys-kernels-trainium`, and on backend `rocm` both `vibesys-llm-serving` and
