@@ -59,8 +59,9 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    A domain skill that needs a tool of its own says how to check it (the `serving-studio`
    simulator: its Setup section). Check it once here; if it is missing, go on without it, say so
    in your first report, and never install it during the run. If it answers, name its
-   variables (`SERVINGSTUDIO_API`, `SERVINGSTUDIO_SIM`) with their values in every planner and
-   profiler brief.
+   variables (`SERVINGSTUDIO_API`, `SERVINGSTUDIO_SIM`, `SERVINGSTUDIO_RECORDS`) with their
+   values in every planner and profiler brief, and after each measure of a new head ask a
+   profiler to re-fit the simulator's calibration on it, as the skill says.
 4. Create or resume the optimization (`vibesys:state`). A new one first needs a base that passes
    its check: run `vibesys-cli submit check <base> --wait` (with `--gpus N` for a task that needs
    GPUs, as `vibesys:measure` says; a pass is saved and later measures reuse

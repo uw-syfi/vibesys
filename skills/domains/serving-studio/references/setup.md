@@ -30,8 +30,20 @@ Needs Linux, git, uv, Python 3.12, a Rust toolchain, `just`, a C/C++ toolchain a
 x86-64 (ServingStudioSim's README lists them). No GPU is needed to simulate over the bundled
 `profile.db`; filling missing kernel rows needs the hardware.
 
+The pin is the task's when it names one, otherwise this skill's:
+
+```toml
+# .vibesys/tasks/<task>/vibesys.input.toml
+[agent.tool_revisions]
+servingstudio-sim = "<ServingStudioSim commit>"
+```
+
+The run checks the table (a lower-case tool name, a 7 to 64 character hexadecimal commit) and
+does nothing else with it, in task schema 0.1 and 0.2 alike. Tasks that need different
+revisions need one checkout each.
+
 ```bash
-PIN=<commit from assets/pins.toml>
+PIN=<the task's servingstudio-sim, or a commit from assets/pins.toml>
 git clone --recurse-submodules https://github.com/SyFI-ServingStudio/ServingStudioSim.git
 cd ServingStudioSim && git checkout "$PIN" && git submodule update --init --recursive --checkout
 just sync
@@ -51,7 +63,11 @@ export SERVINGSTUDIO_API=<endpoint>      # omit to use the hosted service
 export SERVINGSTUDIO_SIM=<absolute path>  # only with a local checkout
 ```
 
-A lead passes both to every subagent it briefs that will use this skill, as it passes its other
+With a local checkout, the lead also creates the task's records directory once and names it as
+`SERVINGSTUDIO_RECORDS` ([calibration.md](calibration.md#where-records-live)); it is kept
+across runs.
+
+A lead passes these to every subagent it briefs that will use this skill, as it passes its other
 tool paths. Where the agents run under a host that clears its environment (the VibeSys
 orchestrator keeps only a fixed list of variables), the operator states the values in the
 run's brief and the lead passes them on; a variable set in the operator's shell does not arrive.

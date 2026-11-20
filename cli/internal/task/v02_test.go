@@ -150,6 +150,9 @@ func TestWhatSchema02RefusesIsNamed(t *testing.T) {
 		{"an unknown agent key", `[environment]`, "[agent]\ndomain = \"x\"\nmodel = \"y\"\n[environment]", `"agent.model"`},
 		{"an agent of no domain", `[environment]`, "[agent]\ninterface = \"service\"\n[environment]", "domain"},
 		{"an unknown interface", `[environment]`, "[agent]\ndomain = \"x\"\ninterface = \"rpc\"\n[environment]", "interface"},
+		{"a tool name that is not one", `[environment]`, "[agent]\ndomain = \"x\"\n[agent.tool_revisions]\nServing_Studio = \"e3ace30\"\n[environment]", "tool_revisions"},
+		{"a tool revision that is not a commit", `[environment]`, "[agent]\ndomain = \"x\"\n[agent.tool_revisions]\nservingstudio-sim = \"main\"\n[environment]", "tool_revisions"},
+		{"tool revisions that are not a table", `[environment]`, "[agent]\ndomain = \"x\"\ntool_revisions = \"e3ace30\"\n[environment]", "tool_revisions"},
 		{"args", `timeout_seconds = 1800`, "timeout_seconds = 1800\nargs = [\"x\"]", "[accuracy] args"},
 		{"check beside accuracy", `[environment]`, "[check]\ncommand = [\"x\"]\n[environment]", "not both"},
 		{"measure beside benchmark", `[environment]`, "[measure]\ncommand = [\"x\"]\n[environment]", "not both"},
@@ -238,6 +241,8 @@ when = 2026-01-01
 [environment]
 needs = ["kubernetes"]
 docker_in_docker = true
+[agent.tool_revisions]
+servingstudio-sim = "e3ace30520b20a116d9df497f2f56bdfca300d51"
 `
 	for name, c := range map[string]struct{ manifest, objectives string }{
 		"json result":         {jsonManifest + extras, objectives},

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import tomllib
 from enum import StrEnum
@@ -48,6 +49,7 @@ MANIFEST_NAME = "vibesys.input.toml"
 SCHEMA_VERSION = "0.1"
 _MIN_COMMIT_HASH_LENGTH = 7
 _MAX_COMMIT_HASH_LENGTH = 64
+_TOOL_NAME = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
 PROTOCOL_OUTPUT_FLAG = "--vs-output"
 _MISSING_EVALUATOR_RESOURCES_MESSAGE = (
     "VibeSys evaluator package resources are not available; install a complete "
@@ -176,15 +178,7 @@ class WorkspaceSource(BaseModel):
     @field_validator("commit")
     @classmethod
     def _valid_commit(cls, value: str) -> str:
-        if not value:
-            message = "commit must be non-empty"
-            raise ValueError(message)
-        if not (_MIN_COMMIT_HASH_LENGTH <= len(value) <= _MAX_COMMIT_HASH_LENGTH) or any(
-            c not in "0123456789abcdefABCDEF" for c in value
-        ):
-            message = "commit must be a 7-64 character hexadecimal hash"
-            raise ValueError(message)
-        return value.lower()
+        return _commit_hash(value, "commit")
 
     @field_validator("dest")
     @classmethod
@@ -200,6 +194,19 @@ class WorkspaceSource(BaseModel):
             message = "dest must not contain empty, current, or parent path components"
             raise ValueError(message)
         return value
+
+
+def _commit_hash(value: str, what: str) -> str:
+    """``value`` as a lower-case commit hash; raise naming ``what`` when it is not one."""
+    if not value:
+        message = f"{what} must be non-empty"
+        raise ValueError(message)
+    if not (_MIN_COMMIT_HASH_LENGTH <= len(value) <= _MAX_COMMIT_HASH_LENGTH) or any(
+        c not in "0123456789abcdefABCDEF" for c in value
+    ):
+        message = f"{what} must be a 7-64 character hexadecimal hash"
+        raise ValueError(message)
+    return value.lower()
 
 
 class EvaluatorInput(BaseModel):
@@ -336,6 +343,24 @@ class AgentInput(BaseModel):
     interface: Literal["inprocess", "service"] | None = None
     """How the evaluator reaches the candidate; the ``--interface`` flag overrides it, and
     ``inprocess`` is the default when neither says."""
+    tool_revisions: dict[str, str] = Field(default_factory=dict)
+    """``[agent.tool_revisions]``: the commit of each domain tool the task needs, by the tool's
+    name (``servingstudio-sim = "<commit>"``). Held as data for the domain skill that uses the
+    tool, which reads it before its own default pin; the run never reads it."""
+
+    @field_validator("tool_revisions")
+    @classmethod
+    def _valid_tool_revisions(cls, value: dict[str, str]) -> dict[str, str]:
+        checked: dict[str, str] = {}
+        for name, commit in value.items():
+            if not _TOOL_NAME.fullmatch(name):
+                message = (
+                    f"{name!r} is not a tool name: lower-case letters and digits, "
+                    "words joined by single hyphens"
+                )
+                raise ValueError(message)
+            checked[name] = _commit_hash(commit, name)
+        return checked
 
 
 class ProfileGuidedInput(BaseModel):
@@ -623,6 +648,12 @@ def render_input_manifest(manifest: InputManifest) -> str:
     ]
     if manifest.agent.interface is not None:
         lines.append(f"interface = {_toml_string(manifest.agent.interface)}")
+    if manifest.agent.tool_revisions:
+        lines += ["", "[agent.tool_revisions]"]
+        lines += [
+            f"{name} = {_toml_string(commit)}"
+            for name, commit in manifest.agent.tool_revisions.items()
+        ]
     _append_profile_guided(lines, manifest)
     _append_build(lines, manifest)
     _append_accuracy(lines, manifest)

@@ -69,6 +69,10 @@ metric = "requests_per_sec"       # the top-level field of that JSON file
   command-line program (with `backends = ["cpu"]`), `kernel-writing` for a compute kernel.
 - Accepted and not read by the CLI: `[agent]`, `[profile]`, `[profile_guided]`, `[resources]`,
   `[workspace]`, `[plan]`, `[[comparison]]`, and `[catalogue]` except `[catalogue.hardware]`.
+- `[agent.tool_revisions]` (optional) pins the commit of a tool a domain skill uses, by the
+  tool's name, when the task needs another revision than the skill's own pin, such as a
+  simulator branch that supports the task's model (`servingstudio-sim = "<commit>"`). The domain
+  skill reads it; nothing else does.
 - `[catalogue.hardware]` (`accelerator`, `count`, `vendor`) is the task's hardware budget, which
   `vibesys-cli task card <task>` prints. The accelerator is a name from the CLI's registry, and
   `task card` refuses an unknown one, naming the file and the key. Nothing stops a candidate from

@@ -2,9 +2,10 @@
 name: serving-studio
 description: >-
   Predict LLM serving performance with the ServingStudio simulator before
-  spending hardware time: reproduce the measured head, attribute simulated
-  time to kernels and phases, run what-ifs, and freeze a prediction with its
-  provenance in a plan so the measurement can confirm or refute it. Use when
+  spending hardware time: reproduce and calibrate against the measured head,
+  attribute simulated time to kernels and phases, run what-ifs and design
+  studies, and freeze a prediction with its provenance in a plan so the
+  measurement can confirm or refute it. Use when
   planning or profiling an LLM serving optimization and a ServingStudio
   endpoint or checkout is set up, or when asked to set one up.
 ---
@@ -23,12 +24,14 @@ prediction missed. A worker does not need it.
 
 ## Setup: once per host, never per agent
 
-You use what is installed; you install nothing. Two variables say what is:
+You use what is installed; you install nothing. These variables say what is:
 
 - `SERVINGSTUDIO_API`: a ServingStudio public API endpoint. Unset means the hosted service, which
   covers only its published GPU presets.
 - `SERVINGSTUDIO_SIM`: the absolute path of a built ServingStudioSim checkout, for what the
   hosted service does not offer (Trainium, a model it does not publish, what-if knobs).
+- `SERVINGSTUDIO_RECORDS`: the task's directory of calibration and design-study records, which
+  outlive the run ([calibration.md](references/calibration.md#where-records-live)).
 
 Check before the first use, and put the line it prints in your evidence:
 
@@ -36,6 +39,13 @@ Check before the first use, and put the line it prints in your evidence:
 python3 <skill-dir>/scripts/servingstudio.py health
 git -C "$SERVINGSTUDIO_SIM" rev-parse HEAD   # only with a local checkout
 ```
+
+The revision the task needs is `servingstudio-sim` under `[agent.tool_revisions]` in the task's
+`vibesys.input.toml` when it is there (a model or hardware supported only on a branch), and
+otherwise the pin in [`assets/pins.toml`](assets/pins.toml) for the task's hardware. When the
+checkout's `HEAD` is not that revision, say so in one line and name the revision you used in
+every number; never check out another revision of a shared checkout yourself (Setup is the
+host's).
 
 If neither answers, or step 1 finds no deployment to use, stop the simulator work, not the
 planning: say so in one line, plan from measurements as you would without this skill, and write
@@ -83,6 +93,11 @@ of an optimization: [setup.md](references/setup.md).
    in every number you hand on.
    Name the phase or kernel that disagrees only with measured timing that shows it; otherwise
    call the residual unattributed.
+   On a match with a local checkout, use the newest calibration in `SERVINGSTUDIO_RECORDS` when
+   it was fitted at this revision, hardware, model and workload: simulate with its factors and
+   report the residual under it. With none, or after an official measurement of the head that
+   no calibration has been fitted on yet, fit one from the measured timeline
+   ([calibration.md](references/calibration.md)).
 3. **Attribute.** Split simulated time by phase (prefill, decode, queueing), by kernel kind and by
    overhead (launch, padding, idle groups, communication), from the reports the simulator
    produced. A cost it does not model (host scheduling, tokenizer, network, client) is
@@ -96,22 +111,32 @@ of an optimization: [setup.md](references/setup.md).
 
    When the question is which deployment to run, simulate each budget-compatible deployment
    from step 1 that has a match or a proxy (not one of them), name the ones the catalog does
-   not offer, and call the winner the best of those evaluated.
+   not offer, and call the winner the best of those evaluated. When it is what the system
+   should be (layout, padding, buckets, chunking, regions, scheduling together), run a design
+   study instead: every axis the preset exposes, several kernel scenarios, and a cumulative
+   ladder from today's engine to the best design ([design-study.md](references/design-study.md)).
 5. **Freeze the prediction** before anyone implements the idea, in the plan or hypothesis you
    hand on ([prediction.md](references/prediction.md)): the metric, the predicted value and the
-   head's simulated value, the residual of step 2, and the provenance (endpoint or checkout,
-   simulator revision, preset and parameters, workload, the command, the result directory).
+   head's simulated value, the residual of step 2, whether the model is calibrated and by which
+   record, and the provenance (endpoint or checkout, simulator revision, preset and parameters,
+   workload, the command, the result directory).
    Never edit a frozen prediction afterwards; a new one is added beside it.
 6. **Close the loop.** Once the candidate is measured, whoever records its outcome writes
    predicted against measured value and the relative miss beside the prediction. A miss that
    points at the model (a phase it does not model, a kernel row from another shape) is a finding
-   of its own: say which.
+   of its own: say which. An official measurement of a new head is also the next calibration's
+   input: re-fit (step 2), adding a record and keeping the earlier ones.
 
 ## Rules
 
 - Quote only numbers the simulator printed, with the result directory or simulation id they came
   from. Arithmetic on them is labeled as yours.
 - Keep the simulated workload the benchmark's. A what-if on another workload is a different claim.
+- A measurement changes the simulator (a factor, a preset's description of the world) only when
+  an external fact changed or was measured: the hardware, the model, the workload, a kernel's
+  measured cost. A limitation of the current engine is never copied into the simulator: it is
+  the engine's configuration in the preset, or a named part of the residual
+  ([calibration.md](references/calibration.md#the-direction-rule)).
 - The hosted service runs two simulations at a time and takes six submissions a minute per client:
   run sweeps on a local checkout, and keep hosted use to a few targeted runs per plan.
 - Simulator output is evidence, not a file of the candidate: keep it where your brief puts

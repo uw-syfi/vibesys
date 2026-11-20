@@ -445,6 +445,20 @@ message TaskAgentV02 {
     (task_schema_since_minor) = 2,
     (buf.validate.field).string.pattern = "^(inprocess|service)?$"
   ];
+  // [agent.tool_revisions]: the commit of each domain tool the task needs, by the tool's name
+  // (servingstudio-sim = "<commit>"). Held as data for the domain skill that uses the tool, which
+  // reads it before its own default pin; vibesys-cli checks it and reads nothing else from it.
+  map<string, string> tool_revisions = 3 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).map = {
+      keys: {
+        string: {pattern: "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"}
+      }
+      values: {
+        string: {pattern: "^[0-9a-fA-F]{7,64}$"}
+      }
+    }
+  ];
 }
 
 // TaskObjectiveDirection is the way an objective improves.

@@ -10,6 +10,7 @@ Prediction: <metric> <predicted change, %> against the head (head simulated <val
 Predicted value: <candidate simulated value>; only for kind match with residual within 10%,
   otherwise leave this line out
 Kind: match | proxy   (proxy: what differs from the engine, one item each)
+Model: uncalibrated | calibrated <calibration id> (fit residual before <+/-x%>, after <+/-y%>)
 Simulator: <endpoint or $SERVINGSTUDIO_SIM>, revision <sim_commit or checkout HEAD>
 Deployment: <preset id and parameters, or the preset file>, and the overrides that make the change
 Workload: <the benchmark's: source, request count, arrivals or load, lengths, acceptance>
@@ -22,6 +23,13 @@ The predicted change is (candidate simulated - head simulated) / head simulated:
 same simulator, revision and workload. The head's measured value and the residual say how far
 to trust it; never correct the candidate's value by the residual and present the result as
 simulated. Label any such arithmetic as yours, beside the block, not in it.
+
+`Model` says whether the head and the candidate were simulated with a calibration's factors
+([calibration.md](calibration.md)); both or neither, never one of each. A calibrated prediction
+names its record, and its first line's residual is the head's residual under that calibration.
+Its record's `residual_before` is the previous calibration's miss on a measurement it had not
+seen, so it, not the in-sample `residual_after`, says how far a calibrated number has held. A
+proxy and a bound are always `uncalibrated`: their rules above do not change.
 
 A what-if bound is not a prediction and is not frozen as one. Write it as a line of its own,
 `Bound: <metric> at most <value or change> if <what was scaled, by how much>`, beside the
@@ -38,7 +46,8 @@ How to read one when deciding:
   judgment, not an error bar; a systematic residual does not bound the error of a change.
 - A bound sets the plan's gain bound; it is not a predicted change.
 - A proxy prediction ranks changes; its size carries the hardware difference too.
-- Two predictions are comparable only when they name the same simulator revision.
+- Two predictions are comparable only when they name the same simulator revision and the same
+  `Model` line.
 
 After the candidate is measured, the outcome is written beside the prediction:
 
