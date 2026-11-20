@@ -82,8 +82,11 @@ validation.md, all through `vibesys-cli` jobs:
 3. A deliberate small slowdown is reported `worse` by `vibesys-cli compare`, so a real change
    of that size can be seen.
 
-Fix the task and run the recipes again until all three hold. A task edit after the run starts
-makes every saved result incomparable, so every fix happens now.
+When the task asks for code that does not exist yet, the base cannot pass: prove the checker and
+the benchmark with a stand-in instead. Golden outputs from a numerically sensitive reference must
+agree with themselves; check them (validation.md). Fix the task and run the recipes again until all
+three hold. A task edit after the run starts makes every saved result incomparable, so every fix
+happens now.
 
 ## 4. Hand back
 
