@@ -60,6 +60,9 @@ type Outcome struct {
 	// ran were not confirmed killed and may still run. The daemon ends and releases each, so no
 	// later job runs beside them; how the job itself ended is End alone.
 	ProcessesLeft []ProcessesLeft
+	// Outputs are the output files of a command job that declared them, collected once its command
+	// ended. Nil for any other job, and for one whose command never started.
+	Outputs core.Outputs
 }
 
 // ProcessesLeft names a standing allocation, by the backend's reference that Launch.Allocation

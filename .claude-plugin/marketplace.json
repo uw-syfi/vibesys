@@ -94,7 +94,7 @@
       "name": "vibesys-kernels-rocm",
       "source": "./skills",
       "description": "Domain skills for correct and fast ROCm kernels, with rocprof analysis, for use with the vibesys optimization loop.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "strict": false,
       "skills": [
         "./domains/kernel-correctness",
@@ -106,11 +106,12 @@
       "name": "vibesys-kernels-trainium",
       "source": "./skills",
       "description": "Domain skills for correct and fast Trainium kernels, with the vendored Neuron NKI pack, for use with the vibesys optimization loop.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "strict": false,
       "skills": [
         "./domains/kernel-correctness",
         "./domains/kernel-performance",
+        "./domains/neuron-agentic-development/neuron-safeguards",
         "./domains/neuron-agentic-development/skills/neuron-explorer-profile-schema",
         "./domains/neuron-agentic-development/skills/neuron-nki-debugging",
         "./domains/neuron-agentic-development/skills/neuron-nki-docs",
@@ -123,7 +124,7 @@
       "name": "vibesys-cli-tools",
       "source": "./skills",
       "description": "Domain skill for optimizing locally built native command-line programs (text, filesystem, sorting and repository tools) without changing their behavior, for use with the vibesys optimization loop.",
-      "version": "0.1.1",
+      "version": "0.1.3",
       "strict": false,
       "skills": [
         "./domains/cli-tool-optimization"

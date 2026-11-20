@@ -118,6 +118,9 @@ type CommandSettings struct {
 	// Candidate is set by the daemon for a job of a task of two images: how the job's candidate image
 	// is built, and the server a command in the task's image runs against. It is never the caller's.
 	Candidate *CommandCandidate
+	// Outputs says the command declared output files: what it leaves in its artifacts directory is
+	// recorded with the job when its command ends (Job.Outputs).
+	Outputs bool
 }
 
 // RanIn is the image the command runs in: the one it names, or for a job stored before an image was
@@ -266,6 +269,10 @@ type Job struct {
 	// Submitters are the callers that submitted the job, one for each distinct (Run, Agent), oldest
 	// first. A submission that joins or reuses the job adds its caller, also once the job is final.
 	Submitters []Submitter
+	// Outputs are the output files of a command job that declared them, recorded when its command
+	// ended. Nil for any other job, one that has not ended, and one whose command never ran or whose
+	// end was not seen by its supervisor.
+	Outputs Outputs
 }
 
 // MaxAttempts is the most attempts a job gets. A job whose supervisor is proved gone is queued again
@@ -432,4 +439,7 @@ type Transition struct {
 	// Cut is set on the move from running back to queued, and only there: it says how the attempt
 	// that ran was cut off, and the job keeps it in Attempts.
 	Cut Cut
+	// Outputs, set only on the move from running to a final state of a command job that declared
+	// outputs, is what its command left (Job.Outputs).
+	Outputs Outputs
 }

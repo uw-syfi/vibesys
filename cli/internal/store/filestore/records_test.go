@@ -101,10 +101,23 @@ func fill(m protoreflect.Message, variant int) {
 		v := core.Headline(ob.Values)
 		ob.Value = &v
 	}
+	// A saved minimum gain is a fraction, at least 0 and below 1, as objectives.toml requires.
+	if md.FullName() == "vibesys.cli.v1.ObjectiveMinGain" {
+		m.Interface().(*cliv1.ObjectiveMinGain).MinGain = 0.25
+	}
 	// A grant names devices of its pool.
 	if md.FullName() == "vibesys.cli.v1.GpuGrant" {
 		grant := m.Interface().(*cliv1.GpuGrant)
 		grant.PoolSize = 8
+	}
+	// A kept file's digest is a SHA-256, and the files are in path order, each once.
+	if md.FullName() == "vibesys.cli.v1.KeptOutput" {
+		m.Interface().(*cliv1.KeptOutput).Sha256 = fmt.Sprintf("%064x", variant)
+	}
+	if md.FullName() == "vibesys.cli.v1.KeptOutputs" {
+		for i, f := range m.Interface().(*cliv1.KeptOutputs).Outputs {
+			f.Name = fmt.Sprintf("dir/file-%d", i)
+		}
 	}
 	// A job's allocation is an allocation's name or any.
 	if md.FullName() == "vibesys.cli.v1.JobSpec" {
@@ -114,6 +127,10 @@ func fill(m protoreflect.Message, variant int) {
 	if md.FullName() == "vibesys.cli.v1.Plan" {
 		plan := m.Interface().(*cliv1.Plan)
 		plan.Transitions[len(plan.Transitions)-1].Status = plan.Status
+		// A plan does not depend on itself: it depends on the plans numbered past its own.
+		for k := range plan.DependsOn {
+			plan.DependsOn[k] = plan.Number + uint32(k) + 1
+		}
 	}
 }
 
@@ -150,7 +167,7 @@ func TestNoFieldOfAStoredMessageIsDropped(t *testing.T) {
 			event := &cliv1.Event{}
 			fill(event.ProtoReflect(), variant)
 			event.Sequence, event.RunId = 1, "run-a"
-			want := &cliv1.EventFile{Format: 8, Event: event}
+			want := &cliv1.EventFile{Format: 10, Event: event}
 			data, err := protojson.Marshal(want)
 			if err != nil {
 				t.Fatal(err)

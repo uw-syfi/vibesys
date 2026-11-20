@@ -139,6 +139,7 @@ func (g *gen) settings() core.Settings {
 			Timeout: time.Duration(1 + g.r.Int64N(1<<40)),
 			Image:   core.CommandImages()[g.pick(2)],
 			Wrap:    g.strs(),
+			Outputs: true,
 			Candidate: &core.CommandCandidate{
 				Build: core.CandidateBuild{Dockerfile: g.text(), Context: g.text(), AllowedBases: g.strs()},
 				Serve: &core.CandidateServe{Argv: g.strs(), Ready: "/" + g.text(), StartupTimeout: time.Duration(1 + g.r.Int64N(1<<40))},
@@ -195,7 +196,11 @@ func (g *gen) metric() core.Metric {
 // name: a store does not judge them.
 func (g *gen) objectives() core.Objectives {
 	metrics := []core.Metric{g.metric(), g.metric()}
-	return core.Objectives{Metrics: metrics, RelativeNoise: g.float(), Noise: []core.ObjectiveNoise{{Name: metrics[1].Name, RelativeNoise: g.float()}}}
+	return core.Objectives{
+		Metrics: metrics, RelativeNoise: g.float(), Noise: []core.ObjectiveNoise{{Name: metrics[1].Name, RelativeNoise: g.float()}},
+		// A saved minimum gain is held to the rule objectives.toml states: at least 0, below 1.
+		MinGains: []core.ObjectiveMinGain{{Name: metrics[0].Name, MinGain: g.r.Float64() * 0.999}},
+	}
 }
 
 func (g *gen) objectiveVerdicts() []core.ObjectiveVerdict {
@@ -235,6 +240,7 @@ func (g *gen) verdict() core.Verdict {
 		Kind:             []core.VerdictKind{core.Better, core.Worse, core.WithinNoise, core.Inconclusive, core.Tradeoff}[g.pick(5)],
 		Reason:           []core.InconclusiveReason{core.ReasonTooFewSamples, core.ReasonConstantSamples, core.ReasonMetricMismatch, core.ReasonTaskVersionMismatch}[g.pick(4)],
 		CandidateSamples: 1 + g.r.Uint32(), BaseSamples: 1 + g.r.Uint32(), CandidateMean: g.float(), BaseMean: g.float(), Ratio: g.float(), Noise: g.float(),
+		RelativeNoise: g.float(), MinGain: g.float(), DecidedBy: []core.VerdictBound{core.BoundNoise, core.BoundMinGain}[g.pick(2)],
 	}
 }
 
@@ -266,8 +272,12 @@ func (g *gen) plan() core.Plan {
 	if status != core.PlanOpen {
 		transitions = append(transitions, core.PlanTransition{Status: status, Origin: g.origin()})
 	}
+	// A plan depends on plans numbered below its own, so never on itself.
+	number := core.PlanNumber(2 + g.pick(1<<20))
+	deps := core.NormalizeDependsOn([]core.PlanNumber{core.PlanNumber(1 + g.pick(int(number-1))), core.PlanNumber(1 + g.pick(int(number-1)))})
+	kinds := core.PlanKinds()
 	return core.Plan{
-		Number: core.PlanNumber(1 + g.r.Uint32()), Title: g.text(), Body: g.text(), Status: status,
+		Number: number, Title: g.text(), Body: g.text(), Status: status, Kind: kinds[g.pick(len(kinds))], DependsOn: deps,
 		Comments: []core.PlanComment{g.comment(), g.comment()}, CreatedAt: g.instant(), UpdatedAt: g.instant(),
 		GainBound:  &core.GainBound{Share: []float64{0.05, 0.1, 3}[g.pick(3)], RelativeTo: core.GainHeadline},
 		Workstream: core.WorkstreamNumber(1 + g.pick(5)), Origin: &origin, Transitions: transitions,
@@ -287,8 +297,28 @@ func (g *gen) job() core.Job {
 		Notes: []core.Note{g.note(), g.note()}, Plans: []core.PlanNumber{core.PlanNumber(1 + g.r.Uint32()), 2},
 		SubmittedAt: g.instant(), StartedAt: &started, FinishedAt: &finished, CancelReason: g.text(), ExitCode: &code,
 		ResultJob: core.JobID(g.name()), CheckJob: core.JobID(g.name()), Attempts: g.attempts(), Submitters: g.submitters(),
-		Needs: g.needs(), TaskVersion: g.name(), FailedStage: core.StageCheck, GPUs: g.grant(),
+		Needs: g.needs(), TaskVersion: g.name(), FailedStage: core.StageCheck, GPUs: g.grant(), Outputs: g.outputs(),
 	}
+}
+
+// outputs is a record of a command job's outputs that a job may hold: files kept, or a refusal.
+func (g *gen) outputs() core.Outputs {
+	if g.pick(3) == 0 {
+		reason := g.text()
+		if len(reason) > 4096 { // the most a refusal holds
+			reason = reason[:4096]
+		}
+		return core.OutputsRefused{Reason: reason}
+	}
+	var kept core.OutputsKept
+	for i := range 1 + g.pick(4) {
+		kept.Files = append(kept.Files, core.OutputFile{
+			Path:   fmt.Sprintf("d%d/%s.json", i, g.name()),
+			Size:   uint64(g.pick(core.MaxOutputBytes / 8)),
+			SHA256: fmt.Sprintf("%016x%016x%016x%016x", g.r.Uint64(), g.r.Uint64(), g.r.Uint64(), g.r.Uint64()),
+		})
+	}
+	return kept
 }
 
 // gpus is a count of GPUs, 1 to the largest pool.
@@ -472,6 +502,14 @@ func (g *gen) transitionFor(job core.Job, at time.Time) core.Transition {
 	}
 	if (tr.To == core.JobQueued && g.pick(6) != 0) || g.pick(12) == 0 {
 		tr.Cut = g.cut()
+	}
+	if (tr.From == core.JobRunning && tr.To.Final() && g.pick(3) != 0) || g.pick(15) == 0 {
+		// Outputs, which only a command job that declared them records as its command ends; now
+		// and then a record a job cannot hold.
+		tr.Outputs = g.outputs()
+		if g.pick(10) == 0 {
+			tr.Outputs = core.OutputsKept{Files: []core.OutputFile{{Path: "../escape", SHA256: "nothex"}}}
+		}
 	}
 	if g.pick(25) == 0 {
 		tr.At = time.Time{}

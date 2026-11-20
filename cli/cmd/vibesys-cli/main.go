@@ -80,6 +80,7 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"note":       noteCommand,
 	"jobs":       jobsCommand,
 	"logs":       logsCommand,
+	"outputs":    outputsCommand,
 	"show":       showCommand,
 	"compare":    compareCommand,
 	"promote":    promoteCommand,
@@ -104,7 +105,7 @@ commands:
   submit check <commit> [--gpus n] [flags]       queue the task's check and print the job
   submit measure <commit> [--samples n] [--recheck] [--plan n | --no-plan] [flags]
                                                  queue the task's benchmark and print the job
-  submit command <commit> --image harness|candidate [--gpus n] [--wrap prefix] [flags] -- <argv...>
+  submit command <commit> --image harness|candidate [--gpus n] [--wrap prefix] [--outputs] [flags] -- <argv...>
                                                  queue a command in the task's image (harness:
                                                  where the check and benchmark run, beside the
                                                  candidate's server, which --wrap wraps, on a task
@@ -116,6 +117,8 @@ commands:
   note <job> <text>                              add a note to a job
   jobs [--commit rev] [--state s] [--note-contains text]
   logs <job> [--follow]                          print a job's output
+  outputs <job> [--to dir]                       the files a command job submitted with --outputs kept,
+                                                 listed, and with --to copied into a directory
   show <commit>                                  results saved for a commit
   compare <commit> [--against rev]               better, worse, within_noise, tradeoff or inconclusive
   promote <commit>                               move the result branch, or say why not

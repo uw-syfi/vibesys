@@ -32,9 +32,22 @@ enum InconclusiveReason {
   INCONCLUSIVE_REASON_TASK_VERSION_MISMATCH = 4;
 }
 
+// VerdictBound is the bar that decided a conclusive verdict.
+enum VerdictBound {
+  // The verdict is inconclusive, or was saved before verdicts named their bound.
+  VERDICT_BOUND_UNSPECIFIED = 0;
+  // The noise test: the gain against a multiple of the noise.
+  VERDICT_BOUND_NOISE = 1;
+  // The objective's declared min_gain. A better verdict names it when min_gain was the higher bar,
+  // and a within-noise one when the gain passed the noise test but not min_gain.
+  VERDICT_BOUND_MIN_GAIN = 2;
+}
+
 // Verdict is a pure function of the two sample sets, the metric's direction and the task's declared
-// noise floor: the same samples always give the same verdict. Without a declared floor it is Welch's
-// t test at 95% and needs at least 3 samples a side; with one, a difference must exceed 2 noises.
+// noise floor and minimum gain: the same samples always give the same verdict. Without a declared
+// floor it is Welch's t test at 95% and needs at least 3 samples a side; with one, a difference must
+// exceed 2 noises, at any sample count. A declared min_gain also holds a better verdict to a gain
+// above it.
 message Verdict {
   VerdictKind kind = 1;
   // Set only when kind is INCONCLUSIVE.
@@ -47,6 +60,12 @@ message Verdict {
   double ratio = 7;
   // One standard error of the ratio. The verdict compares the gain against a multiple of it.
   double noise = 8;
+  // The noise floor the task declared and the comparison used (relative_noise), zero for none.
+  double relative_noise = 9;
+  // The smallest relative gain the task declared to count as better (min_gain), zero for none.
+  double min_gain = 10;
+  // The bar that decided a conclusive verdict; unspecified for an inconclusive one.
+  VerdictBound decided_by = 11;
 }
 
 // ObjectiveVerdict is the verdict on one objective of a multi-objective comparison: the comparison of

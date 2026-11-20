@@ -83,6 +83,7 @@ func Outcome(o lifecycle.Outcome) *cliv1.SupervisorOutcome {
 	for _, p := range o.ProcessesLeft {
 		out.ProcessesLeft = append(out.ProcessesLeft, &cliv1.ProcessesLeft{Allocation: p.Allocation, Detail: p.Detail})
 	}
+	out.Outputs = JobOutputs(o.Outputs)
 	return out
 }
 
@@ -154,6 +155,14 @@ func ToOutcome(o *cliv1.SupervisorOutcome) lifecycle.Outcome {
 	}
 	for _, p := range o.GetProcessesLeft() {
 		out.ProcessesLeft = append(out.ProcessesLeft, lifecycle.ProcessesLeft{Allocation: p.GetAllocation(), Detail: p.GetDetail()})
+	}
+	if o.GetOutputs() != nil {
+		outputs, err := ToJobOutputs("outcome.outputs", o.GetOutputs())
+		if err != nil {
+			// The files are still in the artifacts directory; only the record of them is lost.
+			outputs = core.OutputsRefused{Reason: "the supervisor's record of the outputs cannot be read: " + err.Error()}
+		}
+		out.Outputs = outputs
 	}
 	return out
 }

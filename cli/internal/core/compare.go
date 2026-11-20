@@ -19,6 +19,10 @@ import (
 // A task that declares none has said nothing, so the noise is only what the runs show: Welch's
 // t test, with a hard-coded Student-t table for the critical number, and no verdict until each
 // side holds MinSamplesWithoutFloor samples that are not all alike.
+//
+// A task may also declare a minimum gain (min_gain): the smallest relative gain that counts as
+// better. It is a bar beside the noise test, not part of the statistic, so Python's rule, which
+// has none, is this one with a minimum gain of zero.
 
 const (
 	// MinSamplesWithoutFloor is how many samples each side needs before a comparison that has no
@@ -55,6 +59,9 @@ type CompareInput struct {
 	// RelativeNoise is the task's declared relative variation of one run. Zero means the task
 	// declares none and Welch's t test decides.
 	RelativeNoise float64
+	// MinGain is the task's declared smallest relative gain that counts as better. Zero declares
+	// none. It never changes what counts as worse.
+	MinGain float64
 }
 
 // Compare compares a candidate's samples with a base's. It is a pure function of its input: the
@@ -62,9 +69,14 @@ type CompareInput struct {
 //
 // It fails with a *Failure when there is nothing to compare, and never answers inconclusive for
 // those: FailureNotMeasured for an empty side, and FailureInvalidInput for a direction that is
-// neither maximize nor minimize, a negative or non-finite RelativeNoise, a sample that is not
-// finite, a base mean of zero (a ratio over it means nothing), or samples so extreme that a
+// neither maximize nor minimize, a negative or non-finite RelativeNoise or MinGain, a sample that
+// is not finite, a base mean of zero (a ratio over it means nothing), or samples so extreme that a
 // number derived from them overflows.
+//
+// Better needs the gain to pass the noise test and to exceed MinGain; DecidedBy names the higher
+// of the two bars, the noise test on a tie. A gain that passes the noise test but not MinGain is
+// WithinNoise, decided by BoundMinGain. Worse is the noise test alone. The verdict records the
+// declared RelativeNoise and MinGain it rests on.
 //
 // Nothing the verdict rests on is rounded. Ratio is raw and not oriented by the direction.
 func Compare(in CompareInput) (Verdict, error) {
@@ -106,6 +118,8 @@ func Compare(in CompareInput) (Verdict, error) {
 		BaseMean:         b,
 		Ratio:            ratio,
 		Noise:            noise,
+		RelativeNoise:    in.RelativeNoise,
+		MinGain:          in.MinGain,
 	}
 	gain := ratio - 1
 	if in.Direction == Minimize {
@@ -116,12 +130,17 @@ func Compare(in CompareInput) (Verdict, error) {
 		verdict.Kind, verdict.Reason = Inconclusive, ReasonTooFewSamples
 	case !known:
 		verdict.Kind, verdict.Reason = Inconclusive, ReasonConstantSamples
+	case gain > critical*noise && gain > in.MinGain:
+		verdict.Kind, verdict.DecidedBy = Better, BoundNoise
+		if in.MinGain > critical*noise {
+			verdict.DecidedBy = BoundMinGain
+		}
 	case gain > critical*noise:
-		verdict.Kind = Better
+		verdict.Kind, verdict.DecidedBy = WithinNoise, BoundMinGain
 	case gain < -critical*noise:
-		verdict.Kind = Worse
+		verdict.Kind, verdict.DecidedBy = Worse, BoundNoise
 	default:
-		verdict.Kind = WithinNoise
+		verdict.Kind, verdict.DecidedBy = WithinNoise, BoundNoise
 	}
 	return verdict, nil
 }
@@ -132,6 +151,9 @@ func validateCompare(in CompareInput) error {
 	}
 	if !finite(in.RelativeNoise) || in.RelativeNoise < 0 {
 		return failf(FailureInvalidInput, "relative noise %v is not a finite number of at least zero", in.RelativeNoise)
+	}
+	if !finite(in.MinGain) || in.MinGain < 0 {
+		return failf(FailureInvalidInput, "minimum gain %v is not a finite number of at least zero", in.MinGain)
 	}
 	for _, side := range []struct {
 		name    string

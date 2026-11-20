@@ -145,12 +145,16 @@ func (p Plan) Validate() error {
 
 // validObjectives says why a measure job's objectives cannot be followed: a multi-objective job
 // reads every objective from an evaluator stream, scores one of them, and names each once with a
-// direction. A job with no objectives is a single-metric one.
+// direction. A job with no objectives is a single-metric one; one with a single objective is a
+// single-metric one whose task declares a noise floor or a minimum gain for the metric it scores.
 func validObjectives(scored core.Metric, result task.Result, o core.Objectives) error {
-	if len(o.Metrics) == 0 && o.RelativeNoise == 0 && len(o.Noise) == 0 {
+	if !o.Declared() {
 		return nil
 	}
-	if !o.Pareto() || !result.Protocol2 {
+	if len(o.Metrics) == 1 && (o.RelativeNoise != 0 || (len(o.Noise) == 0 && len(o.MinGains) == 0)) {
+		return fmt.Errorf("a single-metric measure job's objectives declare its own noise floor or minimum gain, and no [pareto] floor")
+	}
+	if len(o.Metrics) != 1 && (!o.Pareto() || !result.Protocol2) {
 		return fmt.Errorf("a multi-objective measure job has more than one objective, read from an evaluator result stream")
 	}
 	if o.RelativeNoise < 0 || o.RelativeNoise >= 1 {
@@ -174,6 +178,16 @@ func validObjectives(scored core.Metric, result task.Result, o core.Objectives) 
 		declared[n.Name] = true
 		if !(n.RelativeNoise >= 0 && n.RelativeNoise < 1) { // false for NaN
 			return fmt.Errorf("the relative noise %v of the objective %q is not at least 0 and less than 1", n.RelativeNoise, n.Name)
+		}
+	}
+	gains := map[string]bool{}
+	for _, g := range o.MinGains {
+		if !seen[g.Name] || gains[g.Name] {
+			return fmt.Errorf("the minimum gain of %q names no objective, or names one twice", g.Name)
+		}
+		gains[g.Name] = true
+		if !(g.MinGain >= 0 && g.MinGain < 1) { // false for NaN
+			return fmt.Errorf("the minimum gain %v of the objective %q is not at least 0 and less than 1", g.MinGain, g.Name)
 		}
 	}
 	return nil

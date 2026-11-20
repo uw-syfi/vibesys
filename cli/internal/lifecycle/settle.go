@@ -38,7 +38,12 @@ func Settle(job core.JobID, from core.JobState, o Outcome, at time.Time) Settlem
 	t := core.Transition{Job: job, From: from, At: at}
 	switch end := o.End.(type) {
 	case CommandEnded:
-		return settleAttempt(t, end.Attempt, o)
+		s := settleAttempt(t, end.Attempt, o)
+		if from == core.JobRunning && s.Transition.To.Final() {
+			// What the command left is recorded however it ended.
+			s.Transition.Outputs = o.Outputs
+		}
+		return s
 	case FlowEnded:
 		return settleVerdict(t, end.Verdict, o)
 	default:

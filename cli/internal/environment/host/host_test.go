@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/host"
+	"github.com/uw-syfi/vibesys/cli/internal/resource/fakeresource"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/gpu"
 )
 
@@ -167,5 +169,44 @@ func TestACommandOnTheHostIsToldTheGPUsItWasGiven(t *testing.T) {
 		t.Errorf("a grant of another pool: attempt %+v, output %q, want it refused before anything starts", a, got)
 	} else if ns, ok := a.(core.NotStarted); !ok || ns.Failure.Kind != core.FailureInvalidInput {
 		t.Errorf("a grant of another pool: attempt %+v, want not started, invalid input", a)
+	}
+}
+
+// The role's check of a job's devices runs on the host before any of its commands: one that fails,
+// as one whose devices another process holds does, ends the job not started, with what the check
+// said, and its command never runs; one that passes lets it run. A job given no devices runs no check.
+func TestAJobWhoseDevicesAreHeldDoesNotStartOnTheHost(t *testing.T) {
+	size, err := core.ParseGPUCount(4, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	group, err := core.ParseDeviceGroup([]uint32{0, 1}, size, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	said := "neuron: /dev/neuron0 holds device memory on 2 of its 8 physical cores"
+	run := func(check string, grant bool) (core.Attempt, bool) {
+		devices := &fakeresource.Devices{Of: core.ResourceNeuron, ID: "neuron:local", Size: size, CheckArgv: []string{"/bin/sh", "-c", check}}
+		var g *core.Grant
+		if grant {
+			g = &core.Grant{Pool: "neuron:local", Size: size, Devices: group, Source: core.GrantByCLI}
+		}
+		dir := checkout(t, nil)
+		ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+		defer cancel()
+		env := host.New(host.Config{Backend: machine(), Timers: clock.System{}, Devices: devices, GPUs: g})
+		a := env.Run(ctx, core.Execution{Checkout: dir, Timeout: time.Hour, Argv: []string{"/bin/sh", "-c", "touch ran"}}, &bytes.Buffer{})
+		_, statErr := os.Stat(filepath.Join(dir.Dir, "ran"))
+		return a, statErr == nil
+	}
+	a, ran := run("echo '"+said+"'; exit 1", true)
+	if ns, ok := a.(core.NotStarted); !ok || ns.Failure.Kind != core.FailureUnavailable || !strings.Contains(ns.Failure.Message, said) || ran {
+		t.Errorf("a failing check: attempt %+v, the command ran %v; want not started with what the check said", a, ran)
+	}
+	if a, ran := run("exit 0", true); !ran {
+		t.Errorf("a passing check: attempt %+v, the command did not run", a)
+	}
+	if a, ran := run("exit 1", false); !ran {
+		t.Errorf("a job given no devices: attempt %+v, the command did not run", a)
 	}
 }

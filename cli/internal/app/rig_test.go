@@ -66,6 +66,9 @@ type world struct {
 	// wrap, when set, wraps the supervisors each daemon starts jobs with, as a test that looks at
 	// the launches does.
 	wrap func(supervisor.Supervisors) supervisor.Supervisors
+	// artifacts, when set, names the artifacts directory of each job, which the supervisors make and
+	// the daemons read outputs back from, in the world's files.
+	artifacts func(repository, task string, job core.JobID) string
 }
 
 func newWorld(t *testing.T) *world {
@@ -108,7 +111,7 @@ func newWorld(t *testing.T) *world {
 var rigMachine = core.MachineFacts{HostID: "host-a", OS: "linux", Arch: "amd64", CPUModel: "Test CPU", LogicalCPUs: 8, MemoryBytes: 16 << 30}
 
 func (w *world) supervisors() supervisor.Supervisors {
-	host := supervisor.Host{Files: w.files, Clock: w.clock}
+	host := supervisor.Host{Files: w.files, Clock: w.clock, Artifacts: w.artifacts}
 	var s supervisor.Supervisors = supervisor.NewInProcess(fakeenv.Environments{core.EnvironmentHost: w.env}, w.checkouts, w.survivors).WithHost(host)
 	if w.wrap != nil {
 		s = w.wrap(s)
@@ -145,6 +148,7 @@ func (w *world) tryNewApp() (*app.App, error) {
 		HostPool:     w.hostPool,
 		Leasing:      w.leasing,
 		Allocations:  w.allocations,
+		Outputs:      supervisor.Host{Files: w.files, Clock: w.clock, Artifacts: w.artifacts},
 		Logf:         func(format string, args ...any) { w.t.Logf("daemon: "+format, args...) },
 	})
 	if w.timers != nil {

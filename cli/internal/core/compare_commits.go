@@ -32,7 +32,8 @@ type CompareRequest struct {
 // Measurements of a multi-objective task (Objectives.Pareto) are compared on every objective, each
 // with Compare under the objectives' noise floor, and the verdict is the overall one that
 // CombineObjectives gives; RelativeNoise is not used for them. Any other measurements are compared
-// on their one metric under RelativeNoise.
+// on their one metric: under the noise floor and minimum gain their Objectives saved for it when
+// they saved any, and under RelativeNoise otherwise.
 //
 // A side with no measurement fails with FailureNotMeasured. Everything Compare refuses fails the
 // same way here.
@@ -92,16 +93,23 @@ func compareMeasurements(candidate, base []Result, relativeNoise float64) (measu
 		}
 		return result, nil
 	}
-	if objectives := objectivesOf(all[0]); objectives.Pareto() {
+	objectives := objectivesOf(all[0])
+	if objectives.Pareto() {
 		verdict, verdicts, err := compareObjectives(candidate, base, objectives)
 		result.verdict, result.objectives = verdict, verdicts
 		return result, err
 	}
+	metric := metricOf(all[0])
+	if objectives.Declared() {
+		// What the task declared for its metric was saved with the measurements, and it decides.
+		relativeNoise = objectives.NoiseFor(metric.Name)
+	}
 	verdict, err := Compare(CompareInput{
-		Direction:     metricOf(all[0]).Direction,
+		Direction:     metric.Direction,
 		Candidate:     candidateSamples,
 		Base:          baseSamples,
 		RelativeNoise: relativeNoise,
+		MinGain:       objectives.MinGainFor(metric.Name),
 	})
 	result.verdict = verdict
 	return result, err

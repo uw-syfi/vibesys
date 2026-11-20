@@ -134,10 +134,10 @@ func versionFive(t *testing.T, withBounds bool) *fsys.MemFS {
 	return image
 }
 
-// A store of version 5 opens as it was, and is a store of the current version (8) from then on, with
-// every directory version 6 added: its format file says 8, and a program of version 5 to 7 would
+// A store of version 5 opens as it was, and is a store of the current version (9) from then on, with
+// every directory version 6 added: its format file says 9, and a program of version 5 to 8 would
 // refuse it. A crash at any step of the migration leaves a store that the next Open migrates and that
-// shows the same, and the format file says 8 only once every directory is there. A plan the older program
+// shows the same, and the format file says 9 only once every directory is there. A plan the older program
 // saved has no origin and no transitions, and none is invented.
 func TestAStoreOfVersionFiveIsMigratedToTheCurrentVersion(t *testing.T) {
 	for _, withBounds := range []bool{true, false} {
@@ -155,8 +155,8 @@ func TestAStoreOfVersionFiveIsMigratedToTheCurrentVersion(t *testing.T) {
 				mem.SetFault(fsys.Fault{At: step, Kind: fsys.FaultCrash})
 				opened, err := filestore.Open(stateDir, filestore.WithFS(mem))
 				if err == nil {
-					if got := formatOf(t, mem); got != 8 {
-						t.Fatalf("format after the migration = %d, want 8", got)
+					if got := formatOf(t, mem); got != 10 {
+						t.Fatalf("format after the migration = %d, want 10", got)
 					}
 					if got := dirNames(t, mem); !slices.Equal(got, wantDirs) {
 						t.Fatalf("directories after the migration = %v, want %v", got, wantDirs)

@@ -231,6 +231,38 @@ func FuzzDecodeGpuGrant(f *testing.F) {
 	})
 }
 
+// The outputs a job kept, decoded from anything, are a record core accepts: within the bounds,
+// each path relative and clean, once and in order, each digest a SHA-256; and they stay the same
+// when encoded and decoded again.
+func FuzzDecodeJobOutputs(f *testing.F) {
+	seedMessages(f,
+		wire.JobOutputs(core.OutputsKept{Files: []core.OutputFile{
+			{Path: "a.json", Size: 3, SHA256: strings.Repeat("ab", 32)},
+			{Path: "dir/b.csv", Size: 0, SHA256: strings.Repeat("0f", 32)},
+		}}),
+		wire.JobOutputs(core.OutputsRefused{Reason: "the job left 2000 files"}),
+		&cliv1.JobOutputs{Record: &cliv1.JobOutputs_Kept{Kept: &cliv1.KeptOutputs{Outputs: []*cliv1.KeptOutput{{Name: "../x", Sha256: strings.Repeat("ab", 32)}}}}},
+	)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.JobOutputs{}
+		decode(t, data, message)
+		first, err := wire.ToJobOutputs("outputs", message)
+		if err != nil {
+			if !wire.IsInvalidInput(err) {
+				t.Fatalf("refused outputs gave %v, want an invalid-input failure", err)
+			}
+			return
+		}
+		if err := core.CheckOutputs(first); err != nil {
+			t.Fatalf("decoded outputs %+v are not ones the domain accepts: %v", first, err)
+		}
+		again, err := wire.ToJobOutputs("outputs", wire.JobOutputs(first))
+		if err != nil || !reflect.DeepEqual(again, first) {
+			t.Fatalf("decoded outputs changed when encoded and decoded again: %+v, %v; want %+v", again, err, first)
+		}
+	})
+}
+
 func FuzzDecodeLaunch(f *testing.F) {
 	r := newRand(12)
 	var seeds []proto.Message
@@ -300,6 +332,8 @@ func FuzzDecodePlan(f *testing.F) {
 				{Status: 99, Origin: &cliv1.RecordOrigin{Agent: "a"}},
 			},
 		},
+		&cliv1.Plan{Number: 5, Status: cliv1.PlanStatus_PLAN_STATUS_OPEN, Kind: cliv1.PlanKind_PLAN_KIND_INTEGRATION, DependsOn: []uint32{1, 3}},
+		&cliv1.Plan{Number: 6, Status: cliv1.PlanStatus_PLAN_STATUS_OPEN, Kind: 42, DependsOn: []uint32{6, 2, 2}},
 	)
 	f.Fuzz(func(t *testing.T, data []byte) {
 		message := &cliv1.Plan{}
@@ -315,6 +349,9 @@ func FuzzDecodePlan(f *testing.F) {
 		if _, err := wire.ToGainBound("gain_bound", message.GetGainBound()); err != nil {
 			statusErr = err
 		}
+		if _, err := wire.ToPlanKind("kind", message.GetKind()); err != nil {
+			statusErr = err
+		}
 		first, err := wire.ToPlan(message)
 		if (err != nil) != (statusErr != nil) {
 			t.Fatalf("a plan with status %s: ToPlan error %v, error of its parts %v; they must agree", message.GetStatus(), err, statusErr)
@@ -324,6 +361,12 @@ func FuzzDecodePlan(f *testing.F) {
 		}
 		if !first.Status.Valid() {
 			t.Fatalf("a decoded plan has the status %q, which is not a status", first.Status)
+		}
+		if first.Kind != "" && !first.Kind.Valid() {
+			t.Fatalf("a decoded plan has the kind %q, which is not a kind", first.Kind)
+		}
+		if deps := wire.ToPlanNumbers(message.GetDependsOn()); !slices.Equal(deps, first.DependsOn) || !slices.Equal(wire.PlanNumbers(deps), message.GetDependsOn()) {
+			t.Fatalf("a plan's dependencies %v decode to %v and back to %v", message.GetDependsOn(), deps, wire.PlanNumbers(deps))
 		}
 		for i, c := range message.GetComments() {
 			if got := wire.ToPlanComment(c); !reflect.DeepEqual(got, first.Comments[i]) {

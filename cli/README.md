@@ -97,7 +97,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/store/` | `Store`: the logical interface to results, events, logs, job state, plans, declared bounds, promotions and the frontier. No paths, no formats. |
 | `internal/store/ledger/` | The decisions every `Store` shares (what a submission joins or reuses, numbering, what a value may hold), as a pure `Ledger`, and the `Engine` that runs one over a `Backend`. It asks `core` whether a transition is legal (`Job.Apply`) and whether a submission joins a job (`CanJoin`). |
 | `internal/store/memstore/` | In-memory `Store` for tests. The same `Engine` as `filestore`, with a backend in memory. |
-| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 to 6 is migrated to version 7 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse, version 4 a job's placement, version 5 a job's needs and task version, and version 6 a plan's origin, transitions and workstream with the `bounds` and `workstreams` directories, so that a program of version 5 refuses the store and never opens it to ignore them, and version 7 a job's standing allocation, which a program of version 6 would refuse as an unknown field); a docker result of version 4 or older is keyed again when it is read, as where it ran left the cache key in version 5 (see "Placements are interchangeable"); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
+| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 to 9 is migrated to version 10 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse, version 4 a job's placement, version 5 a job's needs and task version, and version 6 a plan's origin, transitions and workstream with the `bounds` and `workstreams` directories, so that a program of version 5 refuses the store and never opens it to ignore them, version 7 a job's standing allocation, which a program of version 6 would refuse as an unknown field, version 8 the GPUs a job asks for and is given, version 9 a plan's kind and dependencies, and version 10 a command job's declared outputs and the record of the files it kept); a docker result of version 4 or older is keyed again when it is read, as where it ran left the cache key in version 5 (see "Placements are interchangeable"); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
 | `internal/store/filestore/fsys/` | The slice of a filesystem `filestore` uses, the operating system's implementation, and an in-memory one that models what a crash keeps and fails or dies at any write step. |
 | `internal/store/storetest/` | The one contract suite every `Store` passes, and a differential driver that compares stores. |
 | `internal/environment/` | `Environment`: where a job's commands run (`host`, `docker`), and `Registry`, the environments a build has by kind. `Allocator`: how a placement's standing allocations are made, observed, released and found again after a restart. |
@@ -143,6 +143,8 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/backend/nvidia/` | The GPU facts of a machine (model, count, driver, the driver's CUDA version) for a fingerprint, read with `nvidia-smi`. |
 | `internal/backend/amd/` | The AMD GPU facts of a machine (model, count, the amdgpu driver's version) for a fingerprint, read with `rocminfo` or `amd-smi` and `/sys/module/amdgpu/version`. |
 | `internal/resource/rocm/` | The `rocm` resource: the machine's AMD GPUs, and a check, run in the container before the command, that the image's ROCm runtime sees them. |
+| `internal/backend/neuron/` | The Neuron facts of a machine (model, devices, NeuronCores per device and in all, the logical core config, the neuron driver's version) for a fingerprint and the check of a pool, read with `neuron-ls --json-output` and the driver's sysfs. |
+| `internal/resource/neuron/` | The `neuron` resource: the machine's AWS Neuron devices, a pool of NeuronCores whose role gives a job the `/dev/neuron*` devices of its range and `NEURON_RT_VISIBLE_CORES`, and a check, run before the job's commands, that no other process holds its cores. |
 | `internal/tomlproto/` | Decoding TOML into a proto message by its field names, refusing an unknown key by name, and a key newer than the schema version the file declares (`task_schema_since_minor`). The task manifest and the operator config are read with it. |
 | `internal/operator/` | The operator config (`cli.toml`), decoded into `OperatorConfig` in `operator.proto` with unknown keys refused by name: its version (`0.2`, the only one read; every key of the earlier shape refused by name), its named placements, each placement's kind and sections, its GPU pools, and the defaults the file leaves out. What a kind's section means is that kind's package's business. |
 | `internal/resource/` | `Resource`: what a placement gives every container (`Kind`, `Claims` for scheduling, `Fingerprint`, and `Attach`, the mounts, variables, network and GPUs a container is made with), and the contract suite in `resourcetest/` every resource passes, with the Fake in `fakeresource/` (tests only). |
@@ -274,23 +276,24 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | Command | What it does |
 | --- | --- |
 | `submit check <commit> [flags]` | Queue the task's check. A pass already saved for the commit answers it without running. Also `--wait`, `--note`, `--no-cache`, `--plan`, `--env` and `--gpus N` (see "GPU pools"). |
-| `submit measure <commit> [--samples n] [--recheck] [--plan n \| --no-plan] [flags]` | Queue the task's benchmark for `n` samples (the task's default when omitted). Saved samples count: only the missing ones run. Flags as for `check`, except that a measure takes the whole node and refuses `--gpus`. `--plan n` says the measurement tests plan `n`, which the plan's view and a run's chart show beside the point; `--no-plan` says it tests none, as the baseline's does. A measure submitted from a run (a call that carries `--run`, or `VIBESYS_RUN`) must give one of them, since every point on a run's chart is a measure job and the plan is what the app shows beside it: without either the daemon refuses it as `INVALID_INPUT`, naming both flags. A person at a terminal, with no run, is not asked. The two are never given together, and `--plan 0` is not "none". Only a measure job takes `--no-plan`. An unknown plan is `NOT_FOUND`, naming `--plan`. |
-| `submit command <commit> --image harness\|candidate [flags] -- <argv...>` | Queue a command and print its id. Returns at once; `--wait` blocks as `wait` does. `--image` is required, with no default: `harness` runs the command in the task's image, where its check and benchmark run (the host for a task with no Dockerfile), and on a task with `[candidate]` beside the candidate's server exactly as the check and the benchmark run (server started from `[candidate] serve`, readiness polled, `VIBESYS_SERVICE_URL` set, the same resource shares; the server's startup time is added to `--timeout`); `candidate` runs it in the image built from the commit's `[candidate] dockerfile`, with no server, and is refused for a task without `[candidate]` or with `--env host`. Also `--note`, `--no-cache`, `--plan`, `--env`, `--timeout`, `--service`, `--probe` and `--wrap`. A revision is resolved to a full commit id. `--service`, `--probe` and `--wrap` are split into words as a shell would split them, with single quotes, double quotes and backslashes, and nothing else of a shell. The daemon puts `--wrap` in front of the candidate's server for `--image harness` on a task with `[candidate]` (a profile: `--wrap '<profiler>' -- <load argv>`), and otherwise in front of `--service` when it is given and of the command when not; `--service` is refused beside the candidate's server. Never cached or scored; its artifacts are kept with it. `jobs` names the image of each command job, and the job's output starts by naming it for a docker job. (`submit profile` and the 0.2 `[profile]` it read are retired; a manifest with `[profile]` still loads.) |
+| `submit measure <commit> [--samples n] [--recheck] [--plan n \| --no-plan] [flags]` | Queue the task's benchmark for `n` samples (the task's default when omitted: `samples` in its `objectives.toml`, else 5). Saved samples count: only the missing ones run. Flags as for `check`, except that a measure takes the whole node and refuses `--gpus`. `--plan n` says the measurement tests plan `n`, which the plan's view and a run's chart show beside the point; `--no-plan` says it tests none, as the baseline's does. A measure submitted from a run (a call that carries `--run`, or `VIBESYS_RUN`) must give one of them, since every point on a run's chart is a measure job and the plan is what the app shows beside it: without either the daemon refuses it as `INVALID_INPUT`, naming both flags. A person at a terminal, with no run, is not asked. The two are never given together, and `--plan 0` is not "none". Only a measure job takes `--no-plan`. An unknown plan is `NOT_FOUND`, naming `--plan`. |
+| `submit command <commit> --image harness\|candidate [flags] -- <argv...>` | Queue a command and print its id. Returns at once; `--wait` blocks as `wait` does. `--image` is required, with no default: `harness` runs the command in the task's image, where its check and benchmark run (the host for a task with no Dockerfile), and on a task with `[candidate]` beside the candidate's server exactly as the check and the benchmark run (server started from `[candidate] serve`, readiness polled, `VIBESYS_SERVICE_URL` set, the same resource shares; the server's startup time is added to `--timeout`); `candidate` runs it in the image built from the commit's `[candidate] dockerfile`, with no server, and is refused for a task without `[candidate]` or with `--env host`. Also `--note`, `--no-cache`, `--plan`, `--env`, `--timeout`, `--service`, `--probe` and `--wrap`. A revision is resolved to a full commit id. `--service`, `--probe` and `--wrap` are split into words as a shell would split them, with single quotes, double quotes and backslashes, and nothing else of a shell. The daemon puts `--wrap` in front of the candidate's server for `--image harness` on a task with `[candidate]` (a profile: `--wrap '<profiler>' -- <load argv>`), and otherwise in front of `--service` when it is given and of the command when not; `--service` is refused beside the candidate's server. Never cached or scored; its artifacts are kept with it. `--outputs` records the files the command leaves in its artifacts directory (`$VIBESYS_ARTIFACTS_DIR`) with the job when the command ends, however it ends: see "Output files of a command job". `jobs` names the image of each command job, and the job's output starts by naming it for a docker job. (`submit profile` and the 0.2 `[profile]` it read are retired; a manifest with `[profile]` still loads.) |
 | `wait <job>... [--any] [--timeout d]` | Block until the jobs are final, or with `--any` until one is. The daemon decides how the wait ended and keeps the timeout. |
 | `cancel <job> [--reason text]` | Stop a job and print it once it is final. Cancelling a final job prints it unchanged. |
 | `note <job> <text>` | Add a note to a job in any state. |
 | `jobs [--commit rev] [--state s] [--note-contains text]` | List the task's jobs, oldest first, with why each queued job waits. |
 | `logs <job> [--follow]` | Print a job's output, and with `--follow` keep printing until it ends. |
+| `outputs <job> [--to dir]` | The files a command job submitted with `--outputs` kept: the job, its environment, and each file's path, size and SHA-256. `--to` copies them into the directory, made when missing, at their paths; a file already there is replaced, and a file whose bytes are not the ones the job recorded is refused and not written. A job that kept none says why (exit 2 for a job submitted without `--outputs`, 1 for one that has not ended, ended before its command ran, or whose outputs were refused). |
 | `show <commit>` | Every result saved for a commit, oldest first: each check, and the commit's measurements pooled as `compare` pools them, one line per environment, task version and metric, naming every measure job it holds (a top-up adds its samples to the same measurement). A measurement's `value` is its headline number, the mean of its samples, computed by the daemon; each of its `observations` has the same `value` for its own samples. For a multi-objective task the line gives every objective's headline in the order the task declares them, the numbers `compare` weighs. With `--json`, `results` has each job's result and `measurements` the pooled ones. |
 | `compare <commit> [--against rev]` | `better`, `worse`, `within_noise` or `inconclusive`, against the result branch head unless `--against` names a commit. For a multi-objective task, also `tradeoff`, with a verdict on every objective (see "Multi-objective tasks" below). Refuses to mix environments. |
 | `promote <commit>` | Fast-forward the result branch to a commit that is `better` than its head, or print every reason it was refused. A refusal exits `1` and is printed on stdout. A promoted multi-objective commit is also offered to the frontier. |
 | `result` | The head and a final number, its latest measurement that rests on a passing check of the same commit, task version and environment, or why there is none (exit `1`): `no_head` before the first promotion, and `head_not_measured`, which names the `submit measure <head> --no-plan` that gives the head one (see "The result branch"). |
 | `frontier add <commit>` | Add a measured, check-passed commit of a multi-objective task to the task's frontier, evicting the members it beats, or print every reason it was refused. A refusal exits `1` and is printed on stdout; a commit of a single-metric task is `INVALID_INPUT`. |
 | `frontier list` | The frontier's members in the order they were added, each with its headline number on every objective, computed by the daemon. |
-| `plan create --title t [--body text \| --body-file path] [--gain-bound share] [--workstream n]` | Store a plan, open, and print its number. `--body -` and `--body-file -` read standard input. `--gain-bound` states the most the plan could gain, as a share (`0.05` or `5%`) of the headline; `--gain-bound-of` names what it is a share of (`headline` is the only value, and the default). `--workstream` puts the plan in a workstream of the task (`3` or `#3`), and a number the task has no workstream for is refused as not found, naming the flag. |
-| `plan list [--status s] [--search text]` | List the task's plans by number. With no `--status` every plan is listed. A plan that states a gain bound prints it after the title (`gain <= 5% of headline`). |
-| `plan view <n>` | Print a plan, its comments and the jobs linked to it (`submit --plan <n>` links one). |
-| `plan edit <n> [--title t] [--body text \| --body-file path] [--status s] [--gain-bound share] [--workstream n]` | Change what is given and keep the rest. A gain bound replaces the old one; it is never cleared. `--workstream` moves the plan to another workstream; a plan's workstream is moved and never cleared. |
+| `plan create --title t [--body text \| --body-file path] [--gain-bound share] [--workstream n] [--kind k] [--depends-on n[,n...]]` | Store a plan, open, and print its number. `--body -` and `--body-file -` read standard input. `--gain-bound` states the most the plan could gain, as a share (`0.05` or `5%`) of the headline; `--gain-bound-of` names what it is a share of (`headline` is the only value, and the default). `--workstream` puts the plan in a workstream of the task (`3` or `#3`), and a number the task has no workstream for is refused as not found, naming the flag. `--kind` is one of `kernel`, `system`, `layout`, `simulator`, `probe` and `integration`. `--depends-on` names the plans this one builds on, separated by commas or by repeating the flag; a number the task has no plan for is refused as not found. |
+| `plan list [--status s] [--kind k] [--ready] [--search text]` | List the task's plans by number. With no filter every plan is listed. A plan that states a gain bound prints it after the title (`gain <= 5% of headline`), then its workstream, `kind k` and `depends on 1,2` when it has them. `--kind` takes kinds separated by commas or repeated. `--ready` lists the plans ready to start: `open`, with every plan they depend on `won`. A dependency in any other status, `chosen`, `parked` or `rejected` included, keeps the plan waiting until it is won or the plan's dependencies are edited. |
+| `plan view <n>` | Print a plan, the plans it depends on and the plans that depend on it (each with its status and kind), its comments and the jobs linked to it (`submit --plan <n>` links one). With `--json`, the `PlanView` carries them as `depends_on` and `dependents`. |
+| `plan edit <n> [--title t] [--body text \| --body-file path] [--status s] [--gain-bound share] [--workstream n] [--kind k] [--depends-on n[,n...] \| none]` | Change what is given and keep the rest. A gain bound replaces the old one; it is never cleared. `--workstream` moves the plan to another workstream; a plan's workstream is moved and never cleared. `--kind` replaces the kind, which is never cleared. `--depends-on` replaces the whole set of dependencies, and `--depends-on none` clears it. A dependency on the plan itself, or on a plan that depends on it directly or through others, is refused as invalid input, naming the cycle, so the dependencies never make one. |
 | `plan comment <n> --body text \| --body-file path` | Add a comment, which carries a decision or a result. |
 | `plan close <n> --status s [--comment text \| --comment-file path]` | Set a status other than `open` and add a comment, as one change. |
 | `plan check-gain --under share` | Whether every plan that is `open` or `parked` states a gain bound below the share (`0.1` or `10%`). It prints `yes: ...` or `no: ...` followed by one line for each plan that is not under (a plan that states no bound is not under), and exits `0` for either answer. With `--json` the answer is `answer` (`PLAN_GAIN_ANSWER_ALL_UNDER` or `PLAN_GAIN_ANSWER_NOT_ALL_UNDER`), `counted` and `blockers`. A bound equal to the share is not below it. |
@@ -658,13 +661,43 @@ and are not linked into it) and runs them on the host, or in docker for a task t
   samples are saved with the machine's facts and load. When the measure ran the check itself, that
   pass counts as a check result (`core.Result.PassKey`), so a later check is answered by the
   measure job. A measure for more samples than the cache holds takes only the
-  missing ones, and links the saved check pass instead of checking again.
+  missing ones, and links the saved check pass instead of checking again. Where the task's
+  environment has a pool of GPUs, a pass is a claim about the number of devices it ran on: a measure
+  takes the whole pool and runs its check on all of it, so it links a pass of `submit check --gpus
+  <count>` with the pool's `count` (or one a measure saved), and runs its own check after a check of
+  fewer (see "GPU pools").
 
 Each command of a job gets its own artifacts directory, numbered in the order the commands ran
 (`01-check`, `02-benchmark`, ...), in the repository's state directory
 (`.vibesys-state/.artifacts/<task>/<job>/`); the job's output names it before the command runs. A
 command finds it in `VIBESYS_ARTIFACTS_DIR`. A benchmark that exits non-zero after writing an error
 record says the record's message in the job's reason.
+
+### Output files of a command job
+
+`submit command ... --outputs` declares that the command's files are part of its result. The command
+writes them under `$VIBESYS_ARTIFACTS_DIR`, the directory every command job already has: on the host
+it is the job's `01-command` artifacts directory, in a container `/vibesys/artifacts`, and on a
+remote placement it is copied back to this machine when the command ends, as the artifacts always
+are. A command's argv is not run by a shell, so a command that names the variable runs one
+(`-- sh -c '... > "$VIBESYS_ARTIFACTS_DIR/timings.json"'`) or reads it itself. When the command ends,
+however it ends (exited, failed, timed out or cancelled), the supervisor lists the directory and
+records with the job, beside its commit, environment and GPUs, each file's path, size and SHA-256
+(`Job.outputs`), and the job's output says what was kept. A command that never started records
+nothing.
+
+A job keeps at most 1000 files of at most 256 MiB in all (`core.MaxOutputFiles`,
+`core.MaxOutputBytes`), each path at most 1024 bytes. Past either bound, or with an entry that is not
+a regular file (a symbolic link, a pipe, a device), nothing is kept, and the record says why, naming
+the bound and what the command left (`the job left 1203 files in its artifacts directory, more than
+the 1000 a job keeps, so none was kept`). The refusal changes nothing of how the job ended. The
+files stay where the command left them in every case.
+
+`vibesys-cli outputs <job>` lists the files, and `--to <dir>` copies them through the daemon, so a
+client that cannot read the repository's state directory, such as a confined agent, still gets
+them. The daemon never follows a link or leaves the job's directory when it reads a file, and the
+client writes each file beside its place and renames it in only when its size and digest are the
+ones recorded, so a file that changed since the job ended is refused and never written.
 
 `--no-cache` runs the whole job again, with a fresh check. `--recheck` (measure) checks again but
 still takes only the missing samples. A cancelled job, a failed check, and a benchmark that wrote no
@@ -723,8 +756,9 @@ refused with the reason.
   checkout and the job's scratch directory are mounted at their own paths, so a path a command is
   given means the same inside. A task with `docker_in_docker = true` is refused: the container has
   no container runtime. A task for the `cuda` backend runs when its placement has a `gpu`
-  resource, and a task for the `rocm` backend when it has a `rocm` resource; each is refused
-  otherwise, with the resource it lacks named. Other accelerator backends are refused.
+  resource, a task for the `rocm` backend when it has a `rocm` resource, and a task for the
+  `trainium` backend when it has a `neuron` resource; each is refused otherwise, with the resource
+  it lacks named. Other accelerator backends (`metal`) are refused in a container.
 - A container also gets the cache directory of the task's image at `/vibesys/cache`, kept across
   commits and jobs, and an empty `/vibesys/artifacts` that is kept with the job; the variables
   `VIBESYS_CACHE_DIR` and `VIBESYS_ARTIFACTS_DIR` name them. Why the task environment is shaped this
@@ -737,10 +771,11 @@ refused with the reason.
   | `gpu` | The GPUs, by `--gpus all`, or by the runtime with `NVIDIA_VISIBLE_DEVICES`. When the table has a `count`, the devices of the job's own group instead, by number: `--gpus '"device=2,3"'`, quoted as docker needs a list, or the runtime's variable, and `VIBESYS_GPUS` and `VIBESYS_GPU_DEVICES` (see "GPU pools"). |
   | `kubernetes` | The kubeconfig, read-only, at `/vibesys/kubeconfig`, with `KUBECONFIG` naming it; the network mode (`docker run --network`), such as `host` for a cluster whose API server listens on the machine's loopback address; `VIBESYS_K8S_REGISTRY` and `VIBESYS_K8S_BUILDER` when the config names them. The task deploys to the cluster and cleans up after itself; the daemon does not manage the cluster. |
   | `mounts` | Each directory, read-only, at `/vibesys/mounts/<name>`, with `VIBESYS_MOUNTS` listing the names. |
+  | `neuron` | The `/dev/neuron*` devices that hold the job's range of NeuronCores, by `--device`, with `NEURON_RT_VISIBLE_CORES` naming the range, and `VIBESYS_GPUS` and `VIBESYS_GPU_DEVICES` (see "GPU pools"). Before the command, the container checks that no other process holds the cores; when one does, the job fails before its command, naming the device and the holders it can see. In a task of two images the devices are the server's. |
   | `rocm` | The machine's AMD GPUs: `--device /dev/kfd --device /dev/dri --group-add video` under docker, `--rocm` under Apptainer, and each of `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`, `GPU_DEVICE_ORDINAL` and `CUDA_VISIBLE_DEVICES` that Slurm set. When the table has a `count`, the devices are the same, and `ROCR_VISIBLE_DEVICES` names the job's group (see "GPU pools"). Before the command, the container checks that its ROCm runtime sees a GPU; when it does not, the job fails before its command with why, naming the image's ROCm version and the machine's amdgpu driver version. In a task of two images the GPUs are the server's. |
 
   A task names the resources its jobs need in its manifest, `[environment] needs = ["kubernetes"]`
-  (any of `gpu`, `kubernetes`, `mounts`, `rocm`). A job runs only on a placement that gives them all, and
+  (any of `gpu`, `kubernetes`, `mounts`, `rocm`, `neuron`). A job runs only on a placement that gives them all, and
   one restricted to a placement that lacks one is refused before anything is built, with
   `placement "<name>" has no resource "<kind>"`.
 - A result's environment fingerprint records where it was taken, for telling where a number came
@@ -814,6 +849,7 @@ below.
 | `[placements.<name>.allocations] fit_margin`, `run_idle_end` | Optional: the time a job's fit keeps free before its allocation ends (`"2m"` by default), and how long a run holding allocations of the placement may make no call before it is taken to have ended, as `alloc end-run` ends it (`"2h"` by default, at least `"1m"`). |
 | `[placements.<name>.resources.gpu] count`, `gres_type`, `runtime` | The machine's NVIDIA GPUs. `count` (1 to 64) is how many the machine has (for a cluster, each node): set, the GPUs `0` to `count - 1` are a pool that jobs share, each job given GPUs of its own, and it must equal the number of GPUs the machine reports where the CLI reads it (`nvidia-smi -L \| wc -l`). An empty table, with no `count`, gives every job all of the machine's GPUs. `slurm` placements need `count`, since their allocations ask for GPUs by count. `gres_type`, for `slurm` only, is the GPU type of the cluster's GRES (`a100` asks for `gpu:a100:<n>`), for a partition that names or mixes types. With `runtime` (such as `nvidia`) the GPUs are passed by that container runtime and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
 | `[placements.<name>.resources.rocm] count`, `gres_type` | The machine's AMD GPUs, for tasks of the `rocm` backend, with the same `count` and `gres_type` as `gpu` (`rocm-smi --showid` lists them); `apptainer` placements need `count`. `gres_type` says the cluster has a GPU resource to ask for GPUs in (`--gres=gpu:<gres_type>:<n>`, per job); an `apptainer` placement without it asks for none, since a cluster with no such resource refuses the request: Slurm cannot then keep two allocations off one GPU, so every allocation is a whole node (`--exclusive`) and the CLI names the job's devices inside it in `ROCR_VISIBLE_DEVICES` (as many as the job asked for, the lowest block), which the runtime honours and nothing enforces. An `apptainer` placement gives GPUs only this way; it refuses `gpu` and `kubernetes`. A placement gives the GPUs of one vendor, never both tables. |
+| `[placements.<name>.resources.neuron] count`, `cores_per_device` | The machine's AWS Neuron devices (Trainium), for tasks of the `trainium` backend, shared by logical NeuronCore, the unit `NEURON_RT_VISIBLE_CORES` names. Both are required: `count` is how many NeuronCores the machine has (`neuron-ls --json-output`: the sum of `nc_count`) and `cores_per_device` how many each device has (`nc_count`), which says the device of each core (core `c` is on `/dev/neuron<c / cores_per_device>`). The CLI checks both against `neuron-ls` at daemon start. The table is always a pool: the cores `0` to `count - 1` are shared by the jobs, each given a contiguous range of its own (see "GPU pools"). Only `local` and `ssh` placements give it, and not beside a `gpu` or `rocm` table. |
 | `[placements.<name>.resources.kubernetes] kubeconfig`, `registry`, `builder`, `network` | An absolute path of the kubeconfig on the engine's machine (required), the registry and image builder addresses the container gets, and its network mode (empty leaves docker's default). |
 | `[placements.<name>.resources.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`; for `apptainer`, a directory of the compute nodes, such as one on the shared file system. |
 
@@ -913,6 +949,18 @@ count = 8              # GPUs per node
 hf = "/shared/hf-cache"
 ```
 
+This machine, an AWS Trainium instance (a trn2.3xlarge has one device of four NeuronCores):
+
+```toml
+version = "0.2"
+
+[placements.trn]
+kind = "local"
+[placements.trn.resources.neuron]
+count = 4              # neuron-ls --json-output: the sum of nc_count; max_jobs is 4 unless set
+cores_per_device = 4   # nc_count of each device
+```
+
 Several placements in one file, with a policy and a Kubernetes cluster on this machine:
 
 ```toml
@@ -950,16 +998,30 @@ count = 8
 
 ### GPU pools
 
-A `local` or `ssh` placement whose GPU table (`gpu` or `rocm`) has a `count` makes the machine's GPUs
-`0` to `count - 1` a pool, and jobs share it by number. At daemon start the CLI reads how many GPUs
-the machine has, with `nvidia-smi` or the AMD tools (an ssh host is read over ssh), and refuses to
-start when the `count` is not that number, naming the key
-(`placements.pod.resources.gpu.count = 8, and local has 4 GPUs`); a machine it cannot read says
+A `local` or `ssh` placement whose GPU table (`gpu` or `rocm`) has a `count`, or that has a `neuron`
+table, makes the machine's devices `0` to `count - 1` a pool, and jobs share it by number. At daemon
+start the CLI reads how many devices the machine has, with `nvidia-smi`, the AMD tools or `neuron-ls`
+(an ssh host is read over ssh), and refuses to start when the `count` is not that number, naming the
+key (`placements.pod.resources.gpu.count = 8, and local has 4 GPUs`); a machine it cannot read says
 nothing, and its `count` is believed.
+
+A pool of Neuron devices counts logical NeuronCores, not devices: `NEURON_RT_VISIBLE_CORES` names
+cores, and one Trainium2 device has four (eight with `NEURON_LOGICAL_NC_CONFIG=1`), so jobs of one
+core each can share a device. Everything below holds for it with "GPU" read as "NeuronCore", with
+two differences. A job is given a contiguous range of cores, since the Neuron runtime refuses a
+`NEURON_RT_VISIBLE_CORES` with a gap ("Logical Neuron cores are not contiguous"): a job whose count
+of cores is free but not in a row waits for a range. And before a job's commands run, its
+environment checks that no other process holds its cores (below).
 
 - **Claims.** A check or command job of a task that needs GPUs claims as many devices of the pool as
   its `--gpus N` says, and a measure takes the whole pool, alone, with its placement, as it takes
-  its placement today. `--gpus N` is required of a check or command whose task needs GPUs where a placement declares a pool, and is refused (`INVALID_INPUT`, naming `--gpus` and the placements' sizes, `1 to <count>`) on a measure, for a task that needs no GPU, for a placement with no pool, and for more GPUs than any placement it may run on has; there is no default. A host command in the task's image reads no task, so it is not asked for a count. A job of a task that needs no GPU claims a slot and no device. The pool is
+  its placement today. A check's count is part of its cache key: a check that passed on 2
+  GPUs says nothing of one on 4, so checks of different counts never answer one another. A measure
+  runs its check on the whole pool, so it links the pass of a check that asked for all of it (`--gpus
+  8` of a pool of 8) and checks nothing again; after a check of fewer it runs its own. To check once
+  and measure once, check with the pool's size. A measure on a placement whose pool the CLI does
+  not count (a cluster's, see below) links only a pass saved with no count, such as an earlier
+  measure's. `--gpus N` is required of a check or command whose task needs GPUs where a placement declares a pool, and is refused (`INVALID_INPUT`, naming `--gpus` and the placements' sizes, `1 to <count>`) on a measure, for a task that needs no GPU, for a placement with no pool, and for more GPUs than any placement it may run on has; there is no default. A host command in the task's image reads no task, so it is not asked for a count. A job of a task that needs no GPU claims a slot and no device. The pool is
   a resource of `count` units that the scheduler counts like any other: a job waits when its
   devices are not free, and waits behind an earlier job that waits for more, so a job of the whole
   pool is not starved by a stream of one-GPU jobs. A job that waits for devices says how many it
@@ -1000,7 +1062,31 @@ nothing, and its `count` is believed.
   (`CUDA_VISIBLE_DEVICES`, or `ROCR_VISIBLE_DEVICES`) and nothing else: a host process that ignores
   them can open any GPU, and so can a process that vibesys did not start, which the pool never
   sees. Only `ROCR_VISIBLE_DEVICES` is set for AMD GPUs: `HIP_VISIBLE_DEVICES` counts the devices
-  left after it, so setting both to the group would filter twice.
+  left after it, so setting both to the group would filter twice. A container of a Neuron pool gets
+  the `/dev/neuron*` devices that hold its cores (`--device /dev/neuron0`), so it cannot open
+  another device, and `NEURON_RT_VISIBLE_CORES` names its cores, by the machine's numbering; the
+  cores of its devices that are not its own are kept from it by that variable alone. A host process
+  gets the variable alone.
+- **Cores another process holds.** A process the pool does not know of (a probe, a profiler, a
+  server left running) can hold NeuronCores, and a job whose runtime then opens them fails with
+  `Logical Neuron Core(s) not available ... (cores busy)`, which looks like a fault of the code
+  under test. So before a job of a Neuron pool runs its commands, in its container or on the host,
+  it runs a check that reads, in sysfs, the device memory live runtimes hold on each physical core
+  (`/sys/class/neuron_device/neuron<d>/neuron_core<p>/stats/memory_usage/device_mem/total`), never
+  the scheduler's record. A runtime holds memory there on every physical core of each logical core
+  it opens, from the moment it opens them (2.5 MB on each after `nrt_init` alone), and the driver
+  frees it when the process exits, killed or not. The `present` counters beside it are no signal:
+  they stay at a page while a process holds a gigabyte, and keep 64 MiB after it is gone. The job
+  fails before its commands (`UNAVAILABLE`), naming the device, the held physical cores and the
+  processes `neuron-ls` lists on the device when it can see them (`held by pid 4242 (python
+  holder.py)`), when more physical cores of one of its devices are held than the cores it was not
+  given are made of: then some held core is its own. sysfs does not say which physical cores make
+  up which logical NeuronCore (on a trn2.3xlarge, logical core 0 is physical cores 4 and 5), so the
+  check counts: it is exact for a job given a whole device, as a measure is, which any held core
+  refuses; for a job given part of a device it refuses only what the count proves, and a foreign
+  process on exactly the job's own cores is then reported by the job's runtime. A check that cannot
+  read sysfs fails the job too. A job refused this way can be submitted again once `neuron-ls`
+  shows the device free.
 - **Host jobs** take their GPUs from the pool of the local placement that declares this machine's
   GPUs, and its slot, so a host job and a docker job of this machine never share a GPU. A machine
   with no container runtime declares `kind = "local"` with a `count` (the second example below)
@@ -1018,8 +1104,10 @@ nothing, and its `count` is believed.
   given the GPUs it asks for of the pool.
 
 Adding a vendor is a package under `internal/resource/` with its role (`resource.Devices`: the
-pool's id and size, what a container is given for a group, and the variables a host process is
-given) and its resource, a line in the wiring, and its `devicestest` suite: no other file changes.
+pool's id and size, what a container is given for a group, the variables a host process is given,
+and the check that runs before a job's commands, if any) and its resource, a line in the wiring,
+and its `devicestest` suite: no other file changes. A vendor whose groups must be ranges says so
+in `core.ResourceKind.Contiguous`.
 
 ### The apptainer placement
 
@@ -1329,6 +1417,33 @@ count, so nothing taken under another task version stands for the head (a commit
 that of the task its tree holds), and a failed check or measure saves no result. A head with no such
 measurement is `head_not_measured`, and `submit measure <head> --no-plan` gives it one.
 
+## Sample count, noise floor and minimum gain
+
+`objectives.toml` may say how many samples a measurement takes and, for the objective a task
+scores, its noise floor and the smallest gain that counts:
+
+```toml
+samples = 1                  # optional: submit measure without --samples takes 1 (default 5)
+
+[[objective]]
+name = "tok_per_s"
+direction = "max"
+relative_noise = 0.003       # optional: the measured same-code spread of one run
+min_gain = 0.02              # optional: better needs more than +2% as well as the noise test
+```
+
+`samples` is from 1 to 1000. With `relative_noise` the noise is never below the floor and a gain
+must exceed two noises, at any sample count, one a side included; without it `compare` needs three
+samples a side. `min_gain` is at least 0 and less than 1: `better` then also needs the gain to
+exceed it, and a gain that passes the noise test but not `min_gain` is `within_noise`. It never
+changes what is `worse`. Every verdict records the `relative_noise` and `min_gain` it used and
+`decided_by`, the bar that decided it: `VERDICT_BOUND_NOISE`, or `VERDICT_BOUND_MIN_GAIN` when the
+minimum gain was the higher bar of a `better`, or held back a gain the noise test passed. In a
+task that is not multi-objective only the scored objective may declare either key; one on another
+objective is refused naming it. Each measurement records what was declared, so the verdict rests on
+the values in force when the samples were taken; changing either changes the task version. The job
+records the sample count it ran with.
+
 ## Multi-objective tasks
 
 A task is multi-objective (Pareto) when its `objectives.toml` has a `[pareto]` section and declares
@@ -1353,8 +1468,8 @@ relative_noise = 0.03        # the floor of every objective that declares none
 ```
 
 The value is at least 0 and less than 1 (`0` declares no floor for that objective, so Welch's t
-test judges it); anything else, or a `relative_noise` in a task that is not multi-objective, is
-refused naming the objective. The floor is in `objectives.toml`, so it is part of the task version,
+test judges it); anything else is refused naming the objective. An objective may also declare a
+`min_gain`, which holds a `better` verdict on it to a gain above it (see the section above). The floor is in `objectives.toml`, so it is part of the task version,
 and each measurement records it with its objectives: measurements judged under different floors
 are not pooled. A task with no per-objective value is judged exactly as before.
 

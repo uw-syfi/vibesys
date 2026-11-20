@@ -93,10 +93,14 @@ type GPUs struct {
 	// of them the container uses is up to the variables in GPUEnv: the driver's devices are all
 	// passed, so the container is not confined to them.
 	ROCm bool
+	// Neuron lists the numbers of the AWS Neuron devices the container gets, such as "0,1": the
+	// docker environment passes each as the device /dev/neuron<n>. Which of their NeuronCores the
+	// container uses is up to the variables in GPUEnv. It is never set with the others.
+	Neuron string
 }
 
-// Given reports whether the container gets GPUs of either kind.
-func (g GPUs) Given() bool { return g.Devices != "" || g.NVIDIA != "" || g.ROCm }
+// Given reports whether the container gets GPUs of any kind.
+func (g GPUs) Given() bool { return g.Devices != "" || g.NVIDIA != "" || g.ROCm || g.Neuron != "" }
 
 var (
 	factName    = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
@@ -164,6 +168,10 @@ func (a Attachment) Validate() error {
 		return invalid("the GPUs are passed both with the --gpus value %q and by number", a.GPUs.Devices)
 	case a.GPUs.NVIDIA != "" && !deviceList.MatchString(a.GPUs.NVIDIA):
 		return invalid("%q is not a list of GPU numbers such as 2,3", a.GPUs.NVIDIA)
+	case a.GPUs.Neuron != "" && (a.GPUs.Devices != "" || a.GPUs.NVIDIA != "" || a.GPUs.ROCm || a.GPUs.Runtime != ""):
+		return invalid("Neuron devices are passed with the GPUs of another vendor")
+	case a.GPUs.Neuron != "" && !deviceList.MatchString(a.GPUs.Neuron):
+		return invalid("%q is not a list of Neuron device numbers such as 0,1", a.GPUs.Neuron)
 	}
 	return nil
 }

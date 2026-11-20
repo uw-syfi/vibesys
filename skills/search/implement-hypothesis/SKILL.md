@@ -38,12 +38,17 @@ set; export it as the absolute path of the vibesys-cli to use`.
 3. Commit in your worktree as `vibesys:commit` says: often, with `wip` checkpoints as you go, and the
    candidate as a full commit with `Checks: pass`. A cheap check on a commit that needs no number:
    `vibesys-cli submit check <sha> --wait --plan <n>`. For the number, follow your brief: if it
-   grants a budget, `vibesys-cli submit measure <sha> --samples 5 --plan <n>` and wait for it
+   grants a budget, `vibesys-cli submit measure <sha> --plan <n>` and wait for it
    (`vibesys:measure`; a measure without `--plan <n>` is refused), otherwise return the SHA as
    `ready for measurement`. Then
    `vibesys-cli compare <sha>`, and add `--against <sha>` when you built on a candidate, to see the
    gain over your parent.
 4. With the verdict in hand, build the next step on it, or stop.
+
+When your brief has `Evidence:` and `Device jobs:` lines (a simulator-led run), climb that ladder
+in order instead of measuring: stop at the first rung that fails and hand back its evidence. Submit
+only the device jobs the brief lists, each with its `--note "Question: <...>. Predicts: <...>."`.
+The lead cancels any other device job, and its result counts for nothing.
 
 GPUs: stay inside the task's GPU budget. When your change touches how the server launches,
 places or shards work, or claims a throughput gain, check per-device use under load and report how
@@ -74,7 +79,7 @@ agents' jobs alone ([reading the queue](../measure/references/jobs.md#reading-th
 Every turn ends the same way, in this order, and no turn ends any other way:
 
 1. **Measure.** If your brief grants a budget and you have a candidate commit,
-   `vibesys-cli submit measure <sha> --samples 5 --plan <n>`, wait for it, and run
+   `vibesys-cli submit measure <sha> --plan <n>`, wait for it, and run
    `vibesys-cli compare <sha>` (`vibesys:measure`). A commit you did not measure is
    `ready for measurement`, and your handoff says so. Prose about how fast it should be is not a
    measurement.

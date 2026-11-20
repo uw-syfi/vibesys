@@ -41,6 +41,61 @@ func ToPlanStatus(field string, s cliv1.PlanStatus) (core.PlanStatus, error) {
 	return "", invalid("%s: %s is not a plan status", field, s)
 }
 
+// planKinds pairs each domain kind with its contract value. Both directions read this table, so
+// they cannot disagree. The zero kind, none stated, is the contract's unspecified.
+var planKinds = []struct {
+	domain core.PlanKind
+	wire   cliv1.PlanKind
+}{
+	{"", cliv1.PlanKind_PLAN_KIND_UNSPECIFIED},
+	{core.PlanKernel, cliv1.PlanKind_PLAN_KIND_KERNEL},
+	{core.PlanSystem, cliv1.PlanKind_PLAN_KIND_SYSTEM},
+	{core.PlanLayout, cliv1.PlanKind_PLAN_KIND_LAYOUT},
+	{core.PlanSimulator, cliv1.PlanKind_PLAN_KIND_SIMULATOR},
+	{core.PlanProbe, cliv1.PlanKind_PLAN_KIND_PROBE},
+	{core.PlanIntegration, cliv1.PlanKind_PLAN_KIND_INTEGRATION},
+}
+
+// PlanKind returns the contract's value for a kind: unspecified for none, and for a kind it does
+// not name.
+func PlanKind(k core.PlanKind) cliv1.PlanKind {
+	for _, p := range planKinds {
+		if p.domain == k {
+			return p.wire
+		}
+	}
+	return cliv1.PlanKind_PLAN_KIND_UNSPECIFIED
+}
+
+// ToPlanKind returns the domain kind for the contract's value, "" for unspecified, or
+// invalid_input naming field.
+func ToPlanKind(field string, k cliv1.PlanKind) (core.PlanKind, error) {
+	for _, p := range planKinds {
+		if p.wire == k {
+			return p.domain, nil
+		}
+	}
+	return "", invalid("%s: %s is not a plan kind", field, k)
+}
+
+// PlanNumbers returns the contract's numbers for plan numbers, in order.
+func PlanNumbers(ns []core.PlanNumber) []uint32 {
+	var out []uint32
+	for _, n := range ns {
+		out = append(out, uint32(n))
+	}
+	return out
+}
+
+// ToPlanNumbers returns the domain plan numbers for the contract's, in order.
+func ToPlanNumbers(ns []uint32) []core.PlanNumber {
+	var out []core.PlanNumber
+	for _, n := range ns {
+		out = append(out, core.PlanNumber(n))
+	}
+	return out
+}
+
 // gainReferences pairs each domain reference with its contract value.
 var gainReferences = []struct {
 	domain core.GainReference
@@ -122,6 +177,8 @@ func Plan(p core.Plan) *cliv1.Plan {
 		UpdatedAt:  timestamp(p.UpdatedAt),
 		GainBound:  GainBound(p.GainBound),
 		Workstream: uint32(p.Workstream),
+		Kind:       PlanKind(p.Kind),
+		DependsOn:  PlanNumbers(p.DependsOn),
 	}
 	if p.Origin != nil {
 		out.Origin = RecordOrigin(*p.Origin)
@@ -154,10 +211,14 @@ func ToPlan(p *cliv1.Plan) (core.Plan, error) {
 	if err != nil {
 		return core.Plan{}, err
 	}
+	kind, err := ToPlanKind("plan.kind", p.GetKind())
+	if err != nil {
+		return core.Plan{}, err
+	}
 	out := core.Plan{
 		Number: core.PlanNumber(p.GetNumber()), Title: p.GetTitle(), Body: p.GetBody(), Status: status,
 		CreatedAt: toTime(p.GetCreatedAt()), UpdatedAt: toTime(p.GetUpdatedAt()), GainBound: bound,
-		Workstream: core.WorkstreamNumber(p.GetWorkstream()),
+		Workstream: core.WorkstreamNumber(p.GetWorkstream()), Kind: kind, DependsOn: ToPlanNumbers(p.GetDependsOn()),
 	}
 	if p.GetOrigin() != nil {
 		origin := toRecordOrigin(p.GetOrigin())
@@ -187,18 +248,39 @@ func PlanView(v core.PlanView) *cliv1.PlanView {
 		}
 		out.Jobs = append(out.Jobs, linked)
 	}
+	for _, p := range v.DependsOn {
+		out.DependsOn = append(out.DependsOn, PlanSummary(p))
+	}
+	for _, p := range v.Dependents {
+		out.Dependents = append(out.Dependents, PlanSummary(p))
+	}
 	return out
+}
+
+// PlanSummary returns the contract's short naming of a plan: its number, title, status and kind.
+func PlanSummary(p core.Plan) *cliv1.PlanSummary {
+	return &cliv1.PlanSummary{Number: uint32(p.Number), Title: p.Title, Status: PlanStatus(p.Status), Kind: PlanKind(p.Kind)}
 }
 
 // ToPlanFilter returns the domain filter for a ListPlans request.
 func ToPlanFilter(r *cliv1.ListPlansRequest) (core.PlanFilter, error) {
-	filter := core.PlanFilter{Text: r.GetText()}
+	filter := core.PlanFilter{Text: r.GetText(), Ready: r.GetReady()}
 	for _, s := range r.GetStatuses() {
 		status, err := ToPlanStatus("statuses", s)
 		if err != nil {
 			return core.PlanFilter{}, err
 		}
 		filter.Statuses = append(filter.Statuses, status)
+	}
+	for _, k := range r.GetKinds() {
+		kind, err := ToPlanKind("kinds", k)
+		if err != nil {
+			return core.PlanFilter{}, err
+		}
+		if kind == "" {
+			return core.PlanFilter{}, invalid("kinds: %s is not a plan kind", k)
+		}
+		filter.Kinds = append(filter.Kinds, kind)
 	}
 	return filter, nil
 }

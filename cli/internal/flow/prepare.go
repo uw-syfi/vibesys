@@ -19,6 +19,9 @@ type Starting struct {
 	Environment core.Fingerprint
 	// Saved holds the saved results of the job's commit, whatever their key.
 	Saved []core.Result
+	// GPUs are the GPUs of a pool the job is given as it starts, nil for a job given none, as for a
+	// placement without a pool or one whose cluster names the devices itself.
+	GPUs *core.Grant
 }
 
 // Prepare makes the plan of a job that is about to start. It is the rule for what the cache lets
@@ -31,7 +34,9 @@ type Starting struct {
 //     its own;
 //   - a measure job links the saved check pass of its own key's check, from the same commit, task
 //     version and environment, unless the job is no-cache or rechecks, and runs the check itself
-//     when there is none.
+//     when there is none. A pass is a claim about the number of devices it ran on (core.NewJobKey),
+//     and a measure given the whole of a pool of n runs its check on all n, so it also links a pass
+//     of a check that asked for n (`--gpus n`), and no pass of any other count.
 //
 // It fails with FailureEnvironmentMismatch when the task is not at the version the job was
 // submitted for: the task changed while the job waited, and the submitter asked for a result of the
@@ -56,13 +61,13 @@ func Prepare(in Starting) (Plan, error) {
 		return Plan{}, &core.Failure{Kind: core.FailureEnvironmentMismatch, Message: fmt.Sprintf(
 			"the task changed while job %s waited: it was submitted for task version %s and is now at %s", job.ID, job.TaskVersion, in.Task.Version)}
 	}
-	keyOf := func(kind core.JobKind, settings core.Settings) (core.JobKey, error) {
+	keyOf := func(kind core.JobKind, settings core.Settings, gpus core.GPUCount) (core.JobKey, error) {
 		return core.NewJobKey(core.KeyInputs{
 			Kind: kind, Commit: job.Spec.Commit, TaskVersion: in.Task.Version,
-			Environment: in.Environment, Settings: settings, SchemaVersion: core.SchemaVersion, GPUs: job.Spec.GPUs,
+			Environment: in.Environment, Settings: settings, SchemaVersion: core.SchemaVersion, GPUs: gpus,
 		})
 	}
-	key, err := keyOf(kind, job.Spec.Settings)
+	key, err := keyOf(kind, job.Spec.Settings, job.Spec.GPUs)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -89,16 +94,32 @@ func Prepare(in Starting) (Plan, error) {
 			p.Samples = t.Samples
 		}
 	}
-	checkKey, err := keyOf(core.JobCheck, core.CheckSettings{})
-	if err != nil {
-		return Plan{}, err
+	p.CheckPass, err = linkedPass(in, settings, keyOf)
+	return p, err
+}
+
+// linkedPass is the saved check pass a measure job links, or none. The passes it may link are those
+// of the check its own check would be: the one with no count of GPUs, as the measure's own key has
+// and as an earlier measure's check is saved under (core.Result.PassKey), and, for a measure given
+// the whole of a pool, the one that asked for as many GPUs as the pool has, which ran on as many
+// devices as the measure's check would. A pass of another count says nothing of the measure's.
+func linkedPass(in Starting, settings core.MeasureSettings, keyOf func(core.JobKind, core.Settings, core.GPUCount) (core.JobKey, error)) (core.JobID, error) {
+	counts := []core.GPUCount{in.Job.Spec.GPUs}
+	if g := in.GPUs; g != nil && g.Whole && g.Size.IsSet() && g.Size != in.Job.Spec.GPUs {
+		counts = append(counts, g.Size)
 	}
-	pass, err := core.PlanCache(core.CacheQuery{Key: checkKey, Settings: core.CheckSettings{}, NoCache: in.NoCache || settings.Recheck, Saved: in.Saved})
-	if err != nil {
-		return Plan{}, err
+	for _, n := range counts {
+		checkKey, err := keyOf(core.JobCheck, core.CheckSettings{}, n)
+		if err != nil {
+			return "", err
+		}
+		pass, err := core.PlanCache(core.CacheQuery{Key: checkKey, Settings: core.CheckSettings{}, NoCache: in.NoCache || settings.Recheck, Saved: in.Saved})
+		if err != nil {
+			return "", err
+		}
+		if pass.Action == core.CacheReuse {
+			return pass.From[0], nil
+		}
 	}
-	if pass.Action == core.CacheReuse {
-		p.CheckPass = pass.From[0]
-	}
-	return p, nil
+	return "", nil
 }

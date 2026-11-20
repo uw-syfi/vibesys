@@ -14,12 +14,14 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/verdict.proto.
  */
 export const file_vibesys_cli_v1_verdict: GenFile = /*@__PURE__*/
-  fileDesc("Chx2aWJlc3lzL2NsaS92MS92ZXJkaWN0LnByb3RvEg52aWJlc3lzLmNsaS52MSLiAQoHVmVyZGljdBIpCgRraW5kGAEgASgOMhsudmliZXN5cy5jbGkudjEuVmVyZGljdEtpbmQSMgoGcmVhc29uGAIgASgOMiIudmliZXN5cy5jbGkudjEuSW5jb25jbHVzaXZlUmVhc29uEhkKEWNhbmRpZGF0ZV9zYW1wbGVzGAMgASgNEhQKDGJhc2Vfc2FtcGxlcxgEIAEoDRIWCg5jYW5kaWRhdGVfbWVhbhgFIAEoARIRCgliYXNlX21lYW4YBiABKAESDQoFcmF0aW8YByABKAESDQoFbm9pc2UYCCABKAEiZAoQT2JqZWN0aXZlVmVyZGljdBImCgZtZXRyaWMYASABKAsyFi52aWJlc3lzLmNsaS52MS5NZXRyaWMSKAoHdmVyZGljdBgCIAEoCzIXLnZpYmVzeXMuY2xpLnYxLlZlcmRpY3QiygEKCkNvbXBhcmlzb24SDgoGY29tbWl0GAEgASgJEg8KB2FnYWluc3QYAiABKAkSKAoHdmVyZGljdBgDIAEoCzIXLnZpYmVzeXMuY2xpLnYxLlZlcmRpY3QSOwoLZW52aXJvbm1lbnQYBCABKAsyJi52aWJlc3lzLmNsaS52MS5FbnZpcm9ubWVudEZpbmdlcnByaW50EjQKCm9iamVjdGl2ZXMYBSADKAsyIC52aWJlc3lzLmNsaS52MS5PYmplY3RpdmVWZXJkaWN0KrUBCgtWZXJkaWN0S2luZBIcChhWRVJESUNUX0tJTkRfVU5TUEVDSUZJRUQQABIXChNWRVJESUNUX0tJTkRfQkVUVEVSEAESFgoSVkVSRElDVF9LSU5EX1dPUlNFEAISHQoZVkVSRElDVF9LSU5EX1dJVEhJTl9OT0lTRRADEh0KGVZFUkRJQ1RfS0lORF9JTkNPTkNMVVNJVkUQBBIZChVWRVJESUNUX0tJTkRfVFJBREVPRkYQBSrkAQoSSW5jb25jbHVzaXZlUmVhc29uEiMKH0lOQ09OQ0xVU0lWRV9SRUFTT05fVU5TUEVDSUZJRUQQABInCiNJTkNPTkNMVVNJVkVfUkVBU09OX1RPT19GRVdfU0FNUExFUxABEigKJElOQ09OQ0xVU0lWRV9SRUFTT05fQ09OU1RBTlRfU0FNUExFUxACEicKI0lOQ09OQ0xVU0lWRV9SRUFTT05fTUVUUklDX01JU01BVENIEAMSLQopSU5DT05DTFVTSVZFX1JFQVNPTl9UQVNLX1ZFUlNJT05fTUlTTUFUQ0gQBEI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_vibesys_cli_v1_environment, file_vibesys_cli_v1_result]);
+  fileDesc("Chx2aWJlc3lzL2NsaS92MS92ZXJkaWN0LnByb3RvEg52aWJlc3lzLmNsaS52MSK+AgoHVmVyZGljdBIpCgRraW5kGAEgASgOMhsudmliZXN5cy5jbGkudjEuVmVyZGljdEtpbmQSMgoGcmVhc29uGAIgASgOMiIudmliZXN5cy5jbGkudjEuSW5jb25jbHVzaXZlUmVhc29uEhkKEWNhbmRpZGF0ZV9zYW1wbGVzGAMgASgNEhQKDGJhc2Vfc2FtcGxlcxgEIAEoDRIWCg5jYW5kaWRhdGVfbWVhbhgFIAEoARIRCgliYXNlX21lYW4YBiABKAESDQoFcmF0aW8YByABKAESDQoFbm9pc2UYCCABKAESFgoOcmVsYXRpdmVfbm9pc2UYCSABKAESEAoIbWluX2dhaW4YCiABKAESMAoKZGVjaWRlZF9ieRgLIAEoDjIcLnZpYmVzeXMuY2xpLnYxLlZlcmRpY3RCb3VuZCJkChBPYmplY3RpdmVWZXJkaWN0EiYKBm1ldHJpYxgBIAEoCzIWLnZpYmVzeXMuY2xpLnYxLk1ldHJpYxIoCgd2ZXJkaWN0GAIgASgLMhcudmliZXN5cy5jbGkudjEuVmVyZGljdCLKAQoKQ29tcGFyaXNvbhIOCgZjb21taXQYASABKAkSDwoHYWdhaW5zdBgCIAEoCRIoCgd2ZXJkaWN0GAMgASgLMhcudmliZXN5cy5jbGkudjEuVmVyZGljdBI7CgtlbnZpcm9ubWVudBgEIAEoCzImLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50RmluZ2VycHJpbnQSNAoKb2JqZWN0aXZlcxgFIAMoCzIgLnZpYmVzeXMuY2xpLnYxLk9iamVjdGl2ZVZlcmRpY3QqtQEKC1ZlcmRpY3RLaW5kEhwKGFZFUkRJQ1RfS0lORF9VTlNQRUNJRklFRBAAEhcKE1ZFUkRJQ1RfS0lORF9CRVRURVIQARIWChJWRVJESUNUX0tJTkRfV09SU0UQAhIdChlWRVJESUNUX0tJTkRfV0lUSElOX05PSVNFEAMSHQoZVkVSRElDVF9LSU5EX0lOQ09OQ0xVU0lWRRAEEhkKFVZFUkRJQ1RfS0lORF9UUkFERU9GRhAFKuQBChJJbmNvbmNsdXNpdmVSZWFzb24SIwofSU5DT05DTFVTSVZFX1JFQVNPTl9VTlNQRUNJRklFRBAAEicKI0lOQ09OQ0xVU0lWRV9SRUFTT05fVE9PX0ZFV19TQU1QTEVTEAESKAokSU5DT05DTFVTSVZFX1JFQVNPTl9DT05TVEFOVF9TQU1QTEVTEAISJwojSU5DT05DTFVTSVZFX1JFQVNPTl9NRVRSSUNfTUlTTUFUQ0gQAxItCilJTkNPTkNMVVNJVkVfUkVBU09OX1RBU0tfVkVSU0lPTl9NSVNNQVRDSBAEKmIKDFZlcmRpY3RCb3VuZBIdChlWRVJESUNUX0JPVU5EX1VOU1BFQ0lGSUVEEAASFwoTVkVSRElDVF9CT1VORF9OT0lTRRABEhoKFlZFUkRJQ1RfQk9VTkRfTUlOX0dBSU4QAkI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_vibesys_cli_v1_environment, file_vibesys_cli_v1_result]);
 
 /**
  * Verdict is a pure function of the two sample sets, the metric's direction and the task's declared
- * noise floor: the same samples always give the same verdict. Without a declared floor it is Welch's
- * t test at 95% and needs at least 3 samples a side; with one, a difference must exceed 2 noises.
+ * noise floor and minimum gain: the same samples always give the same verdict. Without a declared
+ * floor it is Welch's t test at 95% and needs at least 3 samples a side; with one, a difference must
+ * exceed 2 noises, at any sample count. A declared min_gain also holds a better verdict to a gain
+ * above it.
  *
  * @generated from message vibesys.cli.v1.Verdict
  */
@@ -69,6 +71,27 @@ export type Verdict = Message<"vibesys.cli.v1.Verdict"> & {
    * @generated from field: double noise = 8;
    */
   noise: number;
+
+  /**
+   * The noise floor the task declared and the comparison used (relative_noise), zero for none.
+   *
+   * @generated from field: double relative_noise = 9;
+   */
+  relativeNoise: number;
+
+  /**
+   * The smallest relative gain the task declared to count as better (min_gain), zero for none.
+   *
+   * @generated from field: double min_gain = 10;
+   */
+  minGain: number;
+
+  /**
+   * The bar that decided a conclusive verdict; unspecified for an inconclusive one.
+   *
+   * @generated from field: vibesys.cli.v1.VerdictBound decided_by = 11;
+   */
+  decidedBy: VerdictBound;
 };
 
 /**
@@ -247,4 +270,39 @@ export enum InconclusiveReason {
  */
 export const InconclusiveReasonSchema: GenEnum<InconclusiveReason> = /*@__PURE__*/
   enumDesc(file_vibesys_cli_v1_verdict, 1);
+
+/**
+ * VerdictBound is the bar that decided a conclusive verdict.
+ *
+ * @generated from enum vibesys.cli.v1.VerdictBound
+ */
+export enum VerdictBound {
+  /**
+   * The verdict is inconclusive, or was saved before verdicts named their bound.
+   *
+   * @generated from enum value: VERDICT_BOUND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The noise test: the gain against a multiple of the noise.
+   *
+   * @generated from enum value: VERDICT_BOUND_NOISE = 1;
+   */
+  NOISE = 1,
+
+  /**
+   * The objective's declared min_gain. A better verdict names it when min_gain was the higher bar,
+   * and a within-noise one when the gain passed the noise test but not min_gain.
+   *
+   * @generated from enum value: VERDICT_BOUND_MIN_GAIN = 2;
+   */
+  MIN_GAIN = 2,
+}
+
+/**
+ * Describes the enum vibesys.cli.v1.VerdictBound.
+ */
+export const VerdictBoundSchema: GenEnum<VerdictBound> = /*@__PURE__*/
+  enumDesc(file_vibesys_cli_v1_verdict, 2);
 

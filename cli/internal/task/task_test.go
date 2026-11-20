@@ -899,15 +899,49 @@ func TestAnInvalidObjectiveNoiseFloorIsRefusedNamingTheObjective(t *testing.T) {
 		}
 	}
 	for name, text := range map[string]string{
-		"no [pareto]":    "[[objective]]\nname = \"a\"\ndirection = \"max\"\nrelative_noise = 0.1\n[[objective]]\nname = \"b\"\ndirection = \"min\"\n",
-		"one objective":  strings.Replace(objectives, `direction = "max"`, "direction = \"max\"\nrelative_noise = 0.1\n[pareto]", 1),
-		"a string":       fmt.Sprintf(noiseObjectives, `"0.1"`),
-		"a misspelt key": "[[objective]]\nname = \"a\"\ndirection = \"max\"\nrelative_noize = 0.1\n",
+		"unscored, no [pareto]": "[[objective]]\nname = \"a\"\ndirection = \"max\"\n[[objective]]\nname = \"b\"\ndirection = \"min\"\nrelative_noise = 0.1\n",
+		"a string":              fmt.Sprintf(noiseObjectives, `"0.1"`),
+		"a misspelt key":        "[[objective]]\nname = \"a\"\ndirection = \"max\"\nrelative_noize = 0.1\n",
 	} {
 		_, err := task.Read(repo(taskFiles("p", protocol2Manifest, text)), "p")
 		if err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// A single-metric task may declare a noise floor and a minimum gain on the objective it scores, and
+// a sample count. The floor and the gain are its Objectives, so every measurement records them,
+// and changing either changes the task's version; the sample count is the task's default.
+func TestASingleMetricTaskDeclaresItsFloorMinimumGainAndSampleCount(t *testing.T) {
+	r := rand.New(rand.NewPCG(13, 14))
+	for range 200 {
+		floor := []float64{0, 0.01, 0.5, r.Float64() * 0.999}[r.IntN(4)]
+		gain := []float64{0, 0.02, 0.5, r.Float64() * 0.999}[r.IntN(4)]
+		samples := 1 + r.Uint32N(1000)
+		text := fmt.Sprintf("samples = %d\n%sname = \"other\"\ndirection = \"min\"\n", samples,
+			strings.Replace(objectives, `direction = "max"`, fmt.Sprintf("direction = \"max\"\nrelative_noise = %v\nmin_gain = %v\n[[objective]]", floor, gain), 1))
+		got, err := task.Read(repo(taskFiles("p", protocol2Manifest, text)), "p")
+		if err != nil {
+			t.Fatalf("%v read from\n%s", err, text)
+		}
+		if got.Samples != samples {
+			t.Errorf("samples %d, want %d", got.Samples, samples)
+		}
+		if got.Objectives.Pareto() || got.Objectives.NoiseFor("ops_per_sec") != floor || got.Objectives.MinGainFor("ops_per_sec") != gain {
+			t.Errorf("objectives %+v, want a floor of %v and a minimum gain of %v on ops_per_sec alone", got.Objectives, floor, gain)
+		}
+		if declared := floor != 0 || gain != 0; declared != (len(got.Objectives.Metrics) == 1 && got.Objectives.Metrics[0] == got.Metric) {
+			t.Errorf("objectives %+v for a floor of %v and a gain of %v: they hold the scored metric exactly when either is declared", got.Objectives, floor, gain)
+		}
+	}
+	plain, err := task.Read(repo(taskFiles("p", protocol2Manifest, objectives)), "p")
+	if err != nil || plain.Samples != task.DefaultSamples || plain.Objectives.Declared() {
+		t.Errorf("a task that declares nothing: samples %d, objectives %+v, %v", plain.Samples, plain.Objectives, err)
+	}
+	gained, err := task.Read(repo(taskFiles("p", protocol2Manifest, strings.Replace(objectives, `direction = "max"`, "direction = \"max\"\nmin_gain = 0.02", 1))), "p")
+	if err != nil || gained.Version == plain.Version {
+		t.Errorf("declaring a min_gain did not change the task version: %v", err)
 	}
 }
 

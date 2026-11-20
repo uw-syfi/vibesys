@@ -13,13 +13,14 @@ Three things hold for the whole run:
 
 - **Plans go to workers.** A plan is a hypothesis for a worker to try. You never try one yourself,
   not a first draft, a small one or the one that looks easy, and you never create a worktree to
-  implement in. Planners write the plans; you write none. You start a subagent with the
+  implement in. Planners write the plans; you write none but an integration plan, which only
+  merges plans already accepted ([integration.md](references/integration.md)). You start a subagent with the
   harness's subagent tool. Loading a role's skill (`plan-hypotheses`, `implement-hypothesis`,
   `judge-candidate`, `combine-candidates`, `profile-revision`) in your own context makes you do
   that role's work, so those skills are for the subagents you start.
 - **A turn ends only with something outstanding.** Before you end a turn, a subagent is running
   or a job is queued. If a plan is open or chosen and nothing is outstanding, start its worker
-  now. Nothing wakes a lead whose subagents and jobs are all done.
+  now, or for an accepted plan its integration. Nothing wakes a lead whose subagents and jobs are all done.
 - **The run ends with a final report.** When is set out in [Finish](#finish).
 
 **Which CLI.** Where this skill writes `vibesys-cli`, run `"$VIBESYS_CLI"`, never the one on
@@ -29,7 +30,8 @@ and pass the selected absolute path to every subagent and background command.
 
 Arguments: `<task>` and `--fanout N`, the most subagents running at once (default 3). Planners,
 workers, profilers, combiners and judges all count; a judge takes a slot too. A repository with no
-`.vibesys/tasks/<task>/` needs one first: `vibesys:create-task`.
+`.vibesys/tasks/<task>/` needs one first: `vibesys:create-task`. `--simulator-led`, or an operator
+steering note that asks for it, selects [simulator-led mode](#simulator-led-mode).
 
 Needs a harness that can run background tasks and subagents, on POSIX (Linux or macOS), with git
 and `vibesys-cli`. Where things live and how to resume: `vibesys:state`. Commands for measuring:
@@ -75,8 +77,8 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    harness file, for you and for every subagent that inherits your environment. Every worktree of the repository shares the task's one store, so each agent sees
    the others' jobs.
 5. If `vibesys-cli show <base>` lists no measure result, measure the base with
-   `vibesys-cli submit measure <base> --samples 5 --no-plan`, as a tracked background `wait`
-   (`vibesys:measure`). The base tests no plan, which `--no-plan` says. No comparison means
+   `vibesys-cli submit measure <base> --no-plan`, as a tracked background `wait`
+   (`vibesys:measure`). Leave out `--samples`: the task's `objectives.toml` sets the count. The base tests no plan, which `--no-plan` says. No comparison means
    anything until it lands. Plan while it runs.
 6. Early, from first principles, declare the speed-of-light bound of each objective the task scores:
    `vibesys-cli bound declare --objective <name> --value <v> --unit <u> --note "<how derived>"`.
@@ -102,24 +104,43 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    Plans are grouped in workstreams, the lines of work the planners named (`vibesys-cli workstream
    list`). When you pause or close a line, say so where it lives: `vibesys-cli workstream edit <n>
    --status paused|closed --note "<one line of why>"`, and `--status active` when it resumes.
+   A plan may name its kind (`kernel`, `system`, `layout`, `simulator`, `probe`, `integration`;
+   `plan list --kind <kind>`) and the plans it builds on (`plan edit <n> --depends-on
+   <n>[,<n>...]`, which replaces the set; `none` clears it). `vibesys-cli plan list --ready` lists
+   the open plans whose dependencies are all `won`, the ones that can start now; `plan view <n>`
+   shows a plan's dependencies and dependents with their statuses. A dependency that is parked or
+   rejected keeps its dependents waiting until you edit their dependencies. The CLI never starts a
+   plan for you: which ready plan to fund is still your decision.
 3. Dispatch workers for chosen plans with a self-contained brief from briefs.md; save the brief
    text as a plan comment. Branch new ideas from the current result branch head.
 4. Measure every returned candidate commit, then dispatch a judge. A candidate is a full commit with
    `Checks: pass` (`vibesys:commit`); `wip` commits below it are not measured. Link every measure
-   to the plan it tests: `vibesys-cli submit measure <sha> --samples 5 --plan <n>`. That link is how
+   to the plan it tests: `vibesys-cli submit measure <sha> --plan <n>`, at the task's sample count. That link is how
    each point on the run's chart is tied to its idea; `vibesysd` refuses a measure from a run that
    names neither `--plan <n>` nor `--no-plan`. Say `--no-plan` only for the baseline and for
    re-measuring the head, which test no idea. Combine parked or won plans with
-   combine-candidates, and use profile-revision when a question needs evidence. Record outcomes
-   and lessons as plan comments (a plan with a simulated prediction also gets predicted against
-   measured value and the miss, as the domain skill's outcome block says), link every other job
-   to its plan too (`--plan`), and close the plan with its gain or its reason: `won` when
-   promoted, `parked` or `rejected` when a measurement settles it, set when it happens and not
-   at the end.
+   combine-candidates, and use profile-revision when a question needs evidence. Where a measure
+   is expensive, accept a candidate on cheap evidence (tests, an on-device self-test, a
+   microbenchmark, a passing check) and measure several at once:
+   [integration.md](references/integration.md) says when to integrate accepted plans, how to
+   compose their prediction, how each plan's status moves, and what to do when the merged check
+   fails. Record outcomes and lessons as plan comments (a plan with a simulated prediction also
+   gets predicted against measured value and the miss, as the domain skill's outcome block says),
+   link every other job to its plan too (`--plan`), and close the plan with its gain or its
+   reason: `won` when promoted, `parked` or `rejected` when a measurement settles it, set when it
+   happens and not at the end.
 5. Keep slots busy; when you leave one idle, state the reason in your next report.
 6. After every profile or promotion that moves the bottleneck, re-triage the parked and rejected
    plans: reopen any whose reason no longer holds (time, size, an old profile, a gain that was
    too small before). A plan is never closed for good by a verdict on an older base.
+
+## Simulator-led mode
+
+Where one measurement costs hours and a domain skill offers a simulator, a simulator plans the
+work and cheap evidence accepts it: [simulator-led.md](references/simulator-led.md). It keeps a
+versioned design target and roadmap, accepts each plan on its kind's ladder
+([acceptance-ladder.md](references/acceptance-ladder.md)), and spends a full check and measure
+only on integrations. It replaces Loop steps 1 to 4; everything else here holds.
 
 ## Rules
 
@@ -201,7 +222,8 @@ It has run its course when either holds:
    `within_noise` or `worse`, or failed their judge, and `plan check-gain --under 10%` lists no
    plan with a stated bound at or above 10%.
 
-Then bring the plans up to date and give the final report, whatever else is still open: a
+Then integrate any accepted plan that waits ([integration.md](references/integration.md)),
+bring the plans up to date and give the final report, whatever else is still open: a
 result you hold is worth more reported than improved forever. A run that stays open after a
 final report costs nothing, and one that never gives it cannot be waited on. The operator's
 steering note may state another share, which you give to `--under`.
@@ -225,6 +247,7 @@ and commit SHAs allowed here:
 
 1. Each promotion since the last report has a judge pass, and `vibesys-cli promote` printed it.
 2. The headline number is the `value` from `vibesys-cli result`.
-3. No plan is marked `chosen` without a live agent.
+3. No plan is marked `chosen` without a live agent, or, for an accepted plan, an integration that
+   holds it or is due.
 4. Idle slots have a stated reason.
 5. Every claimed gain cites a `vibesys-cli compare` verdict.

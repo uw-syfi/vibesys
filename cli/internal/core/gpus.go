@@ -39,16 +39,17 @@ func AllowedGPUCounts(pool GPUCount) string {
 	return fmt.Sprintf("1 to %d", pool.n)
 }
 
-// CheckPoolCount refuses a pool whose declared size is not the number of GPUs the machine has, as
-// the machine's facts read it: a pool larger than the machine would hand out GPUs that do not
-// exist, and a smaller one would leave GPUs no job is told about while a measure believes it holds
-// the machine whole. key names the declaration (placements.<name>.resources.gpu.count) and machine
-// the machine whose GPUs were read. It fails with a *Failure of kind FailureInvalidInput.
-func CheckPoolCount(key string, declared GPUCount, machine string, probed int) error {
+// CheckPoolCount refuses a pool whose declared size is not the number of devices the machine has,
+// as the machine's facts read it: a pool larger than the machine would hand out devices that do not
+// exist, and a smaller one would leave devices no job is told about while a measure believes it
+// holds the machine whole. key names the declaration (placements.<name>.resources.gpu.count),
+// machine the machine whose devices were read, and unit what the pool counts ("GPUs", or
+// "NeuronCores"). It fails with a *Failure of kind FailureInvalidInput.
+func CheckPoolCount(key string, declared GPUCount, machine string, probed int, unit string) error {
 	if declared.Int() == probed {
 		return nil
 	}
-	return failf(FailureInvalidInput, "%s = %d, and %s has %d GPUs", key, declared.Int(), machine, probed)
+	return failf(FailureInvalidInput, "%s = %d, and %s has %d %s", key, declared.Int(), machine, probed, unit)
 }
 
 // DeviceIndex is a device number of a pool, 0 to its size less one.
@@ -108,14 +109,7 @@ func TakeDevices(size GPUCount, held []DeviceGroup, n GPUCount) (DeviceGroup, bo
 	if !size.IsSet() || !n.IsSet() || n.n > size.n {
 		return DeviceGroup{}, false
 	}
-	var busy uint64
-	for _, g := range held {
-		for _, d := range g.idx {
-			if d < DeviceIndex(size.n) {
-				busy |= 1 << d
-			}
-		}
-	}
+	busy := busyOf(size, held)
 	block := uint8(1) << bits.Len8(n.n-1)
 	for start := uint8(0); block <= size.n && start <= size.n-block; start += block {
 		mask := (uint64(1)<<block - 1) << start
@@ -138,6 +132,59 @@ func TakeDevices(size GPUCount, held []DeviceGroup, n GPUCount) (DeviceGroup, bo
 	return DeviceGroup{}, false
 }
 
+// TakeRange picks n devices of a pool of the size that no group of held has, and that are a
+// contiguous range: the lowest wholly free aligned block of the smallest power of two at least n,
+// of it the n lowest devices, as TakeDevices takes, and otherwise the lowest n free devices in a row.
+// It reports false, and the empty group, when no n free devices are in a row, or when the size or n
+// is no count; a job that cannot be given a range then waits for one, though as many devices may be
+// free. It is pure and deterministic.
+func TakeRange(size GPUCount, held []DeviceGroup, n GPUCount) (DeviceGroup, bool) {
+	g, ok := TakeDevices(size, held, n)
+	if !ok || g.IsRange() {
+		return g, ok
+	}
+	busy := busyOf(size, held)
+	run := uint8(0)
+	for d := range size.n {
+		if busy&(1<<d) != 0 {
+			run = 0
+			continue
+		}
+		if run++; run == n.n {
+			return contiguous(d+1-n.n, n.n), true
+		}
+	}
+	return DeviceGroup{}, false
+}
+
+// TakeFor picks the devices of a job of the pool: a contiguous range when the pool's kind needs one
+// (TakeRange), otherwise as TakeDevices does. A pool id that names no kind takes as TakeDevices.
+func TakeFor(pool PoolID, size GPUCount, held []DeviceGroup, n GPUCount) (DeviceGroup, bool) {
+	if pool.Kind().Contiguous() {
+		return TakeRange(size, held, n)
+	}
+	return TakeDevices(size, held, n)
+}
+
+// IsRange says whether the group's devices are a contiguous range, with no gap. The empty group is
+// none.
+func (g DeviceGroup) IsRange() bool {
+	return len(g.idx) > 0 && int(g.idx[len(g.idx)-1]-g.idx[0]) == len(g.idx)-1
+}
+
+// busyOf is the devices of a pool of the size that a group of held has, as bits.
+func busyOf(size GPUCount, held []DeviceGroup) uint64 {
+	var busy uint64
+	for _, g := range held {
+		for _, d := range g.idx {
+			if d < DeviceIndex(size.n) {
+				busy |= 1 << d
+			}
+		}
+	}
+	return busy
+}
+
 // contiguous is the group of the n devices from start.
 func contiguous(start, n uint8) DeviceGroup {
 	out := make([]DeviceIndex, n)
@@ -150,6 +197,15 @@ func contiguous(start, n uint8) DeviceGroup {
 // PoolID names a pool by the machine whose GPUs it is, with the vendor's resource kind first, such
 // as gpu:local or rocm:<placement>@<login host>, as the scheduler names the resource it counts.
 type PoolID string
+
+// Kind is the resource kind the pool's id starts with, or "" for an id that names none.
+func (p PoolID) Kind() ResourceKind {
+	kind, _, ok := strings.Cut(string(p), ":")
+	if !ok || !slices.Contains(ResourceKinds(), ResourceKind(kind)) {
+		return ""
+	}
+	return ResourceKind(kind)
+}
 
 // GrantSource is who chose the devices of a grant.
 type GrantSource string
@@ -241,7 +297,7 @@ func CheckGPUAsk(in GPUAsk) error {
 		}
 		return strings.Join(parts, "; ")
 	}
-	needsGPU := slices.Contains(in.Needs, ResourceGPU) || slices.Contains(in.Needs, ResourceROCm)
+	needsGPU := slices.ContainsFunc(in.Needs, func(k ResourceKind) bool { return slices.Contains(DeviceKinds(), k) })
 	switch {
 	case in.Kind == JobMeasure && in.Asked.IsSet():
 		return failf(FailureInvalidInput, "--gpus: a measure takes the whole node; leave --gpus out")

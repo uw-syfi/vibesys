@@ -178,3 +178,46 @@ metric = "ops"
 		t.Fatalf("submit check = %+v; logs %q", r, logs.stdout)
 	}
 }
+
+// A command in the task's container that declares outputs leaves files in its artifacts directory,
+// and they come back to the host and through the daemon: listed with their digests, and copied byte
+// for byte, also when the command fails. A link the container leaves there is refused by name, and
+// nothing of where it points is read.
+func TestRealDockerCommandOutputsComeBackFromTheContainer(t *testing.T) {
+	m := newMachine(t)
+	m.commitDockerTask()
+
+	r := m.cli("submit", "command", "--image", "harness", "--outputs", "--wait", "HEAD", "--",
+		"sh", "-c", `mkdir -p "$VIBESYS_ARTIFACTS_DIR/by-shape" && printf '{"ms":1.5}' > "$VIBESYS_ARTIFACTS_DIR/timings.json" && `+
+			`printf '64,2' > "$VIBESYS_ARTIFACTS_DIR/by-shape/64.csv" && test "$VIBESYS_ARTIFACTS_DIR" = /vibesys/artifacts && exit 3`)
+	id := jobOf(t, r)
+	if r.code != exitFailed {
+		t.Fatalf("submit command = %+v; logs %q", r, m.cli("logs", id).stdout)
+	}
+	listed := m.cli("outputs", id)
+	if listed.code != exitOK || !strings.Contains(listed.stdout, "outputs: 2 files, 14 bytes") || !strings.Contains(listed.stdout, "environment: docker/") {
+		t.Fatalf("outputs = %+v; logs %q", listed, m.cli("logs", id).stdout)
+	}
+	to := filepath.Join(m.root, "copied")
+	if r := m.cli("outputs", id, "--to", to); r.code != exitOK {
+		t.Fatalf("outputs --to = %+v", r)
+	}
+	for name, want := range map[string]string{"timings.json": `{"ms":1.5}`, "by-shape/64.csv": "64,2"} {
+		if got, err := os.ReadFile(filepath.Join(to, filepath.FromSlash(name))); err != nil || string(got) != want {
+			t.Errorf("%s = %q, %v; want %q", name, got, err, want)
+		}
+	}
+
+	r = m.cli("submit", "command", "--image", "harness", "--outputs", "--wait", "HEAD", "--",
+		"sh", "-c", `echo ok > "$VIBESYS_ARTIFACTS_DIR/real" && ln -s /etc/passwd "$VIBESYS_ARTIFACTS_DIR/escape"`)
+	linked := jobOf(t, r)
+	if r.code != exitOK {
+		t.Fatalf("submit command with a link = %+v", r)
+	}
+	if r := m.cli("outputs", linked); r.code != exitFailed || !strings.Contains(r.stderr, `"escape"`) || !strings.Contains(r.stderr, "symbolic link") {
+		t.Fatalf("outputs of a job that left a link = %+v", r)
+	}
+	if left := m.scopeContainers(); len(left) != 0 {
+		t.Errorf("containers %v left after the jobs", left)
+	}
+}

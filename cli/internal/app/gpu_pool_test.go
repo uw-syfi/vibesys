@@ -194,6 +194,44 @@ func TestSubmitRefusesAGPUCountThePoolCannotGive(t *testing.T) {
 	}
 }
 
+// A measure takes the whole pool and runs its check on all of it, so a pass of a check that asked
+// for the whole pool (--gpus 8 of 8) is the check the measure would run: it links that pass and
+// checks nothing again. A pass of fewer GPUs says nothing of the check on 8, and the measure runs
+// its own.
+func TestAMeasureOnAPoolLinksThePassOfACheckOfTheWholePool(t *testing.T) {
+	for asked, links := range map[int]bool{8: true, 1: false, 4: false} {
+		t.Run(fmt.Sprintf("--gpus %d", asked), func(t *testing.T) {
+			w, _, _ := poolRig(t)
+			a := w.newApp()
+			spec := flowSpec(core.CheckSettings{})
+			var err error
+			if spec.GPUs, err = core.ParseGPUCount(uint32(asked), "test"); err != nil {
+				t.Fatal(err)
+			}
+			out, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: spec})
+			if err != nil {
+				t.Fatal(err)
+			}
+			check := awaitFinal(t, a, out.Job.ID)
+			if check.State != core.JobSucceeded || w.started("exit") != 1 {
+				t.Fatalf("setup: the check is %s, and ran %d times", describe(check), w.started("exit"))
+			}
+			measure, _ := done(t, a, core.MeasureSettings{Samples: 2}, false)
+			if measure.State != core.JobSucceeded || measure.GPUs == nil || !measure.GPUs.Whole {
+				t.Fatalf("the measure is %s, given %+v; want it to succeed on the whole pool", describe(measure), measure.GPUs)
+			}
+			wantCheck, wantRuns := measure.ID, 2
+			if links {
+				wantCheck, wantRuns = check.ID, 1
+			}
+			if measure.CheckJob != wantCheck || w.started("exit") != wantRuns {
+				t.Errorf("after a check of --gpus %d the measure links the check of %s and the check ran %d times; want %s and %d",
+					asked, measure.CheckJob, w.started("exit"), wantCheck, wantRuns)
+			}
+		})
+	}
+}
+
 // gpuTask puts a task into the repository that needs a GPU, as a task of the cuda backend with
 // `needs = ["gpu"]` does.
 func (w *world) gpuTask() {

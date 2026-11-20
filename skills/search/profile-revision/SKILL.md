@@ -30,8 +30,11 @@ names; they usually say which profiler fits. Details are in
 3. Capture on the workload the benchmark uses, or one close enough to say so. A capture that
    drives load is a `vibesys-cli submit command <rev> --image harness [--gpus N] -- <argv...>` job
    (`vibesys:measure`; `--wrap '<profiler>'` profiles the candidate's server), and
-   its output is read with `vibesys-cli logs <job>`. A capture script of your own can travel as
-   the job's argv (`-- python3 -c "<script>"`), so it needs no commit.
+   its output is read with `vibesys-cli logs <job>`. A capture that writes files (a profile, a
+   table of timings) adds `--outputs` and writes them under `$VIBESYS_ARTIFACTS_DIR`; copy them
+   into your scratch directory with `vibesys-cli outputs <job> --to <scratch dir>` (at most 1000
+   files and 256 MiB; see `vibesys:measure`'s jobs reference). A capture script of your own can
+   travel as the job's argv (`-- python3 -c "<script>"`), so it needs no commit.
 4. If the program cannot show what the question needs (it serves no profiler, its binaries carry
    no symbols, it has no hook to time), say so and stop, unless your brief names an
    instrumentation branch. A job runs only a commit, so a scratch copy outside the checkout is

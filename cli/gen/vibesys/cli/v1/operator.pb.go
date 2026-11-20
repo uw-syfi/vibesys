@@ -766,7 +766,10 @@ type Resources struct {
 	// and /dev/dri) and the video group under docker, and --rocm under Apptainer. A variable Slurm
 	// sets to name the GPUs it assigned (ROCR_VISIBLE_DEVICES, HIP_VISIBLE_DEVICES,
 	// GPU_DEVICE_ORDINAL, CUDA_VISIBLE_DEVICES) is passed on when it is set.
-	Rocm          *GpuPool `protobuf:"bytes,4,opt,name=rocm,proto3" json:"rocm,omitempty"`
+	Rocm *GpuPool `protobuf:"bytes,4,opt,name=rocm,proto3" json:"rocm,omitempty"`
+	// The machine's AWS Neuron devices (Trainium), for tasks of the trainium backend: the
+	// /dev/neuron* devices of a job's NeuronCores under docker, and NEURON_RT_VISIBLE_CORES.
+	Neuron        *NeuronPool `protobuf:"bytes,5,opt,name=neuron,proto3" json:"neuron,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -829,6 +832,74 @@ func (x *Resources) GetRocm() *GpuPool {
 	return nil
 }
 
+func (x *Resources) GetNeuron() *NeuronPool {
+	if x != nil {
+		return x.Neuron
+	}
+	return nil
+}
+
+// NeuronPool is the machine's AWS Neuron devices, shared by logical NeuronCore: the unit
+// NEURON_RT_VISIBLE_CORES names. The cores 0 to count-1 of the machine are a pool, which jobs share,
+// each one given a contiguous range of its own (the Neuron runtime refuses a list that is not one).
+// Only the local and ssh kinds give them.
+type NeuronPool struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many logical NeuronCores the machine has, every device's (neuron-ls: the sum of nc_count).
+	// It must equal what the machine reports where the CLI can read it.
+	Count uint32 `protobuf:"varint,1,opt,name=count,proto3" json:"count,omitempty"`
+	// How many logical NeuronCores each device has (neuron-ls: nc_count), which says the device of
+	// each core: core c is on /dev/neuron<c / cores_per_device>. It must equal what the machine
+	// reports where the CLI can read it.
+	CoresPerDevice uint32 `protobuf:"varint,2,opt,name=cores_per_device,json=coresPerDevice,proto3" json:"cores_per_device,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *NeuronPool) Reset() {
+	*x = NeuronPool{}
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NeuronPool) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NeuronPool) ProtoMessage() {}
+
+func (x *NeuronPool) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NeuronPool.ProtoReflect.Descriptor instead.
+func (*NeuronPool) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *NeuronPool) GetCount() uint32 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *NeuronPool) GetCoresPerDevice() uint32 {
+	if x != nil {
+		return x.CoresPerDevice
+	}
+	return 0
+}
+
 // GpuPool is the GPUs of one vendor a placement gives, the vendor being the table it is written
 // in: [resources.gpu] for NVIDIA, [resources.rocm] for AMD. An empty table gives every job all of the
 // machine's GPUs. A count makes them a pool: the GPUs 0 to count-1 of the
@@ -854,7 +925,7 @@ type GpuPool struct {
 
 func (x *GpuPool) Reset() {
 	*x = GpuPool{}
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -866,7 +937,7 @@ func (x *GpuPool) String() string {
 func (*GpuPool) ProtoMessage() {}
 
 func (x *GpuPool) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -879,7 +950,7 @@ func (x *GpuPool) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GpuPool.ProtoReflect.Descriptor instead.
 func (*GpuPool) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GpuPool) GetCount() uint32 {
@@ -925,7 +996,7 @@ type KubernetesResource struct {
 
 func (x *KubernetesResource) Reset() {
 	*x = KubernetesResource{}
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[9]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -937,7 +1008,7 @@ func (x *KubernetesResource) String() string {
 func (*KubernetesResource) ProtoMessage() {}
 
 func (x *KubernetesResource) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[9]
+	mi := &file_vibesys_cli_v1_operator_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -950,7 +1021,7 @@ func (x *KubernetesResource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KubernetesResource.ProtoReflect.Descriptor instead.
 func (*KubernetesResource) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_cli_v1_operator_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *KubernetesResource) GetKubeconfig() string {
@@ -1043,17 +1114,22 @@ const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\x17convert_timeout_seconds\x18\x05 \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x15convertTimeoutSeconds\x12D\n" +
 	"\aruntime\x18\x06 \x01(\x0e2 .vibesys.cli.v1.ContainerRuntimeB\b\xbaH\x05\x82\x01\x02\x10\x01R\aruntime\x12@\n" +
 	"\x14idle_release_seconds\x18\a \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x12idleReleaseSeconds\x12H\n" +
-	"\x18allocation_limit_seconds\x18\b \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x16allocationLimitSeconds\"\xdd\x02\n" +
+	"\x18allocation_limit_seconds\x18\b \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x16allocationLimitSeconds\"\x91\x03\n" +
 	"\tResources\x12)\n" +
 	"\x03gpu\x18\x01 \x01(\v2\x17.vibesys.cli.v1.GpuPoolR\x03gpu\x12B\n" +
 	"\n" +
 	"kubernetes\x18\x02 \x01(\v2\".vibesys.cli.v1.KubernetesResourceR\n" +
 	"kubernetes\x12y\n" +
 	"\x06mounts\x18\x03 \x03(\v2%.vibesys.cli.v1.Resources.MountsEntryB:\xbaH7\x9a\x014\"\x1er\x1c2\x1a^[a-z0-9][a-z0-9_-]{0,62}$*\x12r\x102\x0e^/[^:,\"\\n\\r]*$R\x06mounts\x12+\n" +
-	"\x04rocm\x18\x04 \x01(\v2\x17.vibesys.cli.v1.GpuPoolR\x04rocm\x1a9\n" +
+	"\x04rocm\x18\x04 \x01(\v2\x17.vibesys.cli.v1.GpuPoolR\x04rocm\x122\n" +
+	"\x06neuron\x18\x05 \x01(\v2\x1a.vibesys.cli.v1.NeuronPoolR\x06neuron\x1a9\n" +
 	"\vMountsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa4\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"b\n" +
+	"\n" +
+	"NeuronPool\x12\x1f\n" +
+	"\x05count\x18\x01 \x01(\rB\t\xbaH\x06*\x04\x18@(\x01R\x05count\x123\n" +
+	"\x10cores_per_device\x18\x02 \x01(\rB\t\xbaH\x06*\x04\x18@(\x01R\x0ecoresPerDevice\"\xa4\x01\n" +
 	"\aGpuPool\x12$\n" +
 	"\x05count\x18\x01 \x01(\rB\t\xbaH\x06*\x04\x18@(\x01H\x00R\x05count\x88\x01\x01\x128\n" +
 	"\tgres_type\x18\x02 \x01(\tB\x1b\xbaH\x18r\x162\x14^([A-Za-z0-9_.-]+)?$R\bgresType\x12/\n" +
@@ -1090,7 +1166,7 @@ func file_vibesys_cli_v1_operator_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_cli_v1_operator_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vibesys_cli_v1_operator_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_vibesys_cli_v1_operator_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_vibesys_cli_v1_operator_proto_goTypes = []any{
 	(PlacementKind)(0),          // 0: vibesys.cli.v1.PlacementKind
 	(ContainerRuntime)(0),       // 1: vibesys.cli.v1.ContainerRuntime
@@ -1102,14 +1178,15 @@ var file_vibesys_cli_v1_operator_proto_goTypes = []any{
 	(*SlurmSettings)(nil),       // 7: vibesys.cli.v1.SlurmSettings
 	(*ApptainerSettings)(nil),   // 8: vibesys.cli.v1.ApptainerSettings
 	(*Resources)(nil),           // 9: vibesys.cli.v1.Resources
-	(*GpuPool)(nil),             // 10: vibesys.cli.v1.GpuPool
-	(*KubernetesResource)(nil),  // 11: vibesys.cli.v1.KubernetesResource
-	nil,                         // 12: vibesys.cli.v1.OperatorConfig.PlacementsEntry
-	nil,                         // 13: vibesys.cli.v1.Resources.MountsEntry
-	(*durationpb.Duration)(nil), // 14: google.protobuf.Duration
+	(*NeuronPool)(nil),          // 10: vibesys.cli.v1.NeuronPool
+	(*GpuPool)(nil),             // 11: vibesys.cli.v1.GpuPool
+	(*KubernetesResource)(nil),  // 12: vibesys.cli.v1.KubernetesResource
+	nil,                         // 13: vibesys.cli.v1.OperatorConfig.PlacementsEntry
+	nil,                         // 14: vibesys.cli.v1.Resources.MountsEntry
+	(*durationpb.Duration)(nil), // 15: google.protobuf.Duration
 }
 var file_vibesys_cli_v1_operator_proto_depIdxs = []int32{
-	12, // 0: vibesys.cli.v1.OperatorConfig.placements:type_name -> vibesys.cli.v1.OperatorConfig.PlacementsEntry
+	13, // 0: vibesys.cli.v1.OperatorConfig.placements:type_name -> vibesys.cli.v1.OperatorConfig.PlacementsEntry
 	3,  // 1: vibesys.cli.v1.OperatorConfig.scheduler:type_name -> vibesys.cli.v1.Scheduler
 	0,  // 2: vibesys.cli.v1.Placement.kind:type_name -> vibesys.cli.v1.PlacementKind
 	6,  // 3: vibesys.cli.v1.Placement.remote:type_name -> vibesys.cli.v1.RemoteSettings
@@ -1117,20 +1194,21 @@ var file_vibesys_cli_v1_operator_proto_depIdxs = []int32{
 	9,  // 5: vibesys.cli.v1.Placement.resources:type_name -> vibesys.cli.v1.Resources
 	8,  // 6: vibesys.cli.v1.Placement.apptainer:type_name -> vibesys.cli.v1.ApptainerSettings
 	5,  // 7: vibesys.cli.v1.Placement.allocations:type_name -> vibesys.cli.v1.AllocationSettings
-	14, // 8: vibesys.cli.v1.AllocationSettings.max_for:type_name -> google.protobuf.Duration
-	14, // 9: vibesys.cli.v1.AllocationSettings.fit_margin:type_name -> google.protobuf.Duration
-	14, // 10: vibesys.cli.v1.AllocationSettings.run_idle_end:type_name -> google.protobuf.Duration
+	15, // 8: vibesys.cli.v1.AllocationSettings.max_for:type_name -> google.protobuf.Duration
+	15, // 9: vibesys.cli.v1.AllocationSettings.fit_margin:type_name -> google.protobuf.Duration
+	15, // 10: vibesys.cli.v1.AllocationSettings.run_idle_end:type_name -> google.protobuf.Duration
 	1,  // 11: vibesys.cli.v1.ApptainerSettings.runtime:type_name -> vibesys.cli.v1.ContainerRuntime
-	10, // 12: vibesys.cli.v1.Resources.gpu:type_name -> vibesys.cli.v1.GpuPool
-	11, // 13: vibesys.cli.v1.Resources.kubernetes:type_name -> vibesys.cli.v1.KubernetesResource
-	13, // 14: vibesys.cli.v1.Resources.mounts:type_name -> vibesys.cli.v1.Resources.MountsEntry
-	10, // 15: vibesys.cli.v1.Resources.rocm:type_name -> vibesys.cli.v1.GpuPool
-	4,  // 16: vibesys.cli.v1.OperatorConfig.PlacementsEntry.value:type_name -> vibesys.cli.v1.Placement
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	11, // 12: vibesys.cli.v1.Resources.gpu:type_name -> vibesys.cli.v1.GpuPool
+	12, // 13: vibesys.cli.v1.Resources.kubernetes:type_name -> vibesys.cli.v1.KubernetesResource
+	14, // 14: vibesys.cli.v1.Resources.mounts:type_name -> vibesys.cli.v1.Resources.MountsEntry
+	11, // 15: vibesys.cli.v1.Resources.rocm:type_name -> vibesys.cli.v1.GpuPool
+	10, // 16: vibesys.cli.v1.Resources.neuron:type_name -> vibesys.cli.v1.NeuronPool
+	4,  // 17: vibesys.cli.v1.OperatorConfig.PlacementsEntry.value:type_name -> vibesys.cli.v1.Placement
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_operator_proto_init() }
@@ -1141,14 +1219,14 @@ func file_vibesys_cli_v1_operator_proto_init() {
 	file_vibesys_cli_v1_operator_proto_msgTypes[0].OneofWrappers = []any{}
 	file_vibesys_cli_v1_operator_proto_msgTypes[1].OneofWrappers = []any{}
 	file_vibesys_cli_v1_operator_proto_msgTypes[5].OneofWrappers = []any{}
-	file_vibesys_cli_v1_operator_proto_msgTypes[8].OneofWrappers = []any{}
+	file_vibesys_cli_v1_operator_proto_msgTypes[9].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_operator_proto_rawDesc), len(file_vibesys_cli_v1_operator_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   12,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

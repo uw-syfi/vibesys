@@ -1,7 +1,8 @@
 // Package devicestest is the contract every resource.Devices passes: the pool it declares, and, for
 // every group of devices of the pool, that what it gives a container and a host process names
-// exactly the group, the same way on every call, and that a group outside the pool or an empty one
-// is refused naming the device. Each implementation's tests run it, the Fake's included, so a test
+// exactly the group, the same way on every call, that its check is the container's and the same on
+// every call, and that a group outside the pool, an empty one, or, for a kind whose groups are
+// ranges, one with a gap, is refused naming the device. Each implementation's tests run it, the Fake's included, so a test
 // that uses the Fake in place of a vendor's role tests what the vendor's does.
 //
 // The suite does not know a vendor's variables or flags. It reads the device numbers an attachment
@@ -53,7 +54,7 @@ func Run(t *testing.T, make func(t *testing.T) Subject) {
 	t.Run("a container is given exactly the devices of the group, the same way on every call", func(t *testing.T) {
 		s := make(t)
 		_, size := s.Devices.Pool()
-		for _, g := range groupsOf(t, size) {
+		for _, g := range groupsOf(t, s.Devices, size) {
 			a, err := s.Devices.Container(g)
 			if err != nil {
 				t.Fatalf("Container(%v): %v", g.Devices(), err)
@@ -79,7 +80,7 @@ func Run(t *testing.T, make func(t *testing.T) Subject) {
 	t.Run("a process is told exactly the devices of the group, the same way on every call", func(t *testing.T) {
 		s := make(t)
 		_, size := s.Devices.Pool()
-		for _, g := range groupsOf(t, size) {
+		for _, g := range groupsOf(t, s.Devices, size) {
 			vars, err := s.Devices.Process(g)
 			if err != nil {
 				t.Fatalf("Process(%v): %v", g.Devices(), err)
@@ -105,7 +106,7 @@ func Run(t *testing.T, make func(t *testing.T) Subject) {
 		}
 		r := rand.New(rand.NewPCG(7, 11))
 		for range Groups {
-			a, b := disjointPair(t, r, size)
+			a, b := disjointPair(t, r, s.Kind, size)
 			ca, err1 := s.Devices.Container(a)
 			cb, err2 := s.Devices.Container(b)
 			if err1 != nil || err2 != nil {
@@ -125,6 +126,53 @@ func Run(t *testing.T, make func(t *testing.T) Subject) {
 			}
 		}
 	})
+	t.Run("its check is the container's, runs a program, and is the same on every call", func(t *testing.T) {
+		s := make(t)
+		_, size := s.Devices.Pool()
+		for _, g := range groupsOf(t, s.Devices, size) {
+			check, err := s.Devices.Check(g)
+			if err != nil {
+				t.Fatalf("Check(%v): %v", g.Devices(), err)
+			}
+			if len(check) > 0 && check[0] == "" {
+				t.Errorf("Check(%v) = %q has no program", g.Devices(), check)
+			}
+			if again, err := s.Devices.Check(g); err != nil || !slices.Equal(check, again) {
+				t.Errorf("Check(%v) changed between calls: %q then %q, %v", g.Devices(), check, again, err)
+			}
+			a, err := s.Devices.Container(g)
+			if err != nil || !slices.Equal(a.Check, check) {
+				t.Errorf("Container(%v) checks %q, and Check gives %q (%v)", g.Devices(), a.Check, check, err)
+			}
+		}
+	})
+	t.Run("a group of a kind whose groups are ranges is refused, and a device named, when it has a gap", func(t *testing.T) {
+		s := make(t)
+		_, size := s.Devices.Pool()
+		if !s.Kind.Contiguous() || size.Int() < 3 {
+			return // any group of the pool may be given, or none of it has a gap
+		}
+		r := rand.New(rand.NewPCG(5, uint64(size.Int())))
+		for range Groups {
+			lo := r.IntN(size.Int() - 2)
+			gap := lo + 1 + r.IntN(size.Int()-lo-2)
+			hi := gap + 1 + r.IntN(size.Int()-gap-1)
+			gapped, err := core.ParseDeviceGroup([]uint32{uint32(lo), uint32(hi)}, size, "test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := strconv.Itoa(hi)
+			if _, err := s.Devices.Container(gapped); !isInvalid(err) || !strings.Contains(err.Error(), want) {
+				t.Errorf("Container(%v): %v, want an invalid-input failure naming %s", gapped.Devices(), err, want)
+			}
+			if _, err := s.Devices.Process(gapped); !isInvalid(err) {
+				t.Errorf("Process(%v): %v, want an invalid-input failure", gapped.Devices(), err)
+			}
+			if _, err := s.Devices.Check(gapped); !isInvalid(err) {
+				t.Errorf("Check(%v): %v, want an invalid-input failure", gapped.Devices(), err)
+			}
+		}
+	})
 	t.Run("a group outside the pool, or with no device, is refused and the device named", func(t *testing.T) {
 		s := make(t)
 		_, size := s.Devices.Pool()
@@ -134,6 +182,9 @@ func Run(t *testing.T, make func(t *testing.T) Subject) {
 		}
 		if _, err := s.Devices.Process(empty); !isInvalid(err) {
 			t.Errorf("Process of no device: %v, want an invalid-input failure", err)
+		}
+		if _, err := s.Devices.Check(empty); !isInvalid(err) {
+			t.Errorf("Check of no device: %v, want an invalid-input failure", err)
 		}
 		if size.Int() == core.MaxPoolSize {
 			return // every device number a group can hold is in the pool
@@ -148,6 +199,9 @@ func Run(t *testing.T, make func(t *testing.T) Subject) {
 		}
 		if _, err := s.Devices.Process(beyond); !isInvalid(err) || !strings.Contains(err.Error(), want) {
 			t.Errorf("Process with device %s outside the pool: %v, want an invalid-input failure naming it", want, err)
+		}
+		if _, err := s.Devices.Check(beyond); !isInvalid(err) || !strings.Contains(err.Error(), want) {
+			t.Errorf("Check with device %s outside the pool: %v, want an invalid-input failure naming it", want, err)
 		}
 	})
 }
@@ -167,8 +221,8 @@ func isInvalid(err error) bool {
 }
 
 // groupsOf draws the groups a case checks: every single device, the whole pool, and random ones
-// of the sizes TakeDevices hands out.
-func groupsOf(t *testing.T, size core.GPUCount) []core.DeviceGroup {
+// of the sizes the pool hands out (core.TakeFor, which keeps a pool of ranges to ranges).
+func groupsOf(t *testing.T, d resource.Devices, size core.GPUCount) []core.DeviceGroup {
 	t.Helper()
 	r := rand.New(rand.NewPCG(3, uint64(size.Int())))
 	var out []core.DeviceGroup
@@ -186,9 +240,13 @@ func groupsOf(t *testing.T, size core.GPUCount) []core.DeviceGroup {
 			t.Fatal(err)
 		}
 		held := randomHeld(t, r, size, size.Int()-n)
-		g, ok := core.TakeDevices(size, held, want)
+		id, _ := d.Pool()
+		g, ok := core.TakeFor(id, size, held, want)
+		if !ok && d.Kind().Contiguous() {
+			continue // no n of the free devices are in a row, so the pool gives no group of n
+		}
 		if !ok {
-			t.Fatalf("TakeDevices(%d, %d) found no group in a pool with %d devices free", size.Int(), n, n)
+			t.Fatalf("TakeFor(%d, %d) found no group in a pool with %d devices free", size.Int(), n, n)
 		}
 		out = append(out, g)
 	}
@@ -209,11 +267,20 @@ func randomHeld(t *testing.T, r *rand.Rand, size core.GPUCount, most int) []core
 	return held
 }
 
-// disjointPair draws two groups of a pool of two devices or more that share no device.
-func disjointPair(t *testing.T, r *rand.Rand, size core.GPUCount) (core.DeviceGroup, core.DeviceGroup) {
+// disjointPair draws two groups of a pool of two devices or more that share no device: two ranges
+// side by side for a kind whose groups are ranges.
+func disjointPair(t *testing.T, r *rand.Rand, kind core.ResourceKind, size core.GPUCount) (core.DeviceGroup, core.DeviceGroup) {
 	t.Helper()
 	perm := r.Perm(size.Int())
 	cut := 1 + r.IntN(size.Int()-1)
+	if kind.Contiguous() {
+		lo, hi := r.IntN(cut), cut+1+r.IntN(size.Int()-cut)
+		perm = perm[:0]
+		for d := lo; d < hi; d++ {
+			perm = append(perm, d)
+		}
+		cut -= lo
+	}
 	split := func(devices []int) core.DeviceGroup {
 		numbers := make([]uint32, len(devices))
 		for i, d := range devices {

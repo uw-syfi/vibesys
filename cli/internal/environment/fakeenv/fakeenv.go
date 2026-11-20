@@ -291,7 +291,7 @@ func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) 
 	var wg sync.WaitGroup
 	// Several processes of the script write to out at once. The candidate's server, when the
 	// execution has one, runs on the same fake machine as the command: they share its network.
-	l := &launcher{in: &interpreter{gates: e.gates, dir: x.Checkout.Dir, files: e.files, ready: &atomic.Bool{}}, wg: &wg}
+	l := &launcher{in: &interpreter{gates: e.gates, dir: x.Checkout.Dir, artifacts: x.Artifacts, files: e.files, ready: &atomic.Bool{}}, wg: &wg}
 	out = &syncWriter{w: out}
 	ev := environment.Events{
 		Limit:     limit,

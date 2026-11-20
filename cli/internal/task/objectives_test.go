@@ -18,6 +18,9 @@ import (
 // render writes a message as the objectives.toml an author would, the keys being its field names.
 func render(o *cliv1.TaskObjectives) string {
 	var b strings.Builder
+	if o.Samples != nil {
+		fmt.Fprintf(&b, "samples = %d\n", o.GetSamples())
+	}
 	for _, obj := range o.GetObjective() {
 		b.WriteString("[[objective]]\n")
 		fmt.Fprintf(&b, "name = %s\n", strconv.Quote(obj.GetName()))
@@ -29,6 +32,9 @@ func render(o *cliv1.TaskObjectives) string {
 		if obj.RelativeNoise != nil {
 			fmt.Fprintf(&b, "relative_noise = %s\n", strconv.FormatFloat(obj.GetRelativeNoise(), 'g', -1, 64))
 		}
+		if obj.MinGain != nil {
+			fmt.Fprintf(&b, "min_gain = %s\n", strconv.FormatFloat(obj.GetMinGain(), 'g', -1, 64))
+		}
 	}
 	if o.GetPareto() != nil {
 		fmt.Fprintf(&b, "[pareto]\nrelative_noise = %s\n", strconv.FormatFloat(o.GetPareto().GetRelativeNoise(), 'g', -1, 64))
@@ -36,8 +42,8 @@ func render(o *cliv1.TaskObjectives) string {
 	return b.String()
 }
 
-// anyObjectives is a valid message: a few objectives with distinct names, and when there is a
-// [pareto] section and more than one objective, each may declare its own noise floor.
+// anyObjectives is a valid message: a few objectives with distinct names, each of which may declare
+// its own noise floor and minimum gain, a [pareto] section or none, and a sample count or none.
 func anyObjectives(r *rand.Rand) *cliv1.TaskObjectives {
 	floor := func() float64 {
 		return []float64{0, 0.02, 0.5, 0.999, r.Float64() * 0.999}[r.IntN(5)]
@@ -53,15 +59,19 @@ func anyObjectives(r *rand.Rand) *cliv1.TaskObjectives {
 			Direction: dir,
 		})
 	}
+	for _, obj := range o.Objective {
+		if r.IntN(2) == 0 {
+			obj.RelativeNoise = proto.Float64(floor())
+		}
+		if r.IntN(2) == 0 {
+			obj.MinGain = proto.Float64(floor())
+		}
+	}
 	if r.IntN(2) == 0 {
 		o.Pareto = &cliv1.TaskPareto{RelativeNoise: floor()}
-		if len(o.Objective) > 1 {
-			for _, obj := range o.Objective {
-				if r.IntN(2) == 0 {
-					obj.RelativeNoise = proto.Float64(floor())
-				}
-			}
-		}
+	}
+	if r.IntN(2) == 0 {
+		o.Samples = proto.Uint32([]uint32{1, 2, 5, 1000, 1 + r.Uint32N(1000)}[r.IntN(5)])
 	}
 	return o
 }
@@ -140,8 +150,13 @@ func TestAMalformedObjectivesFileIsRefusedNamingTheKey(t *testing.T) {
 		"noise a string":   {two + "[pareto]\nrelative_noise = \"0.1\"\n", "pareto.relative_noise"},
 		"own noise 1":      {strings.Replace(two, "name = \"b\"", "name = \"b\"\nrelative_noise = 1.0", 1) + "[pareto]\n", `"b"`},
 		"own noise nan":    {strings.Replace(two, "name = \"b\"", "name = \"b\"\nrelative_noise = nan", 1) + "[pareto]\n", `"b"`},
-		"own noise alone":  {strings.Replace(two, "name = \"b\"", "name = \"b\"\nrelative_noise = 0.1", 1), `"b"`},
-		"own noise, one":   {"[[objective]]\nname = \"a\"\ndirection = \"max\"\nrelative_noise = 0.1\n[pareto]\n", `"a"`},
+		"min gain 1":       {strings.Replace(two, "name = \"b\"", "name = \"b\"\nmin_gain = 1.0", 1), `"b"`},
+		"min gain nan":     {strings.Replace(two, "name = \"b\"", "name = \"b\"\nmin_gain = nan", 1), `"b"`},
+		"min gain < 0":     {strings.Replace(two, "name = \"b\"", "name = \"b\"\nmin_gain = -0.01", 1), `"b"`},
+		"samples 0":        {"samples = 0\n" + two, "samples"},
+		"samples too many": {"samples = 1001\n" + two, "samples"},
+		"samples negative": {"samples = -1\n" + two, "samples"},
+		"samples a float":  {"samples = 1.5\n" + two, "samples"},
 		"not toml":         {"this is not toml", ""},
 		"a repeated key":   {"[pareto]\nrelative_noise = 0.1\nrelative_noise = 0.2\n", "relative_noise"},
 		"a misspelt noise": {"[[objective]]\nname = \"a\"\ndirection = \"max\"\nrelative_noize = 0.1\n", "relative_noize"},

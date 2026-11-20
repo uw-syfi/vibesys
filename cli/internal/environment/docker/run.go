@@ -7,7 +7,6 @@ import (
 	"io"
 	"maps"
 	"slices"
-	"strings"
 	"time"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
@@ -249,40 +248,9 @@ func (r *run) start(b *box, spec ContainerSpec) error {
 // and says how the run ends when it fails: nothing of the execution ran, and the failure is what
 // the check printed. It returns nil when the check passed or there is none.
 func (r *run) check(b *box, limit <-chan struct{}) core.Attempt {
-	if len(b.check) == 0 {
-		return nil
-	}
-	out := &environment.Tail{}
-	proc, err := b.container.Start(b.check, out)
-	if err != nil {
-		return core.NotStarted{Failure: core.AsFailure(err)}
-	}
-	failed := func(why string) core.Attempt {
-		return core.NotStarted{Failure: core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
-			"docker: the placement %q gives the container %s what it cannot use: %s", r.e.p.cfg.Placement, b.name, why)}}
-	}
-	select {
-	case st := <-proc.Exited():
-		switch {
-		case st.Err != nil:
-			return failed(fmt.Sprintf("its check did not run to its end (%v)", st.Err))
-		case st.Code != 0:
-			said := strings.TrimSpace(out.String())
-			if said == "" {
-				said = fmt.Sprintf("its check exited with %d and said nothing", st.Code)
-			}
-			return failed(said)
-		}
-		return nil
-	case <-limit:
-		proc.Kill()
-		<-proc.Exited()
-		return failed("its check did not end within the command's limit")
-	case <-r.ctx.Done():
-		proc.Kill()
-		<-proc.Exited()
-		return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}
-	}
+	return environment.Check(b.container, b.check, environment.Events{Limit: limit, Cancelled: r.ctx.Done()}, func(why string) string {
+		return fmt.Sprintf("docker: the placement %q gives the container %s what it cannot use: %s", r.e.p.cfg.Placement, b.name, why)
+	})
 }
 
 // canServe refuses a run whose candidate's server this placement cannot start beside the command:
@@ -389,7 +357,7 @@ func (r *run) containerSpec(b *box, id string, img Image, as role, url string) (
 		}
 		mounts = append(mounts, Mount{Host: m.Host, Container: m.Container, ReadOnly: m.ReadOnly})
 	}
-	gpus := GPUs{Devices: given.GPUs.Devices, NVIDIA: given.GPUs.NVIDIA, Runtime: given.GPUs.Runtime, ROCm: given.GPUs.ROCm}
+	gpus := GPUs{Devices: given.GPUs.Devices, NVIDIA: given.GPUs.NVIDIA, Runtime: given.GPUs.Runtime, ROCm: given.GPUs.ROCm, Neuron: given.GPUs.Neuron}
 	b.check = given.Check
 	given.Env = maps.Clone(given.Env)
 	maps.Copy(given.Env, given.GPUEnv)
@@ -489,7 +457,7 @@ func (r *run) grantOf() *core.Grant {
 	if !asked.IsSet() || asked.Int() > size.Int() {
 		asked = size
 	}
-	group, ok := core.TakeDevices(size, nil, asked)
+	group, ok := core.TakeFor(id, size, nil, asked)
 	if !ok {
 		return nil
 	}
@@ -520,6 +488,7 @@ type share struct {
 var twoImageShares = map[core.ResourceKind]map[role]share{
 	core.ResourceGPU:        {roleServer: {given: true}},
 	core.ResourceROCm:       {roleServer: {given: true}},
+	core.ResourceNeuron:     {roleServer: {given: true}},
 	core.ResourceMounts:     {roleServer: {given: true, readOnly: true}, roleBeside: {given: true, readOnly: true}},
 	core.ResourceKubernetes: {roleBeside: {given: true}},
 }

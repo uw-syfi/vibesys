@@ -92,7 +92,9 @@ func verdict(candidate, base *pb.Result) *pb.Verdict {
 	if c > b {
 		kind = pb.VerdictKind_VERDICT_KIND_BETTER
 	}
-	return &pb.Verdict{Kind: kind, CandidateSamples: 5, BaseSamples: 5, CandidateMean: c, BaseMean: b, Ratio: ratio, Noise: noise}
+	// The scenarios measure a clear win or loss under a task that declares no floor and no minimum
+	// gain, so, as the daemon says it, the noise test decides.
+	return &pb.Verdict{Kind: kind, CandidateSamples: 5, BaseSamples: 5, CandidateMean: c, BaseMean: b, Ratio: ratio, Noise: noise, DecidedBy: pb.VerdictBound_VERDICT_BOUND_NOISE}
 }
 func (m *model) facts() []*pb.TaskFact {
 	head := &pb.Head{State: &pb.Head_None{None: &pb.NoCurrentResult{Reason: pb.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NO_HEAD}}}

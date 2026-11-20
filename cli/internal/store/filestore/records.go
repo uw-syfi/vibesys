@@ -69,7 +69,18 @@ import (
 // versions 2 to 8, and Open migrates a store of 2 to 7 the same way, writing the format file at
 // version 8 last. A job saved before has neither: it asked for no count, and its GPUs are unknown,
 // never guessed.
-const formatVersion = 8
+//
+// Version 9 adds a plan's kind and the plans it depends on (Plan.kind, Plan.depends_on), which a
+// version 8 program would refuse as unknown. It only adds, so this program reads versions 2 to 9, and
+// Open migrates a store of 2 to 8 the same way, writing the format file at version 9 last. A plan
+// saved before has no kind and no dependencies, and none is invented for it: it reads as a plan whose
+// planner stated neither, and is ready while it is open.
+//
+// Version 10 adds a command job's declaration of output files (CommandSettings.outputs) and the
+// record of what it kept (Job.outputs), which a version 9 program would refuse as unknown. It only
+// adds, so this program reads versions 2 to 10, and Open migrates a store of 2 to 9 the same way,
+// writing the format file at version 10 last. A job saved before declared no outputs and has none.
+const formatVersion = 10
 
 // rekeyedBefore is the first version whose results carry keys of the current rule: a result of a
 // record older than it is rekeyed when it is read.
@@ -267,6 +278,7 @@ func settingsFromMessage(s *cliv1.JobSpec) (core.Settings, error) {
 			return nil, err
 		}
 		out.Wrap = slices.Clone(settings.Command.GetWrap())
+		out.Outputs = settings.Command.GetOutputs()
 		if out.Candidate, err = wire.ToCommandCandidate("command.candidate", settings.Command.GetCandidate()); err != nil {
 			return nil, err
 		}
@@ -354,6 +366,10 @@ func jobFromMessage(m *cliv1.Job) (core.Job, error) {
 			return fail(err)
 		}
 		j.GPUs = &grant
+	}
+	// A job saved before format 10 declared no outputs and kept none.
+	if j.Outputs, err = wire.ToJobOutputs("outputs", m.GetOutputs()); err != nil {
+		return fail(err)
 	}
 	return j, nil
 }
@@ -455,9 +471,14 @@ func verdictFromMessage(field string, v *cliv1.Verdict) (core.Verdict, error) {
 	if err != nil {
 		return core.Verdict{}, err
 	}
+	bound, err := wire.ToVerdictBound(field+".decided_by", v.GetDecidedBy())
+	if err != nil {
+		return core.Verdict{}, err
+	}
 	return core.Verdict{
 		Kind: kind, Reason: reason, CandidateSamples: v.GetCandidateSamples(), BaseSamples: v.GetBaseSamples(),
 		CandidateMean: v.GetCandidateMean(), BaseMean: v.GetBaseMean(), Ratio: v.GetRatio(), Noise: v.GetNoise(),
+		RelativeNoise: v.GetRelativeNoise(), MinGain: v.GetMinGain(), DecidedBy: bound,
 	}, nil
 }
 
@@ -469,6 +490,9 @@ func objectivesFromMessage(field string, o *cliv1.Objectives) (core.Objectives, 
 	out := core.Objectives{RelativeNoise: o.GetRelativeNoise()}
 	for _, n := range o.GetNoise() {
 		out.Noise = append(out.Noise, core.ObjectiveNoise{Name: n.GetName(), RelativeNoise: n.GetRelativeNoise()})
+	}
+	for _, g := range o.GetMinGain() {
+		out.MinGains = append(out.MinGains, core.ObjectiveMinGain{Name: g.GetName(), MinGain: g.GetMinGain()})
 	}
 	for i, m := range o.GetMetrics() {
 		d, err := wire.ToDirection(fmt.Sprintf("%s.metrics[%d].direction", field, i), m.GetDirection())

@@ -214,8 +214,8 @@ func printPlan(d deps, asJSON bool, resp planResponse) {
 }
 
 // describePlan is the one line a plan takes: its number first, as a job's id is, so a caller can
-// read it back, then its status and its title, and its gain bound and its workstream when it has
-// them.
+// read it back, then its status and its title, and its gain bound, workstream, kind and dependencies
+// when it has them.
 func describePlan(p *cliv1.Plan) string {
 	line := fmt.Sprintf("%d\t%s\t%s", p.GetNumber(), planStatusName(p.GetStatus()), p.GetTitle())
 	if p.GetGainBound() != nil {
@@ -224,16 +224,24 @@ func describePlan(p *cliv1.Plan) string {
 	if p.GetWorkstream() != 0 {
 		line += fmt.Sprintf("\tworkstream %d", p.GetWorkstream())
 	}
+	if p.GetKind() != cliv1.PlanKind_PLAN_KIND_UNSPECIFIED {
+		line += "\tkind " + planKindName(p.GetKind())
+	}
+	if deps := describeDependsOn(p.GetDependsOn()); deps != "" {
+		line += "\t" + deps
+	}
 	return line
 }
 
-// planCreate is `plan create --title t [--body text | --body-file path]`.
+// planCreate is `plan create --title t [--body text | --body-file path] [--kind k] [--depends-on n,...]`.
 func planCreate(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("plan create", d)
 	title := fs.String("title", "", "the plan's title, one line")
 	body := addTextFlag(fs, "body", "the plan's body, in markdown")
 	gain := addGainBoundFlags(fs, "the most the plan could gain")
 	workstream := addWorkstreamFlag(fs, "the workstream the plan joins")
+	kind := addPlanKindFlag(fs, "what kind of change the plan makes")
+	dependsOn := addDependsOnFlag(fs, "the plans this one builds on")
 	positional, code, ok := planArgs(fs, args)
 	if !ok {
 		return code
@@ -256,12 +264,22 @@ func planCreate(ctx context.Context, d deps, args []string) int {
 	if err != nil {
 		return fail(d, c.json, err)
 	}
+	kindOf, _, err := kind.read()
+	if err != nil {
+		return fail(d, c.json, err)
+	}
+	deps, _, err := dependsOn.read()
+	if err != nil {
+		return fail(d, c.json, err)
+	}
 	callCtx, cl, err := planClient(ctx, d, c)
 	if err != nil {
 		return fail(d, c.json, err)
 	}
 	defer cl.Close()
-	resp, err := cl.CreatePlan(ctx, &cliv1.CreatePlanRequest{Context: callCtx, Title: *title, Body: text, GainBound: bound, Workstream: joins})
+	resp, err := cl.CreatePlan(ctx, &cliv1.CreatePlanRequest{
+		Context: callCtx, Title: *title, Body: text, GainBound: bound, Workstream: joins, Kind: kindOf, DependsOn: deps,
+	})
 	if err != nil {
 		return fail(d, c.json, err)
 	}
@@ -269,12 +287,16 @@ func planCreate(ctx context.Context, d deps, args []string) int {
 	return exitOK
 }
 
-// planList is `plan list [--status s] [--search text]`. Without --status it lists every plan.
+// planList is `plan list [--status s] [--kind k] [--ready] [--search text]`. Without a filter it
+// lists every plan. A plan is ready while it is open and every plan it depends on is won.
 func planList(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("plan list", d)
 	var statuses planStatusList
+	var kinds planKindList
 	search := fs.String("search", "", "only plans whose title or body contains this text")
 	fs.Var(&statuses, "status", "only plans with this status ("+planStatusChoices()+"); repeat or separate with commas")
+	fs.Var(&kinds, "kind", "only plans of this kind ("+planKindChoices()+"); repeat or separate with commas")
+	ready := fs.Bool("ready", false, "only plans ready to start: open, and every plan they depend on won")
 	positional, code, ok := planArgs(fs, args)
 	if !ok {
 		return code
@@ -287,7 +309,7 @@ func planList(ctx context.Context, d deps, args []string) int {
 		return fail(d, c.json, err)
 	}
 	defer cl.Close()
-	resp, err := cl.ListPlans(ctx, &cliv1.ListPlansRequest{Context: callCtx, Statuses: statuses, Text: *search})
+	resp, err := cl.ListPlans(ctx, &cliv1.ListPlansRequest{Context: callCtx, Statuses: statuses, Text: *search, Kinds: kinds, Ready: *ready})
 	if err != nil {
 		return fail(d, c.json, err)
 	}
@@ -301,7 +323,8 @@ func planList(ctx context.Context, d deps, args []string) int {
 	return exitOK
 }
 
-// planView is `plan view <number>`: the plan, its comments and the jobs linked to it.
+// planView is `plan view <number>`: the plan, the plans it depends on and that depend on it, its
+// comments and the jobs linked to it.
 func planView(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("plan view", d)
 	positional, code, ok := planArgs(fs, args)
@@ -329,7 +352,8 @@ func planView(ctx context.Context, d deps, args []string) int {
 	return exitOK
 }
 
-// renderPlanView is a plan as text: the line, the times, the body, then the comments and the jobs.
+// renderPlanView is a plan as text: the line, the times, its statuses, the plans it depends on and
+// that depend on it, the body, then the comments and the jobs.
 func renderPlanView(v *cliv1.PlanView) string {
 	p := v.GetPlan()
 	var b strings.Builder
@@ -344,6 +368,7 @@ func renderPlanView(v *cliv1.PlanView) string {
 			fmt.Fprintf(&b, "  %s, %s, %s\n", planStatusName(t.GetStatus()), clockText(t.GetOrigin().GetAt().AsTime()), originName(t.GetOrigin()))
 		}
 	}
+	renderPlanLinks(&b, v)
 	if p.GetBody() != "" {
 		fmt.Fprintf(&b, "\n%s\n", strings.TrimRight(p.GetBody(), "\n"))
 	}
@@ -371,8 +396,9 @@ func renderPlanView(v *cliv1.PlanView) string {
 
 func clockText(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
-// planEdit is `plan edit <number> [--title t] [--body text | --body-file path] [--status s]`. It
-// changes what it is given and leaves the rest.
+// planEdit is `plan edit <number> [--title t] [--body text | --body-file path] [--status s] [--kind k]
+// [--depends-on n,... | none]`. It changes what it is given and leaves the rest; --depends-on
+// replaces the plan's dependencies whole.
 func planEdit(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("plan edit", d)
 	var title, status optString
@@ -381,6 +407,8 @@ func planEdit(ctx context.Context, d deps, args []string) int {
 	body := addTextFlag(fs, "body", "a new body, in markdown")
 	gain := addGainBoundFlags(fs, "a new bound on the most the plan could gain, replacing the old one")
 	workstream := addWorkstreamFlag(fs, "move the plan to this workstream")
+	kind := addPlanKindFlag(fs, "a new kind, replacing the old one")
+	dependsOn := addDependsOnFlag(fs, "the plans this one builds on, replacing the ones it had")
 	positional, code, ok := planArgs(fs, args)
 	if !ok {
 		return code
@@ -413,8 +441,18 @@ func planEdit(ctx context.Context, d deps, args []string) int {
 	if req.Workstream, err = workstream.read(); err != nil {
 		return fail(d, c.json, err)
 	}
-	if req.Title == nil && req.Body == nil && req.Status == nil && req.GainBound == nil && req.Workstream == 0 {
-		return fail(d, c.json, usagef("plan edit: give at least one of --title, --body, --body-file, --status, --gain-bound or --workstream"))
+	if k, given, err := kind.read(); err != nil {
+		return fail(d, c.json, err)
+	} else if given {
+		req.Kind = &k
+	}
+	if deps, given, err := dependsOn.read(); err != nil {
+		return fail(d, c.json, err)
+	} else if given {
+		req.DependsOn = &cliv1.PlanDependencies{Plans: deps}
+	}
+	if req.Title == nil && req.Body == nil && req.Status == nil && req.GainBound == nil && req.Workstream == 0 && req.Kind == nil && req.DependsOn == nil {
+		return fail(d, c.json, usagef("plan edit: give at least one of --title, --body, --body-file, --status, --gain-bound, --workstream, --kind or --depends-on"))
 	}
 	callCtx, cl, err := planClient(ctx, d, c)
 	if err != nil {

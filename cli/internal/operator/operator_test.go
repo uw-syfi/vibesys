@@ -184,6 +184,14 @@ func TestAMistakeIsRefusedNamingTheKey(t *testing.T) {
 		"an apptainer placement's GPUs with no count": {strings.Replace(apptainerPlacement, "count = 8\n", "", 1), "placements.mi210.resources.rocm.count"},
 		"two pools of this machine":                   {"[placements.a]\nkind = \"local\"\n[placements.a.resources.gpu]\ncount = 8\n[placements.b]\nkind = \"local\"\n[placements.b.resources.gpu]\ncount = 8\n", "placements.b.resources.gpu"},
 		"a pool and all of this machine's GPUs":       {"[placements.a]\nkind = \"local\"\n[placements.a.resources.gpu]\n[placements.b]\nkind = \"local\"\n[placements.b.resources.gpu]\ncount = 8\n", "placements.b.resources.gpu"},
+		"NeuronCores with no count":                   {local + "[placements.x.resources.neuron]\ncores_per_device = 4\n", "count"},
+		"NeuronCores with no cores_per_device":        {local + "[placements.x.resources.neuron]\ncount = 4\n", "cores_per_device"},
+		"NeuronCores not a whole number of devices":   {local + "[placements.x.resources.neuron]\ncount = 6\ncores_per_device = 4\n", "placements.x.resources.neuron.count"},
+		"NeuronCores beside GPUs":                     {local + "[placements.x.resources.gpu]\n[placements.x.resources.neuron]\ncount = 4\ncores_per_device = 4\n", "placements.x.resources.neuron"},
+		"NeuronCores of a cluster":                    {strings.Replace(slurmConfig, "[placements.spark.resources.gpu]\ncount = 8\ngres_type = \"a100\"\nruntime = \"nvidia\"\n", "[placements.spark.resources.neuron]\ncount = 4\ncores_per_device = 4\n", 1), "only \"local\" and \"ssh\" placements"},
+		"NeuronCores of an apptainer cluster":         {strings.Replace(apptainerPlacement, "[placements.mi210.resources.rocm]\ncount = 8\n", "[placements.mi210.resources.neuron]\ncount = 8\ncores_per_device = 4\n", 1), "placements.mi210.resources.neuron"},
+		"an unknown neuron key":                       {local + "[placements.x.resources.neuron]\ncount = 4\ncores_per_device = 4\ngres_type = \"trn2\"\n", "placements.x.resources.neuron.gres_type"},
+		"two pools of NeuronCores of this machine":    {"[placements.a]\nkind = \"local\"\n[placements.a.resources.neuron]\ncount = 4\ncores_per_device = 4\n[placements.b]\nkind = \"local\"\n[placements.b.resources.neuron]\ncount = 4\ncores_per_device = 4\n", "placements.b.resources.neuron"},
 		"two pools of one ssh host":                   {sshPlacement + "[placements.x.resources.rocm]\ncount = 4\n" + strings.ReplaceAll(sshPlacement, "placements.x", "placements.y") + "[placements.y.resources.rocm]\ncount = 4\n", "placements.y.resources.rocm"},
 
 		"an apptainer placement with no remote":     {strings.Replace(apptainerPlacement, "[placements.mi210.remote]\nhost = \"host-a\"\nremote_workspace_root = \"/shared/vibesys\"\n", "", 1), "[placements.mi210.remote]"},
@@ -446,6 +454,33 @@ func TestMaxJobsDefaultsToThePoolsSizeOnAMachine(t *testing.T) {
 			if pool, err := operator.PoolOf("x", c.GetPlacements()["x"]); err != nil || pool.Size.IsSet() {
 				t.Fatalf("a table without a count is the pool %+v, %v", pool, err)
 			}
+		}
+	}
+}
+
+// A table of NeuronCores is always a pool, of the vendor AWS, on this machine or an ssh host: a local
+// placement runs one job per core unless it says otherwise, an ssh one a job at a time.
+func TestAPoolOfNeuronCoresIsRead(t *testing.T) {
+	for kind, section := range map[string]string{
+		"local": "",
+		"ssh":   "[placements.x.remote]\nhost = \"host-a\"\nremote_workspace_root = \"/w\"\n",
+	} {
+		text := fmt.Sprintf("[placements.x]\nkind = %q\n%s[placements.x.resources.neuron]\ncount = 8\ncores_per_device = 4\n", kind, section)
+		c, err := parse(text)
+		if err != nil {
+			t.Fatalf("%s: %v", text, err)
+		}
+		want := uint32(1)
+		if kind == "local" {
+			want = 8
+		}
+		p := c.GetPlacements()["x"]
+		pool, err := operator.PoolOf("x", p)
+		if err != nil || pool.Vendor != core.VendorAWS || pool.Size.Int() != 8 || pool.Key != "placements.x.resources.neuron.count" || pool.GresType != "" {
+			t.Errorf("%s: pool %+v, %v", kind, pool, err)
+		}
+		if p.GetMaxJobs() != want || p.GetResources().GetNeuron().GetCoresPerDevice() != 4 {
+			t.Errorf("%s: max_jobs %d, cores_per_device %d", kind, p.GetMaxJobs(), p.GetResources().GetNeuron().GetCoresPerDevice())
 		}
 	}
 }

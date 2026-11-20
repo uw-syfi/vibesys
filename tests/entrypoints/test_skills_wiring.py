@@ -50,6 +50,7 @@ NKI_SKILL_NAMES = {
     "neuron-nki-profile-querying",
     "neuron-nki-profiling",
     "neuron-nki-writing",
+    "neuron-safeguards",
 }
 DIAL9_PACK_DIR = PROJECT_ROOT / "skills" / "domains" / "dial9-tokio"
 DIAL9_SKILL_NAMES = {
@@ -708,6 +709,89 @@ def test_selected_cli_tool_skill_materializes_every_file_and_every_link(tmp_path
             assert link.is_file(), f"{markdown.relative_to(installed)} links to missing {link}"
 
 
+def test_cli_tool_archetype_citations_name_a_numbered_archetype() -> None:
+    """The mixed-workload examples cite archetypes by number, so each number heads a section."""
+    text = (
+        PROJECT_ROOT / "skills" / "domains" / _CLI_SKILL / "references" / "workload-archetypes.md"
+    ).read_text(encoding="utf-8")
+    numbered = [int(n) for n in re.findall(r"^## (\d+)\. ", text, flags=re.MULTILINE)]
+    mixed = text.split("## Mixed workloads", 1)[1]
+    cited = {int(n) for n in re.findall(r"\b\d+\b", mixed)}
+
+    assert cited
+    assert numbered == list(range(1, len(numbered) + 1))
+    assert cited <= set(numbered)
+
+
+@pytest.mark.parametrize("domain", list(DomainName))
+def test_create_task_names_every_domain_a_task_can_declare(domain: DomainName) -> None:
+    """A task author is told every `[agent] domain` value, since `optimize` loads skills by it."""
+    task_format = (
+        PROJECT_ROOT / "skills" / "search" / "create-task" / "references" / "task-format.md"
+    )
+
+    assert f"`{domain.value}`" in task_format.read_text(encoding="utf-8")
+
+
+_NAMED_BY_PATH_DOCS = (
+    Path("skills") / "search" / "optimize" / "references" / "domain-plugins.md",
+    Path("orchestrator") / "README.md",
+)
+
+
+@pytest.mark.parametrize("doc", _NAMED_BY_PATH_DOCS, ids=str)
+def test_docs_that_name_a_domain_skill_by_path_give_the_path_of_a_vendored_pack_skill(
+    doc: Path,
+) -> None:
+    """A managed run names a domain skill by its absolute path, so the docs must give a real one.
+
+    The docs say a skill is `skills/domains/<skill>/SKILL.md`, which is wrong for the skills of a
+    vendored pack: they sit below the pack's folder.
+    """
+    domains = PROJECT_ROOT / "skills" / "domains"
+    nested = [
+        path.parent.relative_to(domains)
+        for path in domains.rglob("SKILL.md")
+        if "repos" not in path.parts and len(path.parent.relative_to(domains).parts) > 1
+    ]
+    text = (PROJECT_ROOT / doc).read_text(encoding="utf-8")
+
+    assert nested
+    for skill in nested:
+        pack, *below = skill.parts
+        pattern = (
+            f"{pack}/skills/<skill>/SKILL.md"
+            if below[0] == "skills" and len(below) == 2
+            else f"{skill.as_posix()}/SKILL.md"
+        )
+        assert pattern in text, f"{doc} does not give the path {pattern} of {skill}"
+
+
+_NEURON_SAFEGUARDS = "neuron-agentic-development/neuron-safeguards/SKILL.md"
+_SAFEGUARD_CITERS = (
+    Path("skills") / "search" / "optimize" / "references" / "briefs.md",
+    Path("skills") / "search" / "plan-hypotheses" / "SKILL.md",
+)
+_DOMAIN_SKILL_PATH = re.compile(r"`([a-z0-9-]+(?:/[a-z0-9-]+)+/SKILL\.md)`")
+
+
+@pytest.mark.parametrize("doc", _SAFEGUARD_CITERS, ids=str)
+def test_neuron_safeguards_cited_by_search_skills_resolve(doc: Path) -> None:
+    """The briefs and the planner point at the Neuron safeguards checklist by a path that exists.
+
+    A lead copies the checklist into Trainium briefs by that path, so a moved or renamed skill
+    would leave every Neuron brief without it.
+    """
+    domains = PROJECT_ROOT / "skills" / "domains"
+    cited = _DOMAIN_SKILL_PATH.findall((PROJECT_ROOT / doc).read_text(encoding="utf-8"))
+
+    assert _NEURON_SAFEGUARDS in cited
+    for path in cited:
+        skill_file = domains / path
+        assert skill_file.is_file(), f"{doc} cites {path}, which is not under {domains}"
+        assert load_skill_frontmatter(skill_file.parent)["name"] == skill_file.parent.name
+
+
 _DIAL9_RANK_SKILL = "dial9-rank-bottlenecks"
 _DIAL9_TOOLKIT_FILES = ("trace_parser.js", "trace_analysis.js", "decode.js", "diagnose_setup.js")
 _SKILL_DIR_COMMAND = re.compile(r"<this skill's directory>/(\S+)")
@@ -738,3 +822,25 @@ def test_selected_dial9_ranker_is_installed_with_its_skill(tmp_path: Path) -> No
     assert extractor.is_file()
     toolkit = extractor.parent.parent.parent.parent / "dial9-toolkit" / "scripts"
     assert all((toolkit / name).is_file() for name in _DIAL9_TOOLKIT_FILES)
+
+
+_MEASURE_WITH_A_COUNT = re.compile(r"submit measure\b[^`\n]*--samples[ =]+\d")
+
+
+def test_no_skill_hard_codes_a_measure_sample_count() -> None:
+    """A measure takes the task's sample count, so no skill names one (#4324).
+
+    `samples` in a task's `objectives.toml` sets how many samples `submit measure` takes without
+    `--samples`. A skill that writes `--samples 5` overrides it for every task, including one whose
+    one sample costs an hour. A placeholder such as `--samples <k>` is fine.
+    """
+    skills = PROJECT_ROOT / "skills"
+    offenders = [
+        f"{path.relative_to(PROJECT_ROOT)}:{number}: {line.strip()}"
+        for path in sorted(skills.rglob("*.md"))
+        if "repos" not in path.relative_to(skills).parts
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+        if _MEASURE_WITH_A_COUNT.search(line)
+    ]
+
+    assert offenders == []

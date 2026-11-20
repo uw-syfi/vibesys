@@ -45,6 +45,11 @@ or the bare `kernel-performance` where the harness has no plugin prefix). A skil
 operator's instructions named by its directory goes by the absolute path of its `SKILL.md`, never
 by a plugin name: no such plugin is installed.
 
+Neuron safeguards: on backend `trainium`, copy the checklist of the `neuron-safeguards` domain
+skill whole into every implement and combine brief, after the rules. It is
+`vibesys-kernels-trainium:neuron-safeguards` where the harness offers it, and
+`neuron-agentic-development/neuron-safeguards/SKILL.md` under the domain skills folder otherwise.
+
 ## Implement
 
 Add:
@@ -59,9 +64,18 @@ First step: <the smallest change to the claim that you can finish, commit and me
   turn>. Do it and measure it before anything larger.
 Parent: <base commit, or the candidate commit you build on and its measured value>
 Measure: <whether you submit the measure yourself, or return `ready for measurement`>
+Safeguards: <on backend trainium, the neuron-safeguards checklist, copied whole; else omit>
+Evidence: <simulator-led only: the plan kind's acceptance ladder, rung by rung; you submit no
+  measure and no full check; else omit>
+Device jobs: <simulator-led only: each device job you may submit, with the note it carries,
+  "Question: <...>. Predicts: <...>."; any other device job is cancelled; else omit>
 Hand back: claim, commit SHA, job ids and the compare output, what you learned, the next step
   you propose.
 ```
+
+On a simulator-led run ([simulator-led.md](simulator-led.md)), the ladders and the device-job
+rule are in [acceptance-ladder.md](acceptance-ladder.md). A simulator plan's worktree is a
+worktree of the simulator's checkout, not of the task's repository.
 
 ## Judge
 
@@ -87,7 +101,31 @@ Main commit: <SHA>      Apply in this order, each as the diff from where it was 
   2. ...
 How to combine them: <which side wins a conflict; what must survive>
 Watch for: <where the parts interact>
+Safeguards: <on backend trainium, the neuron-safeguards checklist, copied whole; else omit>
 Hand back: the commit, the parts you could not apply and why, the checks you ran.
+```
+
+## Integrate
+
+The Combine template, for plans accepted on cheap evidence
+([integration.md](integration.md)). Dispatch it as a combiner on the integration plan's
+branch, `vibesys-work/<task>/plan-<I>`, with `Plan: <I>` in the header.
+
+```
+Integration plan: <I>      Main commit: <head SHA>
+Apply in this order, most proven first, each as the diff from where it was built, with a full
+commit after each:
+  1. plan <n> at <accepted SHA>, built on <parent SHA>
+  2. ...
+How to combine them: <which side wins a conflict in a shared file; what must survive>
+Watch for: <where the parts interact>
+Samples: <the task's declared samples>      Check size: --gpus <G>, or none without a device pool
+Checks: at most <1 + F * (ceil(log2 N) + 2)>, for F parts at fault      Parallel bisection: yes | no
+Measure: one, of the top of the chain that passes its check, linked to plan <I> and each part.
+  Every check and every repeat of one takes the same --gpus <G>.
+On a failed check: bisect, name the part at fault and whether it fails alone, finish without it.
+Hand back: the chain, the candidate and the parts it holds, every check with its result and job
+  id, the measure job id and compare output against the head.
 ```
 
 ## Profile

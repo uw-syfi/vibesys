@@ -408,9 +408,17 @@ func (l *Ledger) CreatePlan(np core.NewPlan) (Change, core.Plan, error) {
 	if np.Workstream != 0 && !l.hasWorkstream(np.Workstream) {
 		return nil, none, noWorkstream(np.Workstream)
 	}
+	if err := checkKind("plan.Kind", np.Kind); err != nil {
+		return nil, none, err
+	}
+	number := core.PlanNumber(len(l.plans) + 1)
+	deps := core.NormalizeDependsOn(np.DependsOn)
+	if err := core.CheckDependsOn("--depends-on", number, deps, l.plans); err != nil {
+		return nil, none, err
+	}
 	origin := np.Origin
 	plan := core.Plan{
-		Number:      core.PlanNumber(len(l.plans) + 1),
+		Number:      number,
 		Title:       np.Title,
 		Body:        np.Body,
 		Status:      core.PlanOpen,
@@ -420,6 +428,8 @@ func (l *Ledger) CreatePlan(np core.NewPlan) (Change, core.Plan, error) {
 		Workstream:  np.Workstream,
 		Origin:      &origin,
 		Transitions: []core.PlanTransition{{Status: core.PlanOpen, Origin: origin}},
+		Kind:        np.Kind,
+		DependsOn:   deps,
 	}
 	return PutPlan{Plan: plan}, Copy(plan), nil
 }
@@ -444,6 +454,18 @@ func (l *Ledger) EditPlan(number core.PlanNumber, edit core.PlanEdit) (Change, c
 	if edit.Workstream != nil && !l.hasWorkstream(*edit.Workstream) {
 		return nil, none, noWorkstream(*edit.Workstream)
 	}
+	if edit.Kind != nil {
+		if err := checkKind("edit.Kind", *edit.Kind); err != nil {
+			return nil, none, err
+		}
+	}
+	var deps []core.PlanNumber
+	if edit.DependsOn != nil {
+		deps = core.NormalizeDependsOn(*edit.DependsOn)
+		if err := core.CheckDependsOn("--depends-on", number, deps, l.plans); err != nil {
+			return nil, none, err
+		}
+	}
 	plan := Copy(l.plans[number-1])
 	if edit.Title != nil {
 		plan.Title = *edit.Title
@@ -460,6 +482,12 @@ func (l *Ledger) EditPlan(number core.PlanNumber, edit core.PlanEdit) (Change, c
 	}
 	if edit.Workstream != nil {
 		plan.Workstream = *edit.Workstream
+	}
+	if edit.Kind != nil {
+		plan.Kind = *edit.Kind
+	}
+	if edit.DependsOn != nil {
+		plan.DependsOn = deps
 	}
 	if edit.Comment != nil {
 		plan.Comments = append(plan.Comments, *edit.Comment)
@@ -560,6 +588,14 @@ func (l *Ledger) hasWorkstream(n core.WorkstreamNumber) bool {
 
 // noWorkstream is the refusal of a number that names no workstream of the task. It names the flag
 // that gave the number, which is the only way an agent gives one.
+// checkKind refuses a kind that is neither none nor one of core.PlanKinds.
+func checkKind(field string, k core.PlanKind) error {
+	if k != "" && !k.Valid() {
+		return invalid(field, fmt.Sprintf("%q is not a plan kind", k))
+	}
+	return nil
+}
+
 func noWorkstream(n core.WorkstreamNumber) error {
 	return notFound("--workstream %d: this task has no workstream %d; workstream list shows the ones it has", n, n)
 }
@@ -637,6 +673,12 @@ func (l *Ledger) Plans(f core.PlanFilter) []core.Plan {
 			continue
 		}
 		if f.Text != "" && !strings.Contains(plan.Title, f.Text) && !strings.Contains(plan.Body, f.Text) {
+			continue
+		}
+		if len(f.Kinds) > 0 && !slices.Contains(f.Kinds, plan.Kind) {
+			continue
+		}
+		if f.Ready && !plan.Ready(l.plans) {
 			continue
 		}
 		out = append(out, Copy(plan))

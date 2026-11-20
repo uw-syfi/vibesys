@@ -47,7 +47,7 @@ func submitFlow(ctx context.Context, d deps, kind string, args []string) int {
 		plan    = fs.Uint("plan", 0, "the number of a plan to link the job to")
 		noPlan  = fs.Bool("no-plan", false, "measure: the job tests no plan, as for the baseline or a re-measure of the head; not with --plan")
 		wait    = fs.Bool("wait", false, "block until the job is final, then exit as `wait` does")
-		samples = fs.Uint("samples", 0, "measure: how many benchmark samples are needed (default: the task's)")
+		samples = fs.Uint("samples", 0, "measure: how many benchmark samples are needed (default: the task's, samples in objectives.toml, else 5)")
 		recheck = fs.Bool("recheck", false, "measure: run the check again even when a saved pass exists")
 		gpus    = fs.Uint("gpus", 0, gpusUsage)
 	)
@@ -124,6 +124,7 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 		plan    = fs.Uint("plan", 0, "the number of a plan to link the job to")
 		wait    = fs.Bool("wait", false, "block until the job is final, then exit as `wait` does")
 		gpus    = fs.Uint("gpus", 0, gpusUsage)
+		outputs = fs.Bool("outputs", false, "record the files the command leaves in its artifacts directory ($VIBESYS_ARTIFACTS_DIR) with the job when it ends, at most 1000 files and 256 MiB; read them with vibesys-cli outputs <job>")
 	)
 	positional, err := parse(fs, flagArgs)
 	if err != nil {
@@ -179,7 +180,7 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 
 	// The daemon puts the wrapper where it goes, as only it reads the task: in front of the
 	// candidate's server, the service or the command.
-	settings := &cliv1.CommandSettings{Argv: argv, Image: imageKind, Wrap: prefix}
+	settings := &cliv1.CommandSettings{Argv: argv, Image: imageKind, Wrap: prefix, Outputs: *outputs}
 	if *timeout > 0 {
 		settings.Timeout = durationpb.New(*timeout)
 	}
@@ -208,7 +209,7 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 }
 
 // gpusUsage is the help of --gpus.
-const gpusUsage = "check and command: how many GPUs of the placement's pool the job takes, the fewest the command can run on; required for a task that needs GPUs where a placement declares a pool (see `jobs` for what earlier jobs took); a measure takes the whole node and refuses it"
+const gpusUsage = "check and command: how many GPUs (or NeuronCores, of a neuron pool) of the placement's pool the job takes, the fewest the command can run on; required for a task that needs GPUs where a placement declares a pool (see `jobs` for what earlier jobs took); a measure takes the whole node and refuses it"
 
 // gpuCount reads --gpus: nil when it was not given, and otherwise a number of GPUs. An explicit 0
 // is a mistake and not "none", as for --plan. How many a job may take is for the daemon to say: it
