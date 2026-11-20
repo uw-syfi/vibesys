@@ -37,6 +37,39 @@ hours. It is only for this recipe: the optimization's count is `samples` in `obj
 - A service-style task also shows its cleanup here: after the check and the samples, nothing the
   wrapper created (a namespace, a pod, a process) is left running.
 
+## A task with no implementation yet
+
+When the task asks for the code to be built (a server for a model that has none on this hardware,
+for example), the base fails the check by design and none of the recipes above runs on it. The
+first time the checker and the benchmark run end to end would then be in the middle of the
+optimization, where a fault in either one costs hours. Prove them now with a **stand-in**: the
+smallest code that does the work, committed on a throwaway branch (an earlier port, a thin
+wrapper over the reference implementation, or any engine that serves the task's interface on the
+budgeted hardware).
+
+- The stand-in passes the check. A failure is either the stand-in's or the task's: read the log,
+  and fix the task when the checker, the reference or the environment is at fault.
+- Its benchmark runs once to the end with every resource the real run uses (mounts, caches,
+  tokenizers, the load generator's own downloads): `submit measure <stand-in> --no-plan`. Its
+  number says nothing about the target; that it lands says the benchmark works.
+- The mutants below are written against the stand-in.
+
+When no stand-in exists, say so when you hand back, run every part of the benchmark that runs
+without one (its data loading, its client against a fake server), and tell the user which parts
+were never run.
+
+## A frozen reference agrees with itself
+
+Golden outputs recorded with a closeness measure (a tie margin between two candidate answers, a
+tolerance) are only as good as that measure. When the reference is produced by a numerically
+sensitive process (floating point, parallel reduction, sampling), check that every point the
+checker treats as decisive is one where the reference's own runs agree: compare two independent
+passes of the reference over the same inputs (for a model, its token-by-token generation and one
+forward pass over the whole output), and record every point where they disagree as a tie. A
+point where the reference contradicts itself fails every correct candidate at random. Fix the
+reference, not the tolerance, and do it before the run: a task edit after the run starts makes
+every saved result incomparable.
+
 ## Mutants
 
 A mutant is a commit on a throwaway branch that breaks the code under optimization in a way an
