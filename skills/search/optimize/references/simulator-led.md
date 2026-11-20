@@ -16,6 +16,14 @@ engine to the best design found). Plans that it backs carry a **frozen predictio
 before the change exists. If Start step 3 finds no such skill, or the skill's setup check fails,
 say so in your first report and run the default loop. Never run this mode without a simulator.
 
+A simulator that is installed is not yet one that can lead. Before the first planner, have a
+planner or profiler run the domain skill's deployment step for the task (its model, precision,
+hardware and workload) and say whether the simulator models it: a match, or a proxy the domain
+skill accepts, and a simulation of the task's workload that runs to the end. When it does not (a
+model or a hardware the simulator has no preset for, or a preset that refuses the workload for
+missing kernel timings), the simulator cannot lead yet. Say so in your first report, and run
+[Before the simulator can lead](#before-the-simulator-can-lead).
+
 ## The design target and the roadmap
 
 The **roadmap** is the ordered list of plans that lead from today's head to the design target.
@@ -46,8 +54,8 @@ Parked: plan <n> predicts <+x%>, under the bar
 Changes from v<N-1>: <each move or new item in one line, or "none: the order held">
 ```
 
-**Start.** Before planners propose single ideas, dispatch one planner with the Plan brief and the
-nudge `design study`, and name the records directory in its brief. That planner runs the domain
+**Start.** Once the simulator can lead (above), and before planners propose single ideas,
+dispatch one planner with the Plan brief and the nudge `design study`, and name the records directory in its brief. That planner runs the domain
 skill's design study and proposes one plan for each step of the study's ladder, each with its kind,
 its dependencies and its frozen prediction for that step alone. From those plans, write roadmap
 v001. Further planners fill gaps in the roadmap: give them the nudge `roadmap: <the step or the
@@ -72,6 +80,37 @@ apply the order rule. On every plan that moved, entered or left the order, comme
 `roadmap v<N> (<date>): <the move and why>`, so that `plan view` holds the plan's own history. A
 calibration is the domain skill's to make: after each measure of a new head, ask a profiler to fit
 one with the domain skill's calibration procedure, and name the records directory in its brief.
+
+## Before the simulator can lead
+
+Adding a model or a hardware to a simulator is the domain skill's setup, done before the run with
+the user's approval: a model description, a measured timing for every kernel at every shape the
+workload reaches, and a check against measured numbers. It takes far longer than one plan.
+Without an operator steering note that approves it, run the default loop for the whole run, and
+name in your final report what the simulator was missing.
+
+When the operator approves building it during the run:
+
+- **Run the default loop meanwhile.** The simulator work is plans of their own: a `simulator`
+  plan for the preset, and `probe` plans for the kernel timings it needs, with the simulator plan
+  depending on them. They predict no gain.
+- **Rank every other plan by measured evidence, labeled.** Keep the roadmap, with
+  `Calibration: uncalibrated` and `Design target: none yet (<what the simulator still lacks>)`.
+  Order the other plans by the gain their device evidence supports (a microbenchmark, a timed
+  self-test, a measured head), and write the source beside each, as
+  `predicts <+x%> from <job ids>, uncalibrated`. Never present that arithmetic as a simulated
+  prediction.
+- **Ask what the simulator can already answer.** A preset that refuses the whole workload may
+  already model one phase from the timings it has (the decode step, for example). A planner may
+  freeze a prediction of that phase alone, named as such, as the domain skill allows; it is never
+  a prediction of the task's metric.
+- **Switch when it can lead.** When the simulation of the task's workload runs to the end, start
+  this mode as [Start](#the-design-target-and-the-roadmap) says: dispatch the design-study
+  planner, and write the next roadmap version with
+  `Why: simulator ready (plan <n>, plan <m>)`. Plans funded before the switch keep their
+  evidence; the study predicts each of them again.
+- **Budget it.** On a time budget, say in the first roadmap how much of it the simulator work may
+  take. When that is spent, finish the run in the default loop.
 
 ## The loop
 
