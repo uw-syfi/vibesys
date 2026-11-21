@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 from entrypoints.cli import load_config_and_skills
 from vibesys.constants import PROJECT_ROOT, ComputeBackend, DomainName
@@ -277,6 +279,59 @@ def test_conflicting_same_specificity_rules_fail(tmp_path: Path) -> None:
 
     with pytest.raises(SkillMetadataError, match="conflicting VibeSys rules"):
         effective_skill_metadata(skill_dir, duplicate_rules)
+
+
+def _toml_list(values: Iterable[str] | None) -> str:
+    return "" if values is None else "[" + ", ".join(f'"{v}"' for v in values) + "]"
+
+
+def _scope_permutations[T](values: list[T]) -> st.SearchStrategy[tuple[list[T], list[T]] | None]:
+    scopes = st.lists(st.sampled_from(values), min_size=1, unique=True)
+    return st.none() | scopes.flatmap(
+        lambda scope: st.tuples(st.permutations(scope), st.just(scope))
+    )
+
+
+@pytest.mark.regression
+@given(
+    backends=_scope_permutations(list(ComputeBackend)),
+    domains=_scope_permutations(list(DomainName)),
+)
+@example(
+    backends=([ComputeBackend.CUDA, ComputeBackend.CPU], [ComputeBackend.CPU, ComputeBackend.CUDA]),
+    domains=None,
+)
+def test_same_specificity_rules_that_agree_in_any_order_do_not_conflict(
+    tmp_path_factory: pytest.TempPathFactory,
+    backends: tuple[list[ComputeBackend], list[ComputeBackend]] | None,
+    domains: tuple[list[DomainName], list[DomainName]] | None,
+) -> None:
+    """Two rules on one skill at the same depth agree when they name the same sets.
+
+    The order a sidecar lists backends or domains in is not part of its meaning,
+    yet ``["cuda", "cpu"]`` and ``["cpu", "cuda"]`` were once rejected as conflicting.
+    """
+    root = tmp_path_factory.mktemp("skills")
+    _write_skill(root / "vendor" / "skills", "agreed")
+    sidecars = (
+        (root / "vendor", "skills/agreed"),
+        (root / "vendor" / "skills" / "agreed", "."),
+    )
+    for index, (sidecar_dir, rule_path) in enumerate(sidecars):
+        lines = ["[[rule]]", f'path = "{rule_path}"']
+        if backends is not None:
+            lines.append(f"backends = {_toml_list(backends[index])}")
+        if domains is not None:
+            lines.append(f"domains = {_toml_list(domains[index])}")
+        _write_sidecar(sidecar_dir, "\n".join(lines) + "\n")
+
+    for backend in ComputeBackend:
+        for domain in DomainName:
+            loaded = _skill_names(resolve_skill_source_dirs([root], backend=backend, domain=domain))
+            expected = (backends is None or backend in backends[1]) and (
+                domains is None or domain in domains[1]
+            )
+            assert loaded == ({"agreed"} if expected else set())
 
 
 def test_duplicate_skill_dirs_are_deduped(tmp_path: Path) -> None:

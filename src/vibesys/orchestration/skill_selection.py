@@ -370,6 +370,10 @@ def coerce_skill_root(raw: str | Path, *, project_root: Path = PROJECT_ROOT) -> 
     return path
 
 
+def _as_set[T](values: tuple[T, ...] | None) -> frozenset[T] | None:
+    return None if values is None else frozenset(values)
+
+
 def effective_skill_metadata(skill_dir: Path, rules: list[SkillRule]) -> SkillMetadata:
     """Resolve winning VibeSys routing metadata for one validated skill directory."""
     matches = [rule for rule in rules if rule.applies_to(skill_dir)]
@@ -378,7 +382,8 @@ def effective_skill_metadata(skill_dir: Path, rules: list[SkillRule]) -> SkillMe
 
     best_specificity = max(rule.specificity for rule in matches)
     winners = [rule for rule in matches if rule.specificity == best_specificity]
-    constraints = {(rule.backends, rule.domains) for rule in winners}
+    # Order within a sidecar list carries no meaning: compare the sets each rule allows.
+    constraints = {(_as_set(rule.backends), _as_set(rule.domains)) for rule in winners}
     if len(constraints) > 1:
         locations = ", ".join(f"{rule.sidecar_path}:{rule.raw_path}" for rule in winners)
         raise _metadata_error(
