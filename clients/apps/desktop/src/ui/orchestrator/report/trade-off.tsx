@@ -39,8 +39,17 @@ export function TradeOff(props: {
     y: tradeoff.objectives[1]?.name ?? '',
   });
   const names = tradeoff.objectives.map(objective => objective.name);
-  const xAt = Math.max(0, names.indexOf(chosen.x));
-  const yAt = Math.max(0, names.indexOf(chosen.y));
+  // `chosen` survives a report whose objective set has changed under it (the same chart reused for
+  // a different run, with no remount between): neither name may still be one of `names`. Falling
+  // back to `Math.max(0, -1)` for each axis independently would then put both axes at index 0, the
+  // same objective. Fall back to this report's own first two objectives instead, together, so a
+  // stale pick never aliases the two axes to one.
+  const picked =
+    names.includes(chosen.x) && names.includes(chosen.y)
+      ? chosen
+      : {x: names[0] ?? '', y: names[1] ?? names[0] ?? ''};
+  const xAt = names.indexOf(picked.x);
+  const yAt = names.indexOf(picked.y);
   const units = new Map(props.objectives.map(objective => [objective.name, objective.unit]));
   const x = tradeoff.objectives[xAt];
   const y = tradeoff.objectives[yAt];
@@ -69,7 +78,7 @@ export function TradeOff(props: {
                 <Select
                   value={names[xAt] ?? ''}
                   options={options}
-                  change={name => choose({...chosen, x: name})}
+                  change={name => choose({...picked, x: name})}
                   size="sm"
                 />
               </Field>
@@ -77,7 +86,7 @@ export function TradeOff(props: {
                 <Select
                   value={names[yAt] ?? ''}
                   options={options}
-                  change={name => choose({...chosen, y: name})}
+                  change={name => choose({...picked, y: name})}
                   size="sm"
                 />
               </Field>
