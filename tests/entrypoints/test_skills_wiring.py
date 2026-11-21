@@ -336,6 +336,26 @@ def test_invalid_sidecar_metadata_fails_with_sidecar_path(
     assert message in str(exc.value)
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize("target", ["SKILL.md", "references/notes.md"])
+def test_rule_path_naming_a_file_fails_instead_of_scoping_nothing(
+    tmp_path: Path, target: str
+) -> None:
+    # A rule whose path names a file can never contain a skill directory, so before the fix it
+    # matched nothing and the skill it meant to scope loaded for every backend.
+    root = tmp_path / "skills"
+    skill = _write_skill(root, "trainium-only")
+    skill.joinpath("references").mkdir()
+    skill.joinpath("references", "notes.md").write_text("notes\n", encoding="utf-8")
+    _write_sidecar(root, f'[[rule]]\npath = "trainium-only/{target}"\nbackends = ["trainium"]\n')
+
+    with pytest.raises(SkillMetadataError) as exc:
+        resolve_skill_source_dirs([root], backend=ComputeBackend.CUDA, domain=DomainName.GENERIC)
+
+    assert ".vibesys.toml" in str(exc.value)
+    assert "is not a directory" in str(exc.value)
+
+
 def test_missing_skill_frontmatter_is_invalid(tmp_path: Path) -> None:
     skill_dir = tmp_path / "bad-skill"
     skill_dir.mkdir()

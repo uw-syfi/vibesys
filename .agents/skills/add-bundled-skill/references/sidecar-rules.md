@@ -21,8 +21,8 @@ rule per skill directory.
 A sidecar holds one or more `[[rule]]` tables, each with these keys:
 
 - `path` (required): a directory relative to the sidecar's directory. It must
-  exist, must not be absolute or contain `..`, and must still lie inside the
-  sidecar's directory after symlinks are resolved.
+  exist and be a directory, must not be absolute or contain `..`, and must
+  still lie inside the sidecar's directory after symlinks are resolved.
 - `backends` (optional): a list of `ComputeBackend` values. Absent means the
   rule does not constrain the backend.
 - `domains` (optional): a list of `DomainName` values, matched against the
@@ -63,7 +63,7 @@ file or directory. A run fails before its first agent turn when:
 - it has no `[[rule]]` table, or a `rule` entry that is not a table;
 - a rule has a key other than `path`, `backends` and `domains`;
 - `path` is missing, empty, absolute, contains `..`, escapes the directory,
-  or does not exist;
+  does not exist, or names something other than a directory;
 - `backends` or `domains` is not a list, or holds a value outside its enum
   (the message lists the allowed values);
 - two equally specific matching rules disagree.

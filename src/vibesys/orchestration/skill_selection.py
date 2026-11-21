@@ -281,6 +281,10 @@ def _parse_rule_path(sidecar_path: Path, raw_path: object) -> tuple[str, Path]:
         raise _metadata_error(sidecar_path, "`rule.path` must stay in-tree") from exc
     if not target.exists():
         raise _metadata_error(sidecar_path, f"`rule.path` does not exist: {raw_path!r}")
+    # A rule scopes the skills inside a directory; a file holds none, so a rule naming one would
+    # match nothing and leave the skill it meant to scope loading for every backend and domain.
+    if not target.is_dir():
+        raise _metadata_error(sidecar_path, f"`rule.path` is not a directory: {raw_path!r}")
 
     return raw_path, target
 
