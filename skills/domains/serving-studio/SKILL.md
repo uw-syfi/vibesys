@@ -74,7 +74,12 @@ of an optimization: [setup.md](references/setup.md).
      never an absolute value. Name each difference in the plan.
    - **None:** another architecture, another precision, or hardware of another vendor or kind.
      Stop the simulator work as Setup says. Porting a model or hardware is ServingStudio's own
-     development work and costs far more than one plan.
+     development work and costs far more than one plan
+     ([setup.md](references/setup.md#adding-a-model-or-hardware)).
+   - **Match, but the workload refuses:** the preset exists and refuses the task's workload for
+     missing kernel rows. The workload waits for them. A phase whose rows all exist (the decode
+     step at the workload's batch sizes and contexts) may be simulated alone: a phase
+     prediction, named as such in the plan, that never stands for the task's metric.
 
    A feature is modeled only when the preset shows it: a parameter or axis in its catalog entry,
    or a report that breaks out its cost. One the entry does not name is `unknown`, not modeled;
