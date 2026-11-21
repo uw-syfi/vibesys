@@ -102,7 +102,11 @@ function abridged(text: string): {readonly shown: string; readonly hiddenLines: 
   if (lines.length <= VISIBLE_LINES && text.length <= VISIBLE_CHARS) {
     return {shown: text, hiddenLines: 0};
   }
-  const shown = lines.slice(0, VISIBLE_LINES).join('\n').slice(0, VISIBLE_CHARS);
+  const head = lines.slice(0, VISIBLE_LINES).join('\n');
+  // Cut on code-point boundaries: `.slice` counts UTF-16 units, so it could split an astral
+  // character's surrogate pair (the text is free-form and can hold emoji), leaving a lone
+  // surrogate (a broken glyph) before the "Show more" line.
+  const shown = [...head].slice(0, VISIBLE_CHARS).join('');
   return {shown, hiddenLines: Math.max(1, lines.length - shown.split('\n').length)};
 }
 

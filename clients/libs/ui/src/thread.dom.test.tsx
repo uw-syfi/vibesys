@@ -361,4 +361,29 @@ describe('a tool call, closed and open', () => {
     expect(text(container)).toContain('line 59');
     expect(text(container)).not.toContain('Show more');
   });
+
+  test('cuts a long result on a whole character, never half of an astral one', async () => {
+    const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    const shownOf = async (output: string): Promise<string> => {
+      const {container} = await mount(
+        <ToolCall
+          name="Read"
+          state="ok"
+          input={null}
+          output={output}
+          open
+          toggle={() => undefined}
+        />,
+      );
+      return one(container, '.vs-code-block-body').textContent ?? '';
+    };
+    // A plain result far longer than the character budget finds it empirically: the shown text
+    // ends in a newline and an ellipsis, so its length less those two is the room it was cut to.
+    const plain = await shownOf('x'.repeat(4000));
+    const keep = plain.length - 2;
+    // An emoji placed so its surrogate pair straddles the cut index must be kept whole, not
+    // halved into a lone surrogate (a broken glyph) before the "Show more" ellipsis.
+    const straddling = await shownOf(`${'x'.repeat(keep - 1)}😀${'y'.repeat(10)}`);
+    expect(LONE_SURROGATE.test(straddling)).toBe(false);
+  });
 });
