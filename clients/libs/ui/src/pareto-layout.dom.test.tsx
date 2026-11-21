@@ -157,6 +157,33 @@ describe('the words and the frontier of a Pareto chart', () => {
     );
   });
 
+  test('cuts an axis title on a whole character, never half of an astral one', async () => {
+    const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    const points: ParetoPoint[] = [
+      {id: 'a', x: 1, y: 1, time: 0, state: 'passed'},
+      {id: 'b', x: 2, y: 2, time: 1, state: 'passed'},
+    ];
+    const y: ParetoAxis = {name: 'Latency', unit: 'ms', direction: 'lower'};
+    const titleOf = async (name: string): Promise<string> => {
+      const svg = await draw(points, {name, unit: '', direction: 'higher'}, y);
+      const title = [...svg.querySelectorAll('.vs-chart-label')]
+        .map(element => element.textContent ?? '')
+        .find(text => text.endsWith('→'));
+      if (title === undefined) throw new Error('no x axis title drawn');
+      svg.parentElement?.parentElement?.remove();
+      return title.slice(0, -2);
+    };
+    // A plain name far longer than any plausible room finds the room in characters: the title
+    // ends in an ellipsis, so the shown text's length (less the ellipsis) is the room it was cut
+    // to.
+    const plain = await titleOf('x'.repeat(300));
+    const keep = plain.length - 1;
+    // An emoji placed so its surrogate pair straddles the cut index must be kept whole, not
+    // halved into a lone surrogate (a broken glyph) before the ellipsis.
+    const straddling = await titleOf(`${'x'.repeat(keep - 1)}😀${'y'.repeat(10)}`);
+    expect(LONE_SURROGATE.test(straddling)).toBe(false);
+  });
+
   test('the frontier is a step from its first point to its last, inside the plot, never out to the frame', async () => {
     await fc.assert(
       fc.asyncProperty(pointsOf, axis, axis, async (points, x, y) => {

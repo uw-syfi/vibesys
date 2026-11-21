@@ -210,13 +210,17 @@ function nameOf(axis: ParetoAxis): string {
  * unit it ends in an ellipsis; it is never wider than `room`.
  */
 function axisTitle(axis: ParetoAxis, room: number): string {
-  const fits = (text: string): boolean => text.length * LABEL_GLYPH <= room;
+  // Count and cut on code-point boundaries throughout: `text.length` and `slice` both count
+  // UTF-16 units, so either could split an astral character's surrogate pair (an objective's
+  // name or unit is free text), the guard adding an unneeded ellipsis to a title that already
+  // fits and the cut leaving a lone surrogate (a broken glyph) before it.
+  const fits = (text: string): boolean => [...text].length * LABEL_GLYPH <= room;
   const whole = `${nameOf(axis)}, ${axis.direction} is better`;
   if (fits(whole)) return whole;
   const short = nameOf(axis);
   if (fits(short)) return short;
   const keep = Math.max(0, Math.floor(room / LABEL_GLYPH) - ELLIPSIS.length);
-  return `${short.slice(0, keep)}${ELLIPSIS}`;
+  return `${[...short].slice(0, keep).join('')}${ELLIPSIS}`;
 }
 
 /**
