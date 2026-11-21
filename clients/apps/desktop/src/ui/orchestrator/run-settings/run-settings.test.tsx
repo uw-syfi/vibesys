@@ -6,6 +6,7 @@ import {
   AgentSchema,
   AgentStatus,
   CommandSchema,
+  Harness,
   ModelCatalogSchema,
   RunChangeSchema,
   RunStatus,
@@ -64,14 +65,18 @@ function withBusyLead(base: Scenario): Scenario {
 }
 
 /** The page of the scenario's run over a fake daemon: updates go to it, and its log is what is shown. */
-function openSettings(daemon: FakeDaemon = new FakeDaemon(scenario)) {
+function openSettings(
+  daemon: FakeDaemon = new FakeDaemon(scenario),
+  /** Transform the view the window renders from, without changing what the host holds. */
+  withState: (state: OrchestratorState) => OrchestratorState = state => state,
+) {
   const runId = daemon.scenario.runId;
   const sent: RunUpdateRequest[] = [];
   let progress: CommandProgress | undefined;
   let screen: Screen | undefined;
   const app = () => (
     <OrchestratorApp
-      hosts={[hostSnapshotOf({model: {data: stateOf(daemon), agentCursors: {}}})]}
+      hosts={[hostSnapshotOf({model: {data: withState(stateOf(daemon)), agentCursors: {}}})]}
       nowMs={scenario.endMs}
       commands={appCommandsOf({
         update: progress === undefined ? {} : {[runId]: progress},
@@ -193,6 +198,27 @@ describe('the run page settings', () => {
     );
     expect(run()?.maxCostUsd).toBeUndefined();
     expect(dialogText(screen)).not.toContain('Cost limit No limit');
+    screen.unmount();
+  });
+
+  it('asks for a lead explicitly picked while the run’s current lead has not been read yet', () => {
+    const daemon = new FakeDaemon(scenario);
+    const leadAgentId = daemon.scenario.changes.reduce(applyChange, emptyState).runs[
+      daemon.scenario.runId
+    ]?.leadAgentId;
+    const unread = (state: OrchestratorState): OrchestratorState => {
+      const agents = {...state.agents};
+      if (leadAgentId !== undefined) delete agents[leadAgentId];
+      return {...state, agents};
+    };
+    const {screen, sent} = openSettings(daemon, unread);
+    // The dropdown opens at the tool's own default, the only one the form can assume while the
+    // host has not yet said who the lead is; picking a different tool is still a real ask.
+    expect(screen.control('Apply').getAttribute('aria-disabled')).toBe('true');
+    choose(fieldOf<HTMLSelectElement>(screen, 'Lead'), 'codex');
+    expect(screen.control('Apply').getAttribute('aria-disabled')).toBeNull();
+    screen.press(screen.control('Apply'));
+    expect(sent).toEqual([{lead: {harness: Harness.CODEX, model: ''}}]);
     screen.unmount();
   });
 
