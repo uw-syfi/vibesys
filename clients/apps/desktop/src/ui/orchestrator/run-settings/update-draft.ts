@@ -29,9 +29,11 @@ export interface SettingsDraft {
   readonly model: string;
 }
 
+/** What the form assumes while the run's lead is not yet known (the tool's own default, no model). */
+const DEFAULT_LEAD: LeadChoice = 'claude_code';
+
 const choiceOf = (harness: Harness): LeadChoice =>
-  (Object.entries(LEADS).find(([, value]) => value === harness)?.[0] ??
-    'claude_code') as LeadChoice;
+  (Object.entries(LEADS).find(([, value]) => value === harness)?.[0] ?? DEFAULT_LEAD) as LeadChoice;
 
 /** The lead the form starts from: the one waiting to take over, else the one running. */
 const leadOfSettings = (settings: RunSettings): LeadSetting | null =>
@@ -44,7 +46,7 @@ export function draftOf(settings: RunSettings): SettingsDraft {
     cost: settings.cost.limitUsd === null ? '' : String(settings.cost.limitUsd),
     time: settings.time.limitSeconds === null ? NO_LIMIT : String(settings.time.limitSeconds),
     fanout: String(settings.fanout.cap),
-    lead: lead === null ? 'claude_code' : choiceOf(lead.harness),
+    lead: lead === null ? DEFAULT_LEAD : choiceOf(lead.harness),
     model: lead?.model ?? '',
   };
 }
@@ -80,10 +82,14 @@ function leadEdit(
   draft: SettingsDraft,
   settings: RunSettings,
 ): NonNullable<RunUpdateRequest['lead']> | null {
+  // The run's lead is unknown until its agents are read (`leadOfSettings` returns null); the form
+  // then opens at the same default this falls back to, so a draft still at that default asks
+  // nothing, and an explicit pick away from it is asked for rather than silently dropped.
   const held = leadOfSettings(settings);
-  if (held === null) return null;
+  const heldHarness = held === null ? LEADS[DEFAULT_LEAD] : held.harness;
+  const heldModel = held?.model ?? '';
   const harness = LEADS[draft.lead];
-  return harness === held.harness && draft.model === held.model
+  return harness === heldHarness && draft.model === heldModel
     ? null
     : {harness, model: draft.model};
 }
