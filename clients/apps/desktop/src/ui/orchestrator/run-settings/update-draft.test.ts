@@ -88,20 +88,38 @@ describe('the settings form', () => {
   it('asks the lead only when its tool or model differs from the waiting or running one', () => {
     fc.assert(
       fc.property(settings, lead, (held, chosen) => {
-        fc.pre(held.lead.current !== null || held.lead.pending !== null);
         const draft = draftOf(held);
-        const base = held.lead.pending ?? held.lead.current;
+        // Neither waiting nor running is known before the run's agents are read; the form then
+        // opens at the tool's own default with no model, so that is the base an edit is asked against.
+        const base = held.lead.pending ??
+          held.lead.current ?? {
+            harness: LEADS.claude_code,
+            model: '',
+          };
         const next = {
           ...draft,
           lead: chosen.harness === Harness.CODEX ? 'codex' : 'claude_code',
         } as const;
         const asking = request({...next, model: chosen.model}, held);
-        const same = base?.harness === chosen.harness && base?.model === chosen.model;
+        const same = base.harness === chosen.harness && base.model === chosen.model;
         expect(asking?.lead === undefined).toBe(same);
         if (asking?.lead !== undefined)
           expect(asking.lead).toEqual({harness: LEADS[next.lead], model: chosen.model});
       }),
     );
+  });
+
+  it('asks for a lead explicitly picked away from the default while the run lead is still unknown', () => {
+    const held: RunSettings = {
+      cost: {limitUsd: null, spentUsd: null, setupUsd: null},
+      time: {limitSeconds: null, elapsedSeconds: null, setupSeconds: null},
+      fanout: {cap: 1, live: null, above: 0},
+      lead: {current: null, pending: null},
+    };
+    const draft = draftOf(held);
+    expect(asked(draft, held)).toEqual({kind: 'nothing'});
+    const asking = request({...draft, lead: 'codex', model: 'gpt-5'}, held);
+    expect(asking?.lead).toEqual({harness: LEADS.codex, model: 'gpt-5'});
   });
 
   it('makes a command that names each asked setting and none that was not', () => {
