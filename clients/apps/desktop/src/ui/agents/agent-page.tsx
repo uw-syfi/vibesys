@@ -12,6 +12,7 @@ import {
 } from '../../state/index.js';
 import {useDisplayClock} from '../display-clock.js';
 import {agentWord, harnessWord} from '../orchestrator/words.js';
+import {plural} from '../plain-words.js';
 import {AgentTranscript, type HistoryAccess} from './agent-transcript.js';
 import {agentLabel} from './labels.js';
 import {MessageBox} from './message-box.js';
@@ -112,7 +113,11 @@ export function AgentPage(props: {
           <Chip label={harnessWord(agent.harness)} />
           {agent.model === '' ? null : <Chip label={agent.model} mono clip />}
           {turnsLeftOut === 0 ? null : (
-            <Chip label={`${turnsLeftOut} turns not shown`} tone="warn" dot />
+            <Chip
+              label={`${turnsLeftOut} ${plural(turnsLeftOut, 'turn', 'turns')} not shown`}
+              tone="warn"
+              dot
+            />
           )}
           {props.reading}
         </>
