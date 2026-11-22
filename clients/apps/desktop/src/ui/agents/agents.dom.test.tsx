@@ -270,6 +270,9 @@ describe('an agent page', () => {
       return text;
     };
     expect(shown(read(12))).toContain('12 turns not shown');
+    // One left-out turn reads in the singular, as every other count the page writes does.
+    expect(shown(read(1))).toContain('1 turn not shown');
+    expect(shown(read(1))).not.toContain('1 turns not shown');
     expect(shown(read(0))).not.toContain('not shown');
     expect(shown(state)).not.toContain('not shown');
   });
