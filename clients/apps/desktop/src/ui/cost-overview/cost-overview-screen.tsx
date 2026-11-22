@@ -560,7 +560,7 @@ function summaryFigures(figures: Figures): readonly Figure[] {
     {
       label: 'Runs',
       value: countFigure(figures.runs.count, figures.servedHosts, figures.hostCount),
-      detail: `${figures.turns.count} finished turns`,
+      detail: `${figures.turns.count} finished ${figures.turns.what}`,
       ...reported(figures.servedHosts > 0),
     },
     {

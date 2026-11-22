@@ -113,6 +113,16 @@ describe('the Cost page of one host', () => {
     screen.unmount();
   });
 
+  it('says "finished turn" in the singular when exactly one turn has finished', () => {
+    const run = views.none.runs[0];
+    if (run === undefined) throw new Error('the no-spend case has its live run');
+    const screen = mount(page({...views.none, turns: 1, runs: [{...run, turns: 1}]}));
+    const text = screen.container.querySelector('.vs-figure-strip')?.textContent ?? '';
+    expect(text).toContain('1 finished turn');
+    expect(text).not.toContain('1 finished turns');
+    screen.unmount();
+  });
+
   it('draws its agents by type in the columns the run report uses, with how many are working of how many there have been', () => {
     const view = views.short;
     const [first] = view.roles;
