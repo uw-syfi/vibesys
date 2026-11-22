@@ -127,12 +127,22 @@ const section = <Source, Row>(
   };
 };
 
-/** A change as a signed percent, or as a multiple once it is too large for a percent to read. */
+/** A change as a signed percent, relative to the magnitude of the base. */
 const signed = (percent: number): string => {
   const size = Math.abs(percent);
-  if (percent >= 1000) return `${formatFigure(percent / 100 + 1)}×`;
   const text = size < 10 ? size.toFixed(1) : String(Math.round(size));
   return `${percent < 0 ? '−' : '+'}${text}%`;
+};
+
+/**
+ * The change from `base` to `latest`: a signed percent of the base's magnitude, or a multiple once
+ * it is too large for a percent to read. The multiple is the ratio `latest / base`, which reads as
+ * growth only from a positive base; a negative base has no such multiple (its `latest / base` would
+ * misreport a sign flip as clean growth), so its change stays a signed percent.
+ */
+const changeFrom = (base: number, latest: number): string => {
+  const percent = ((latest - base) / Math.abs(base)) * 100;
+  return base > 0 && percent >= 1000 ? `${formatFigure(latest / base)}×` : signed(percent);
 };
 
 const DIRECTION: Readonly<Record<Metric['direction'], string>> = {
@@ -150,9 +160,7 @@ function measureRow(metric: Metric): MeasureRow {
       : formatCount(metric.points.length);
   const base = first === undefined || first === latest ? null : first.value;
   const change =
-    latest === null || base === null || base === 0
-      ? DASH
-      : signed(((latest.value - base) / Math.abs(base)) * 100);
+    latest === null || base === null || base === 0 ? DASH : changeFrom(base, latest.value);
   const kept =
     metric.omittedPoints > 0
       ? `${formatCount(metric.omittedPoints)} older ${plural(metric.omittedPoints, 'reading was', 'readings were')} left out. `

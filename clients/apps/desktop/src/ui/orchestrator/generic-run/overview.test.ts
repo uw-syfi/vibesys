@@ -217,6 +217,21 @@ describe('the overview of a generic run', () => {
     expect(grown.measures.rows[0]?.change).toBe('512×');
   });
 
+  it('writes a change from a negative base as a signed percent, never a bogus multiple', () => {
+    const [first] = live.optimization.metrics.items[0]?.points ?? [];
+    if (first === undefined) throw new Error('the representative run has no reading');
+    // From -10 to 90 the value flips sign; `latest / base` is -9, so a `N×` multiple is meaningless.
+    const points = [
+      {...first, value: -10},
+      {...first, value: 90},
+    ];
+    const [, latest] = points;
+    const changed = overviewOf(entry(), withMetric({points, latest: latest ?? null}), false);
+    const change = changed.measures.rows[0]?.change;
+    expect(change).toBe('+1000%');
+    expect(change).not.toContain('×');
+  });
+
   it('puts the objectives before resources and references whatever order the run recorded', () => {
     const [objective, resource] = live.optimization.metrics.items;
     if (objective === undefined || resource === undefined) throw new Error('metrics missing');
