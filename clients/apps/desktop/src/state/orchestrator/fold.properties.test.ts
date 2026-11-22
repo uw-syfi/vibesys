@@ -11,6 +11,9 @@ import {
   ReceiptSchema,
   type RunChange,
   RunChangeSchema,
+  RunsSnapshotSchema,
+  TurnSchema,
+  TurnStatus,
   type WatchAgentResponse,
   WatchAgentResponseSchema,
 } from '@vibesys/orchestrator-proto';
@@ -203,6 +206,41 @@ describe('a snapshot', () => {
       }),
       {numRuns: 60},
     );
+  });
+
+  it('of detail SUMMARY drops the turns it no longer carries, as it does agents and messages', () => {
+    const held = applySnapshot(
+      emptyState,
+      create(RunsSnapshotSchema, {
+        sequence: 1n,
+        turns: [create(TurnSchema, {id: 'turn-1', status: TurnStatus.RUNNING})],
+      }),
+    );
+    expect(held.turns['turn-1']).toBeDefined();
+    // A SUMMARY snapshot carries no agents, turns, messages or check-ins (service.proto), so none is
+    // held after it: the run screen reads the history again with GetRunHistory. Before the fix, the
+    // empty turns were folded onto the held state and so left it unchanged, retaining stale turns
+    // while agents, messages and check-ins (replaced wholesale) correctly cleared.
+    const summary = applySnapshot(held, create(RunsSnapshotSchema, {sequence: 2n}));
+    expect(summary.turns).toEqual({});
+  });
+
+  it('that carries a turn does not take a turn the client already finished back to running', () => {
+    const held = applySnapshot(
+      emptyState,
+      create(RunsSnapshotSchema, {
+        sequence: 1n,
+        turns: [create(TurnSchema, {id: 'turn-1', status: TurnStatus.COMPLETED})],
+      }),
+    );
+    const after = applySnapshot(
+      held,
+      create(RunsSnapshotSchema, {
+        sequence: 2n,
+        turns: [create(TurnSchema, {id: 'turn-1', status: TurnStatus.RUNNING})],
+      }),
+    );
+    expect(after.turns['turn-1']?.status).toBe(TurnStatus.COMPLETED);
   });
 });
 
