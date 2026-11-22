@@ -81,7 +81,15 @@ function snapshotState(
       models,
     };
   }
-  const turns = snapshot.turns.reduce(withTurn, state).turns;
+  // A snapshot replaces the turns it carries: `withTurn` folds each one in (so a turn the agent
+  // stream already finished is not taken back to running), then every turn the snapshot does not
+  // carry is dropped. A SUMMARY snapshot carries none, so none is held after it; the run screen reads
+  // them again with `GetRunHistory`. Folding straight onto `state` (as `applyRunHistory` does, where a
+  // page is meant to merge) would instead keep stale turns, including turns of runs no longer present.
+  const carried = new Set(snapshot.turns.map(turn => turn.id));
+  const turns = Object.fromEntries(
+    Object.entries(snapshot.turns.reduce(withTurn, state).turns).filter(([id]) => carried.has(id)),
+  );
   const runs = byId(snapshot.runs);
   return {
     ...state,
