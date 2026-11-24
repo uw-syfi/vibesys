@@ -46,7 +46,7 @@ func TestEveryEndOfACommandIsRecordedAsItIs(t *testing.T) {
 		log    string
 	}{
 		{"exit 3", []string{"exit", "3"}, core.JobFailed, ptr(3), ""},
-		{"time limit", []string{"timeout"}, core.JobFailed, nil, "ran past its time limit"},
+		{"time limit", []string{"timeout"}, core.JobFailed, nil, "ran past its time limit and was ended; to give it longer, submit it again with --timeout"},
 		{"service never ready", []string{"service-not-ready"}, core.JobFailed, nil, "service was not ready"},
 		{"service exited", []string{"service-exited"}, core.JobFailed, nil, "service exited"},
 		{"environment cannot say", []string{"unknown"}, core.JobLost, nil, "how it ended is not known"},

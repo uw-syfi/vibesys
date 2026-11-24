@@ -74,6 +74,7 @@ func parseV02(name string, table map[string]any, o *cliv1.TaskObjectives) (Task,
 		}
 	}
 	t := Task{Name: name, Samples: DefaultSamples, Schema: Schema02}
+	t.CommandTimeout = time.Duration(m.GetCommandTimeoutSeconds()) * time.Second
 	var err error
 	if t.Backend, err = backendOf(m.GetBackends()); err != nil {
 		return Task{}, err

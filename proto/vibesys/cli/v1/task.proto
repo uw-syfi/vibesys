@@ -124,6 +124,15 @@ message TaskManifestV02 {
   // Only a task of one image has it: a task with [candidate] starts its candidate's server for
   // each command.
   TaskServiceV02 service = 19 [(task_schema_since_minor) = 2];
+  // The time limit of a command job of the task (vibesys-cli submit command) that gives no
+  // --timeout: for a task whose profiles or microbenchmarks run for hours. Zero leaves it to the
+  // daemon's default, 30 minutes. Beside the candidate's server, the server's startup time is added,
+  // as it is to --timeout. A command submitted with --env host on a machine without a GPU pool does
+  // not read its task, and has the daemon's default.
+  uint32 command_timeout_seconds = 20 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).uint32.lte = 604800
+  ];
 }
 
 // TaskDomain is what an example task optimizes. A task names one as the value's name without its

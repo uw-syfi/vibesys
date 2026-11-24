@@ -136,6 +136,9 @@ type Task struct {
 	// Service is set for a task of one image with a job-scoped server (a Schema02 manifest with
 	// [service]): a job starts it once and runs its samples against it.
 	Service *Service
+	// CommandTimeout is the time limit of a command job of the task that sets none, from a Schema02
+	// manifest's command_timeout_seconds. Zero leaves it to the daemon's default.
+	CommandTimeout time.Duration
 }
 
 // Declared is every objective the task declares, which way each improves: the scored metric first,

@@ -6,7 +6,9 @@ The CLI reads the task from the commit, builds and runs it in a clean checkout, 
 placement's capacity allows, saves a result only with its samples and a passing check, and answers a
 repeat of a job it already has from the saved result. A second submission of the same job joins
 the one in the queue; the submit response's `disposition` says `CREATED`, `JOINED` or `REUSED`.
-`submit command` jobs are never reused or joined.
+`submit command` jobs are never reused or joined. A command job's time limit is its `--timeout`,
+else its task's `command_timeout_seconds`, else 30 minutes; give a long profile or microbenchmark a
+`--timeout` that covers it.
 
 You therefore do not take a measurement slot, serialize your own runs, clean a worktree, start a
 service by hand or record a sample. If a step seems missing, ask the CLI (`vibesys-cli --help`)

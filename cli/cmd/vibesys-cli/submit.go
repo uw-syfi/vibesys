@@ -115,7 +115,7 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 	var (
 		image   = fs.String("image", "", "required: the image the command runs in: harness (the task's image, where its check and benchmark run, beside the candidate's server on a task with [candidate]) or candidate (the image built from the commit's [candidate] dockerfile)")
 		env     = fs.String("env", "", "the environment to run in: host or docker (default: the task's)")
-		timeout = fs.Duration("timeout", 0, "the time limit of the command, such as 10m (default: the daemon's); beside a candidate's server, the server's startup time is added")
+		timeout = fs.Duration("timeout", 0, "the time limit of the command, such as 10m (default: the task's command_timeout_seconds, else the daemon's); beside a candidate's server, the server's startup time is added")
 		service = fs.String("service", "", "a long-lived process to run the command against, split into words as a shell would, quotes kept; not beside a candidate's server")
 		probe   = fs.String("probe", "", "a command that succeeds when the service is ready, split as --service is")
 		wrap    = fs.String("wrap", "", "an argv prefix, split as --service is: with --image harness on a task with [candidate], put in front of the candidate's server (a profiler's command line, say); otherwise in front of --service when it is given and of the command when not")
