@@ -43,6 +43,17 @@ enum VerdictBound {
   VERDICT_BOUND_MIN_GAIN = 2;
 }
 
+// SigmaSource is what set the relative variation of one run that a verdict's noise rests on.
+enum SigmaSource {
+  // The verdict is inconclusive for want of comparable numbers, or was saved before verdicts named
+  // their sigma.
+  SIGMA_SOURCE_UNSPECIFIED = 0;
+  // The task's declared relative_noise: it was at least the spread the runs showed.
+  SIGMA_SOURCE_DECLARED_FLOOR = 1;
+  // The spread the runs showed: above the declared relative_noise, or the task declares none.
+  SIGMA_SOURCE_OBSERVED_SPREAD = 2;
+}
+
 // Verdict is a pure function of the two sample sets, the metric's direction and the task's declared
 // noise floor and minimum gain: the same samples always give the same verdict. Without a declared
 // floor it is Welch's t test at 95% and needs at least 3 samples a side; with one, a difference must
@@ -66,6 +77,24 @@ message Verdict {
   double min_gain = 10;
   // The bar that decided a conclusive verdict; unspecified for an inconclusive one.
   VerdictBound decided_by = 11;
+  // How many noises a gain had to exceed: 2 under a declared relative_noise, else the Student-t
+  // quantile for the samples' degrees of freedom. Zero for an inconclusive verdict.
+  double critical = 12;
+  // The relative gain the bar that decided the verdict stands at: critical times noise when decided_by
+  // is NOISE, min_gain when it is MIN_GAIN. A better verdict's gain exceeded it, a worse one's fell
+  // below its negative, and a within-noise one's did neither (or, decided by MIN_GAIN, exceeded the
+  // noise bar but not it). Zero for an inconclusive verdict.
+  double threshold = 13;
+  // What set the noise: the declared relative_noise or the observed spread.
+  SigmaSource sigma_source = 14;
+  // The pooled relative deviation of one run from its own side's mean, as the runs showed it: zero
+  // with two runs or fewer in all. It is the sigma when sigma_source is OBSERVED_SPREAD under a
+  // declared relative_noise; without one, Welch's test weighs each side's own spread instead.
+  double observed_spread = 15;
+  // For a within-noise verdict whose gain is positive: the smallest number of samples a side at which
+  // the same means and the same sigma would clear the bar and read better. Zero when no count
+  // would (the gain does not exceed min_gain, or the count does not fit), and for any other verdict.
+  uint32 samples_to_decide = 16;
 }
 
 // ObjectiveVerdict is the verdict on one objective of a multi-objective comparison: the comparison of

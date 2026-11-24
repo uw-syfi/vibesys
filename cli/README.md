@@ -1438,8 +1438,16 @@ samples a side. `min_gain` is at least 0 and less than 1: `better` then also nee
 exceed it, and a gain that passes the noise test but not `min_gain` is `within_noise`. It never
 changes what is `worse`. Every verdict records the `relative_noise` and `min_gain` it used and
 `decided_by`, the bar that decided it: `VERDICT_BOUND_NOISE`, or `VERDICT_BOUND_MIN_GAIN` when the
-minimum gain was the higher bar of a `better`, or held back a gain the noise test passed. In a
-task that is not multi-objective only the scored objective may declare either key; one on another
+minimum gain was the higher bar of a `better`, or held back a gain the noise test passed. It also
+says the bar itself: `critical`, how many noises a gain had to exceed (2 under a declared floor, else
+the Student-t quantile), and `threshold`, the gain the deciding bar stands at (`critical` × `noise`,
+or `min_gain` when it decided); `sigma_source`, whether the declared `relative_noise` or the spread
+the runs showed set the noise, with that spread in `observed_spread` (the pooled relative deviation
+of one run); and, for a `within_noise` gain that is positive and above `min_gain`,
+`samples_to_decide`, the samples a side at which the same means and sigma would read `better`
+(zero otherwise). The text of `compare` says them in one clause, such as `need gain > 10.67% (2 ×
+noise 5.337%, sigma from declared relative_noise 0.05; observed spread 0.2401%); at this gain about
+6 vs 6 samples would decide`. In a task that is not multi-objective only the scored objective may declare either key; one on another
 objective is refused naming it. Each measurement records what was declared, so the verdict rests on
 the values in force when the samples were taken; changing either changes the task version. The job
 records the sample count it ran with.

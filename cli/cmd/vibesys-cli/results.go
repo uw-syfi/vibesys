@@ -308,11 +308,61 @@ func describeVerdict(v *cliv1.Verdict) string {
 	if v.GetDecidedBy() == cliv1.VerdictBound_VERDICT_BOUND_MIN_GAIN {
 		b.WriteString(", decided by min_gain")
 	}
+	if bar := describeBar(v); bar != "" {
+		b.WriteString("; " + bar)
+	}
 	if v.GetReason() != cliv1.InconclusiveReason_INCONCLUSIVE_REASON_UNSPECIFIED {
 		fmt.Fprintf(&b, " [%s]", lower("INCONCLUSIVE_REASON_", v.GetReason().String()))
 	}
 	return b.String()
 }
+
+// describeBar is the bar a conclusive verdict was weighed against and what set its noise, and, for
+// a gain within noise that more samples would decide, how many a side. It is empty for a verdict
+// with no bar: an inconclusive one, the overall verdict of several objectives, or one saved before
+// verdicts carried their bar.
+func describeBar(v *cliv1.Verdict) string {
+	if v.GetCritical() == 0 {
+		return ""
+	}
+	noiseBar := v.GetCritical() * v.GetNoise()
+	how := fmt.Sprintf("%s × noise %s%s", number(v.GetCritical()), percent(v.GetNoise()), sigmaText(v))
+	gainBar := fmt.Sprintf("%s (%s)", percent(noiseBar), how)
+	if v.GetMinGain() > noiseBar {
+		gainBar = fmt.Sprintf("min_gain %s (noise bar %s = %s)", percent(v.GetMinGain()), percent(noiseBar), how)
+	}
+	var out string
+	switch v.GetKind() {
+	case cliv1.VerdictKind_VERDICT_KIND_BETTER:
+		out = "cleared gain > " + gainBar
+	case cliv1.VerdictKind_VERDICT_KIND_WORSE:
+		out = fmt.Sprintf("gain below -%s (%s)", percent(noiseBar), how)
+	default:
+		out = "need gain > " + gainBar
+	}
+	if k := v.GetSamplesToDecide(); k != 0 {
+		out += fmt.Sprintf("; at this gain about %d vs %d samples would decide", k, k)
+	}
+	return out
+}
+
+// sigmaText says what set a verdict's noise, after a comma, and nothing for a verdict saved before
+// verdicts said it.
+func sigmaText(v *cliv1.Verdict) string {
+	spread := percent(v.GetObservedSpread())
+	switch {
+	case v.GetSigmaSource() == cliv1.SigmaSource_SIGMA_SOURCE_DECLARED_FLOOR:
+		return fmt.Sprintf(", sigma from declared relative_noise %s; observed spread %s", number(v.GetRelativeNoise()), spread)
+	case v.GetSigmaSource() != cliv1.SigmaSource_SIGMA_SOURCE_OBSERVED_SPREAD:
+		return ""
+	case v.GetRelativeNoise() != 0:
+		return fmt.Sprintf(", sigma from observed spread %s, above declared relative_noise %s", spread, number(v.GetRelativeNoise()))
+	}
+	return fmt.Sprintf(", sigma from each side's observed spread (Welch's t; pooled spread %s)", spread)
+}
+
+// percent is a share as a percentage, rounded as number rounds.
+func percent(share float64) string { return number(100*share) + "%" }
 
 // notComparable are the inconclusive reasons whose verdict holds no numbers, with what to say.
 var notComparable = map[cliv1.InconclusiveReason]string{
