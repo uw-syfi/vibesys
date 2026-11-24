@@ -899,6 +899,11 @@ def is_task_image_reference(image: str) -> bool:
     return image.startswith(f"{TASK_IMAGE_REPOSITORY}:")
 
 
+def is_image_id(image: str) -> bool:
+    """Return whether *image* is an immutable ``sha256:...`` image ID rather than a name."""
+    return _IMAGE_ID.fullmatch(image) is not None
+
+
 def local_image_id(
     image: str,
     *,

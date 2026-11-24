@@ -30,6 +30,8 @@ _DOCKERFILE = Path("/project/.vibesys/tasks/t/Dockerfile")
 _REFERENCES = st.sampled_from(("vibesys-task-build:o-1", "vibesys-task-build:o-2"))
 _LOCAL_ID = "sha256:" + "c" * 64
 _IDS = st.sampled_from(("sha256:" + "a" * 64, "sha256:" + "b" * 64))
+# Images named with --docker-image: neither a task image reference nor an image ID.
+_NAMES = st.sampled_from(("custom:1", "python:3", "sha256-lookalike:1"))
 _BASES = st.one_of(st.none(), st.sampled_from(("nvcr.io/nvidia/pytorch:25.04-py3", "python:3")))
 
 
@@ -69,7 +71,7 @@ def test_without_a_task_dockerfile_the_image_is_used_as_given(
 
 _CASES = st.tuples(
     st.sampled_from(_ENVIRONMENTS),
-    st.one_of(st.none(), _REFERENCES, _IDS),
+    st.one_of(st.none(), _REFERENCES, _IDS, _NAMES),
     st.sampled_from(("fresh", "resume")),
     _REFERENCES,
     _BASES,
@@ -96,6 +98,11 @@ def test_a_task_dockerfile_is_honored_or_refused_never_dropped(
                 and (
                     image is None
                     or (facts.recorded_is_reference and image != reference and not present)
+                    or (
+                        not facts.recorded_is_reference
+                        and not image.startswith("sha256:")
+                        and not present
+                    )
                 )
             )
         )
@@ -197,6 +204,33 @@ def test_a_pre_reference_run_resumes_only_on_its_recorded_id(recorded: str, buil
     else:
         with pytest.raises(TaskImageError, match="predates input-keyed task images"):
             plan.resolve(built)
+
+
+@given(recorded=_NAMES, base=_BASES)
+def test_a_resumed_run_whose_named_image_is_gone_is_refused_before_any_build(
+    recorded: str, base: str | None
+) -> None:
+    with pytest.raises(TaskImageError, match=f"recorded with image {recorded}, which is no longer"):
+        editor_image_plan(
+            "docker",
+            task_dockerfile=_DOCKERFILE,
+            image=recorded,
+            launch="resume",
+            facts=_facts("vibesys-task-build:o-1", base, recorded, present=False),
+        )
+
+
+@given(recorded=_NAMES)
+def test_a_resumed_run_whose_named_image_is_local_runs_on_it(recorded: str) -> None:
+    plan = editor_image_plan(
+        "docker",
+        task_dockerfile=_DOCKERFILE,
+        image=recorded,
+        launch="resume",
+        facts=_facts("vibesys-task-build:o-1", None, recorded, present=True),
+    )
+    assert plan.build is None
+    assert plan.resolve(None) == _LOCAL_ID
 
 
 @given(
