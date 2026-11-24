@@ -22,112 +22,112 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// ExportedFileKind is what one file of an export holds. Each JSON kind is a response of the
+// ExportContent is what one entry of an export holds. Each JSON kind is a response of the
 // daemon's service in protobuf's canonical JSON with the original field names, as `--json` prints
 // it, indented; each text kind is what the command prints without `--json`.
-type ExportedFileKind int32
+type ExportContent int32
 
 const (
-	ExportedFileKind_EXPORTED_FILE_KIND_UNSPECIFIED ExportedFileKind = 0
+	ExportContent_EXPORT_CONTENT_UNSPECIFIED ExportContent = 0
 	// README.md: what the directory holds, for a person.
-	ExportedFileKind_EXPORTED_FILE_KIND_README ExportedFileKind = 1
+	ExportContent_EXPORT_CONTENT_README ExportContent = 1
 	// plans.txt: one line per plan, as `plan list` prints it.
-	ExportedFileKind_EXPORTED_FILE_KIND_PLAN_LIST_TEXT ExportedFileKind = 2
+	ExportContent_EXPORT_CONTENT_PLAN_LIST_TEXT ExportContent = 2
 	// A ViewPlanResponse: the plan with its comments and transitions, and its linked jobs.
-	ExportedFileKind_EXPORTED_FILE_KIND_PLAN_VIEW ExportedFileKind = 3
+	ExportContent_EXPORT_CONTENT_PLAN_VIEW ExportContent = 3
 	// The same plan as `plan view` prints it.
-	ExportedFileKind_EXPORTED_FILE_KIND_PLAN_VIEW_TEXT ExportedFileKind = 4
+	ExportContent_EXPORT_CONTENT_PLAN_VIEW_TEXT ExportContent = 4
 	// A ListJobsResponse: every exported job, with its notes and linked plans.
-	ExportedFileKind_EXPORTED_FILE_KIND_JOB_LIST ExportedFileKind = 5
+	ExportContent_EXPORT_CONTENT_JOB_LIST ExportContent = 5
 	// The same jobs as `jobs` prints them.
-	ExportedFileKind_EXPORTED_FILE_KIND_JOB_LIST_TEXT ExportedFileKind = 6
-	// A job's output, as `logs` prints it, or its head and tail (ExportedFile.omitted_bytes).
-	ExportedFileKind_EXPORTED_FILE_KIND_JOB_LOG ExportedFileKind = 7
+	ExportContent_EXPORT_CONTENT_JOB_LIST_TEXT ExportContent = 6
+	// A job's output, as `logs` prints it, or its head and tail (ExportEntry.omitted_bytes).
+	ExportContent_EXPORT_CONTENT_JOB_LOG ExportContent = 7
 	// A directory of the files a command job kept, as `outputs --to` copies them.
-	ExportedFileKind_EXPORTED_FILE_KIND_JOB_OUTPUTS ExportedFileKind = 8
+	ExportContent_EXPORT_CONTENT_JOB_OUTPUTS ExportContent = 8
 	// A ShowResponse: every result saved for a commit.
-	ExportedFileKind_EXPORTED_FILE_KIND_COMMIT_RESULTS ExportedFileKind = 9
+	ExportContent_EXPORT_CONTENT_COMMIT_RESULTS ExportContent = 9
 	// The same results as `show` prints them.
-	ExportedFileKind_EXPORTED_FILE_KIND_COMMIT_RESULTS_TEXT ExportedFileKind = 10
+	ExportContent_EXPORT_CONTENT_COMMIT_RESULTS_TEXT ExportContent = 10
 	// A CurrentResultResponse: the result branch's head and its number, or why there is none.
-	ExportedFileKind_EXPORTED_FILE_KIND_CURRENT_RESULT ExportedFileKind = 11
+	ExportContent_EXPORT_CONTENT_CURRENT_RESULT ExportContent = 11
 	// A ListBoundsResponse: every declared bound of the task.
-	ExportedFileKind_EXPORTED_FILE_KIND_BOUNDS ExportedFileKind = 12
+	ExportContent_EXPORT_CONTENT_BOUNDS ExportContent = 12
 	// A ListWorkstreamsResponse: every workstream of the task.
-	ExportedFileKind_EXPORTED_FILE_KIND_WORKSTREAMS ExportedFileKind = 13
+	ExportContent_EXPORT_CONTENT_WORKSTREAMS ExportContent = 13
 )
 
-// Enum value maps for ExportedFileKind.
+// Enum value maps for ExportContent.
 var (
-	ExportedFileKind_name = map[int32]string{
-		0:  "EXPORTED_FILE_KIND_UNSPECIFIED",
-		1:  "EXPORTED_FILE_KIND_README",
-		2:  "EXPORTED_FILE_KIND_PLAN_LIST_TEXT",
-		3:  "EXPORTED_FILE_KIND_PLAN_VIEW",
-		4:  "EXPORTED_FILE_KIND_PLAN_VIEW_TEXT",
-		5:  "EXPORTED_FILE_KIND_JOB_LIST",
-		6:  "EXPORTED_FILE_KIND_JOB_LIST_TEXT",
-		7:  "EXPORTED_FILE_KIND_JOB_LOG",
-		8:  "EXPORTED_FILE_KIND_JOB_OUTPUTS",
-		9:  "EXPORTED_FILE_KIND_COMMIT_RESULTS",
-		10: "EXPORTED_FILE_KIND_COMMIT_RESULTS_TEXT",
-		11: "EXPORTED_FILE_KIND_CURRENT_RESULT",
-		12: "EXPORTED_FILE_KIND_BOUNDS",
-		13: "EXPORTED_FILE_KIND_WORKSTREAMS",
+	ExportContent_name = map[int32]string{
+		0:  "EXPORT_CONTENT_UNSPECIFIED",
+		1:  "EXPORT_CONTENT_README",
+		2:  "EXPORT_CONTENT_PLAN_LIST_TEXT",
+		3:  "EXPORT_CONTENT_PLAN_VIEW",
+		4:  "EXPORT_CONTENT_PLAN_VIEW_TEXT",
+		5:  "EXPORT_CONTENT_JOB_LIST",
+		6:  "EXPORT_CONTENT_JOB_LIST_TEXT",
+		7:  "EXPORT_CONTENT_JOB_LOG",
+		8:  "EXPORT_CONTENT_JOB_OUTPUTS",
+		9:  "EXPORT_CONTENT_COMMIT_RESULTS",
+		10: "EXPORT_CONTENT_COMMIT_RESULTS_TEXT",
+		11: "EXPORT_CONTENT_CURRENT_RESULT",
+		12: "EXPORT_CONTENT_BOUNDS",
+		13: "EXPORT_CONTENT_WORKSTREAMS",
 	}
-	ExportedFileKind_value = map[string]int32{
-		"EXPORTED_FILE_KIND_UNSPECIFIED":         0,
-		"EXPORTED_FILE_KIND_README":              1,
-		"EXPORTED_FILE_KIND_PLAN_LIST_TEXT":      2,
-		"EXPORTED_FILE_KIND_PLAN_VIEW":           3,
-		"EXPORTED_FILE_KIND_PLAN_VIEW_TEXT":      4,
-		"EXPORTED_FILE_KIND_JOB_LIST":            5,
-		"EXPORTED_FILE_KIND_JOB_LIST_TEXT":       6,
-		"EXPORTED_FILE_KIND_JOB_LOG":             7,
-		"EXPORTED_FILE_KIND_JOB_OUTPUTS":         8,
-		"EXPORTED_FILE_KIND_COMMIT_RESULTS":      9,
-		"EXPORTED_FILE_KIND_COMMIT_RESULTS_TEXT": 10,
-		"EXPORTED_FILE_KIND_CURRENT_RESULT":      11,
-		"EXPORTED_FILE_KIND_BOUNDS":              12,
-		"EXPORTED_FILE_KIND_WORKSTREAMS":         13,
+	ExportContent_value = map[string]int32{
+		"EXPORT_CONTENT_UNSPECIFIED":         0,
+		"EXPORT_CONTENT_README":              1,
+		"EXPORT_CONTENT_PLAN_LIST_TEXT":      2,
+		"EXPORT_CONTENT_PLAN_VIEW":           3,
+		"EXPORT_CONTENT_PLAN_VIEW_TEXT":      4,
+		"EXPORT_CONTENT_JOB_LIST":            5,
+		"EXPORT_CONTENT_JOB_LIST_TEXT":       6,
+		"EXPORT_CONTENT_JOB_LOG":             7,
+		"EXPORT_CONTENT_JOB_OUTPUTS":         8,
+		"EXPORT_CONTENT_COMMIT_RESULTS":      9,
+		"EXPORT_CONTENT_COMMIT_RESULTS_TEXT": 10,
+		"EXPORT_CONTENT_CURRENT_RESULT":      11,
+		"EXPORT_CONTENT_BOUNDS":              12,
+		"EXPORT_CONTENT_WORKSTREAMS":         13,
 	}
 )
 
-func (x ExportedFileKind) Enum() *ExportedFileKind {
-	p := new(ExportedFileKind)
+func (x ExportContent) Enum() *ExportContent {
+	p := new(ExportContent)
 	*p = x
 	return p
 }
 
-func (x ExportedFileKind) String() string {
+func (x ExportContent) String() string {
 	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
 }
 
-func (ExportedFileKind) Descriptor() protoreflect.EnumDescriptor {
+func (ExportContent) Descriptor() protoreflect.EnumDescriptor {
 	return file_vibesys_cli_v1_export_proto_enumTypes[0].Descriptor()
 }
 
-func (ExportedFileKind) Type() protoreflect.EnumType {
+func (ExportContent) Type() protoreflect.EnumType {
 	return &file_vibesys_cli_v1_export_proto_enumTypes[0]
 }
 
-func (x ExportedFileKind) Number() protoreflect.EnumNumber {
+func (x ExportContent) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use ExportedFileKind.Descriptor instead.
-func (ExportedFileKind) EnumDescriptor() ([]byte, []int) {
+// Deprecated: Use ExportContent.Descriptor instead.
+func (ExportContent) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_export_proto_rawDescGZIP(), []int{0}
 }
 
-// ExportedFile is one file or directory an export wrote, at a path relative to the export's
-// directory.
-type ExportedFile struct {
+// ExportEntry is one entry an export wrote: a file, or for a job's kept outputs a directory of them.
+type ExportEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Slash-separated, relative, and inside the export's directory.
-	Path string           `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	Kind ExportedFileKind `protobuf:"varint,2,opt,name=kind,proto3,enum=vibesys.cli.v1.ExportedFileKind" json:"kind,omitempty"`
-	// What the file is about: a plan's number, a job's id or a full commit. Empty for a file about
+	// Where the entry is in the export, relative to it and slash-separated, such as plan/0001.json:
+	// what a reader of the index opens.
+	Name    string        `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Content ExportContent `protobuf:"varint,2,opt,name=content,proto3,enum=vibesys.cli.v1.ExportContent" json:"content,omitempty"`
+	// What the entry is about: a plan's number, a job's id or a full commit. Empty for a file about
 	// the whole task.
 	Subject string `protobuf:"bytes,3,opt,name=subject,proto3" json:"subject,omitempty"`
 	// For a job log: how many bytes the job's output held.
@@ -139,20 +139,20 @@ type ExportedFile struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ExportedFile) Reset() {
-	*x = ExportedFile{}
+func (x *ExportEntry) Reset() {
+	*x = ExportEntry{}
 	mi := &file_vibesys_cli_v1_export_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ExportedFile) String() string {
+func (x *ExportEntry) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ExportedFile) ProtoMessage() {}
+func (*ExportEntry) ProtoMessage() {}
 
-func (x *ExportedFile) ProtoReflect() protoreflect.Message {
+func (x *ExportEntry) ProtoReflect() protoreflect.Message {
 	mi := &file_vibesys_cli_v1_export_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -164,40 +164,40 @@ func (x *ExportedFile) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ExportedFile.ProtoReflect.Descriptor instead.
-func (*ExportedFile) Descriptor() ([]byte, []int) {
+// Deprecated: Use ExportEntry.ProtoReflect.Descriptor instead.
+func (*ExportEntry) Descriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_export_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *ExportedFile) GetPath() string {
+func (x *ExportEntry) GetName() string {
 	if x != nil {
-		return x.Path
+		return x.Name
 	}
 	return ""
 }
 
-func (x *ExportedFile) GetKind() ExportedFileKind {
+func (x *ExportEntry) GetContent() ExportContent {
 	if x != nil {
-		return x.Kind
+		return x.Content
 	}
-	return ExportedFileKind_EXPORTED_FILE_KIND_UNSPECIFIED
+	return ExportContent_EXPORT_CONTENT_UNSPECIFIED
 }
 
-func (x *ExportedFile) GetSubject() string {
+func (x *ExportEntry) GetSubject() string {
 	if x != nil {
 		return x.Subject
 	}
 	return ""
 }
 
-func (x *ExportedFile) GetLogBytes() uint64 {
+func (x *ExportEntry) GetLogBytes() uint64 {
 	if x != nil {
 		return x.LogBytes
 	}
 	return 0
 }
 
-func (x *ExportedFile) GetOmittedBytes() uint64 {
+func (x *ExportEntry) GetOmittedBytes() uint64 {
 	if x != nil {
 		return x.OmittedBytes
 	}
@@ -217,8 +217,8 @@ type ExportIndex struct {
 	MaxLogBytes uint64 `protobuf:"varint,3,opt,name=max_log_bytes,json=maxLogBytes,proto3" json:"max_log_bytes,omitempty"`
 	// Whether the files command jobs kept were copied (`--outputs`).
 	Outputs bool `protobuf:"varint,4,opt,name=outputs,proto3" json:"outputs,omitempty"`
-	// Every file and directory the export wrote but this one, ordered by path.
-	Files         []*ExportedFile `protobuf:"bytes,5,rep,name=files,proto3" json:"files,omitempty"`
+	// Every entry the export wrote but the index itself, ordered by name.
+	Entries       []*ExportEntry `protobuf:"bytes,5,rep,name=entries,proto3" json:"entries,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -281,9 +281,9 @@ func (x *ExportIndex) GetOutputs() bool {
 	return false
 }
 
-func (x *ExportIndex) GetFiles() []*ExportedFile {
+func (x *ExportIndex) GetEntries() []*ExportEntry {
 	if x != nil {
-		return x.Files
+		return x.Entries
 	}
 	return nil
 }
@@ -292,36 +292,36 @@ var File_vibesys_cli_v1_export_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_export_proto_rawDesc = "" +
 	"\n" +
-	"\x1bvibesys/cli/v1/export.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\"\xc9\x01\n" +
-	"\fExportedFile\x12\x1b\n" +
-	"\x04path\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04path\x12@\n" +
-	"\x04kind\x18\x02 \x01(\x0e2 .vibesys.cli.v1.ExportedFileKindB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12\x18\n" +
+	"\x1bvibesys/cli/v1/export.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\"\xcb\x01\n" +
+	"\vExportEntry\x12\x1b\n" +
+	"\x04name\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04name\x12C\n" +
+	"\acontent\x18\x02 \x01(\x0e2\x1d.vibesys.cli.v1.ExportContentB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\acontent\x12\x18\n" +
 	"\asubject\x18\x03 \x01(\tR\asubject\x12\x1b\n" +
 	"\tlog_bytes\x18\x04 \x01(\x04R\blogBytes\x12#\n" +
-	"\romitted_bytes\x18\x05 \x01(\x04R\fomittedBytes\"\xbd\x01\n" +
+	"\romitted_bytes\x18\x05 \x01(\x04R\fomittedBytes\"\xc0\x01\n" +
 	"\vExportIndex\x12\x1b\n" +
 	"\x04task\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04task\x12\x1f\n" +
 	"\x06run_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80\x02R\x05runId\x12\"\n" +
 	"\rmax_log_bytes\x18\x03 \x01(\x04R\vmaxLogBytes\x12\x18\n" +
-	"\aoutputs\x18\x04 \x01(\bR\aoutputs\x122\n" +
-	"\x05files\x18\x05 \x03(\v2\x1c.vibesys.cli.v1.ExportedFileR\x05files*\x8d\x04\n" +
-	"\x10ExportedFileKind\x12\"\n" +
-	"\x1eEXPORTED_FILE_KIND_UNSPECIFIED\x10\x00\x12\x1d\n" +
-	"\x19EXPORTED_FILE_KIND_README\x10\x01\x12%\n" +
-	"!EXPORTED_FILE_KIND_PLAN_LIST_TEXT\x10\x02\x12 \n" +
-	"\x1cEXPORTED_FILE_KIND_PLAN_VIEW\x10\x03\x12%\n" +
-	"!EXPORTED_FILE_KIND_PLAN_VIEW_TEXT\x10\x04\x12\x1f\n" +
-	"\x1bEXPORTED_FILE_KIND_JOB_LIST\x10\x05\x12$\n" +
-	" EXPORTED_FILE_KIND_JOB_LIST_TEXT\x10\x06\x12\x1e\n" +
-	"\x1aEXPORTED_FILE_KIND_JOB_LOG\x10\a\x12\"\n" +
-	"\x1eEXPORTED_FILE_KIND_JOB_OUTPUTS\x10\b\x12%\n" +
-	"!EXPORTED_FILE_KIND_COMMIT_RESULTS\x10\t\x12*\n" +
-	"&EXPORTED_FILE_KIND_COMMIT_RESULTS_TEXT\x10\n" +
-	"\x12%\n" +
-	"!EXPORTED_FILE_KIND_CURRENT_RESULT\x10\v\x12\x1d\n" +
-	"\x19EXPORTED_FILE_KIND_BOUNDS\x10\f\x12\"\n" +
-	"\x1eEXPORTED_FILE_KIND_WORKSTREAMS\x10\rB9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
+	"\aoutputs\x18\x04 \x01(\bR\aoutputs\x125\n" +
+	"\aentries\x18\x05 \x03(\v2\x1b.vibesys.cli.v1.ExportEntryR\aentries*\xd2\x03\n" +
+	"\rExportContent\x12\x1e\n" +
+	"\x1aEXPORT_CONTENT_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15EXPORT_CONTENT_README\x10\x01\x12!\n" +
+	"\x1dEXPORT_CONTENT_PLAN_LIST_TEXT\x10\x02\x12\x1c\n" +
+	"\x18EXPORT_CONTENT_PLAN_VIEW\x10\x03\x12!\n" +
+	"\x1dEXPORT_CONTENT_PLAN_VIEW_TEXT\x10\x04\x12\x1b\n" +
+	"\x17EXPORT_CONTENT_JOB_LIST\x10\x05\x12 \n" +
+	"\x1cEXPORT_CONTENT_JOB_LIST_TEXT\x10\x06\x12\x1a\n" +
+	"\x16EXPORT_CONTENT_JOB_LOG\x10\a\x12\x1e\n" +
+	"\x1aEXPORT_CONTENT_JOB_OUTPUTS\x10\b\x12!\n" +
+	"\x1dEXPORT_CONTENT_COMMIT_RESULTS\x10\t\x12&\n" +
+	"\"EXPORT_CONTENT_COMMIT_RESULTS_TEXT\x10\n" +
+	"\x12!\n" +
+	"\x1dEXPORT_CONTENT_CURRENT_RESULT\x10\v\x12\x19\n" +
+	"\x15EXPORT_CONTENT_BOUNDS\x10\f\x12\x1e\n" +
+	"\x1aEXPORT_CONTENT_WORKSTREAMS\x10\rB9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
 
 var (
 	file_vibesys_cli_v1_export_proto_rawDescOnce sync.Once
@@ -338,13 +338,13 @@ func file_vibesys_cli_v1_export_proto_rawDescGZIP() []byte {
 var file_vibesys_cli_v1_export_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_vibesys_cli_v1_export_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_vibesys_cli_v1_export_proto_goTypes = []any{
-	(ExportedFileKind)(0), // 0: vibesys.cli.v1.ExportedFileKind
-	(*ExportedFile)(nil),  // 1: vibesys.cli.v1.ExportedFile
-	(*ExportIndex)(nil),   // 2: vibesys.cli.v1.ExportIndex
+	(ExportContent)(0),  // 0: vibesys.cli.v1.ExportContent
+	(*ExportEntry)(nil), // 1: vibesys.cli.v1.ExportEntry
+	(*ExportIndex)(nil), // 2: vibesys.cli.v1.ExportIndex
 }
 var file_vibesys_cli_v1_export_proto_depIdxs = []int32{
-	0, // 0: vibesys.cli.v1.ExportedFile.kind:type_name -> vibesys.cli.v1.ExportedFileKind
-	1, // 1: vibesys.cli.v1.ExportIndex.files:type_name -> vibesys.cli.v1.ExportedFile
+	0, // 0: vibesys.cli.v1.ExportEntry.content:type_name -> vibesys.cli.v1.ExportContent
+	1, // 1: vibesys.cli.v1.ExportIndex.entries:type_name -> vibesys.cli.v1.ExportEntry
 	2, // [2:2] is the sub-list for method output_type
 	2, // [2:2] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name

@@ -69,8 +69,8 @@ func (c *cli) stdoutOf(args ...string) string {
 func sameFiles(t *testing.T, index *cliv1.ExportIndex, files map[string]string) {
 	t.Helper()
 	var listed []string
-	for _, f := range index.GetFiles() {
-		listed = append(listed, f.GetPath())
+	for _, f := range index.GetEntries() {
+		listed = append(listed, f.GetName())
 	}
 	want := slices.Sorted(maps.Keys(files))
 	want = slices.DeleteFunc(want, func(p string) bool { return p == "index.json" })
@@ -172,8 +172,8 @@ func TestAnExportOfARunHoldsOnlyItsJobsAndPlans(t *testing.T) {
 		t.Fatalf("export --run r1 = %v", files)
 	}
 	all := c.export(t.TempDir(), "--run", "")
-	if got := len(slices.DeleteFunc(all.GetFiles(), func(f *cliv1.ExportedFile) bool {
-		return f.GetKind() != cliv1.ExportedFileKind_EXPORTED_FILE_KIND_JOB_LOG
+	if got := len(slices.DeleteFunc(all.GetEntries(), func(f *cliv1.ExportEntry) bool {
+		return f.GetContent() != cliv1.ExportContent_EXPORT_CONTENT_JOB_LOG
 	})); got != 2 {
 		t.Fatalf("export of every run wrote %d logs, want 2", got)
 	}
@@ -203,8 +203,8 @@ func TestALongLogKeepsItsHeadAndTail(t *testing.T) {
 		dir := t.TempDir()
 		index := c.export(dir, "--max-log-bytes", strconv.FormatUint(limit, 10))
 		got := tree(t, dir)["log/"+job+".log"]
-		i := slices.IndexFunc(index.GetFiles(), func(f *cliv1.ExportedFile) bool { return f.GetSubject() == job })
-		entry := index.GetFiles()[i]
+		i := slices.IndexFunc(index.GetEntries(), func(f *cliv1.ExportEntry) bool { return f.GetSubject() == job })
+		entry := index.GetEntries()[i]
 		total := uint64(len(whole))
 		if entry.GetLogBytes() != total {
 			t.Fatalf("limit %d: the index says the log held %d bytes, want %d", limit, entry.GetLogBytes(), total)

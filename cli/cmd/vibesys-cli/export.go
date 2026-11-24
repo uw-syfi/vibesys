@@ -73,7 +73,7 @@ type exporter struct {
 	outputs bool
 	dir     string
 	root    *os.Root
-	files   []*cliv1.ExportedFile
+	entries []*cliv1.ExportEntry
 }
 
 func (x *exporter) run(ctx context.Context) (*cliv1.ExportIndex, error) {
@@ -110,11 +110,11 @@ func (x *exporter) run(ctx context.Context) (*cliv1.ExportIndex, error) {
 		}
 	}
 	index := &cliv1.ExportIndex{Task: x.callCtx.GetTask(), RunId: x.callCtx.GetRunId(), MaxLogBytes: x.maxLog, Outputs: x.outputs}
-	if err := x.writeText("README.md", cliv1.ExportedFileKind_EXPORTED_FILE_KIND_README, "", exportReadme(index)); err != nil {
+	if err := x.writeText("README.md", cliv1.ExportContent_EXPORT_CONTENT_README, "", exportReadme(index)); err != nil {
 		return nil, err
 	}
-	slices.SortFunc(x.files, func(a, b *cliv1.ExportedFile) int { return strings.Compare(a.GetPath(), b.GetPath()) })
-	index.Files = x.files
+	slices.SortFunc(x.entries, func(a, b *cliv1.ExportEntry) int { return strings.Compare(a.GetName(), b.GetName()) })
+	index.Entries = x.entries
 	raw, err := exportJSON(index)
 	if err != nil {
 		return nil, err
@@ -180,22 +180,22 @@ func (x *exporter) plans(ctx context.Context, plans []*cliv1.Plan) error {
 			return err
 		}
 		name, subject := fmt.Sprintf("plan/%04d", p.GetNumber()), strconv.FormatUint(uint64(p.GetNumber()), 10)
-		if err := x.writeMessage(name+".json", cliv1.ExportedFileKind_EXPORTED_FILE_KIND_PLAN_VIEW, subject, resp); err != nil {
+		if err := x.writeMessage(name+".json", cliv1.ExportContent_EXPORT_CONTENT_PLAN_VIEW, subject, resp); err != nil {
 			return err
 		}
-		if err := x.writeText(name+".txt", cliv1.ExportedFileKind_EXPORTED_FILE_KIND_PLAN_VIEW_TEXT, subject, renderPlanView(resp.GetView())); err != nil {
+		if err := x.writeText(name+".txt", cliv1.ExportContent_EXPORT_CONTENT_PLAN_VIEW_TEXT, subject, renderPlanView(resp.GetView())); err != nil {
 			return err
 		}
 	}
-	return x.writeText("plans.txt", cliv1.ExportedFileKind_EXPORTED_FILE_KIND_PLAN_LIST_TEXT, "", list.String())
+	return x.writeText("plans.txt", cliv1.ExportContent_EXPORT_CONTENT_PLAN_LIST_TEXT, "", list.String())
 }
 
 // jobs writes the job list, as JSON and as jobs prints it.
 func (x *exporter) jobs(jobs *cliv1.ListJobsResponse) error {
-	if err := x.writeMessage("jobs.json", cliv1.ExportedFileKind_EXPORTED_FILE_KIND_JOB_LIST, "", jobs); err != nil {
+	if err := x.writeMessage("jobs.json", cliv1.ExportContent_EXPORT_CONTENT_JOB_LIST, "", jobs); err != nil {
 		return err
 	}
-	return x.writeText("jobs.txt", cliv1.ExportedFileKind_EXPORTED_FILE_KIND_JOB_LIST_TEXT, "", renderJobs(jobs, x.callCtx.GetTask()))
+	return x.writeText("jobs.txt", cliv1.ExportContent_EXPORT_CONTENT_JOB_LIST_TEXT, "", renderJobs(jobs, x.callCtx.GetTask()))
 }
 
 // logs writes each job's output, whole or its head and tail.
@@ -224,8 +224,8 @@ func (x *exporter) log(ctx context.Context, job, name string) error {
 	if err := x.write(name, keep.bytes()); err != nil {
 		return err
 	}
-	x.files = append(x.files, &cliv1.ExportedFile{
-		Path: name, Kind: cliv1.ExportedFileKind_EXPORTED_FILE_KIND_JOB_LOG, Subject: job,
+	x.entries = append(x.entries, &cliv1.ExportEntry{
+		Name: name, Content: cliv1.ExportContent_EXPORT_CONTENT_JOB_LOG, Subject: job,
 		LogBytes: keep.total, OmittedBytes: keep.omitted(),
 	})
 	return nil
@@ -248,7 +248,7 @@ func (x *exporter) copyOutputs(ctx context.Context, jobs []*cliv1.Job) error {
 		if _, err := x.cl.CopyOutputs(ctx, &cliv1.ReadOutputsRequest{Context: x.callCtx, JobId: j.GetId()}, filepath.Join(x.dir, filepath.FromSlash(at))); err != nil {
 			return err
 		}
-		x.files = append(x.files, &cliv1.ExportedFile{Path: at, Kind: cliv1.ExportedFileKind_EXPORTED_FILE_KIND_JOB_OUTPUTS, Subject: j.GetId()})
+		x.entries = append(x.entries, &cliv1.ExportEntry{Name: at, Content: cliv1.ExportContent_EXPORT_CONTENT_JOB_OUTPUTS, Subject: j.GetId()})
 	}
 	return nil
 }
@@ -267,10 +267,10 @@ func (x *exporter) results(ctx context.Context, jobs []*cliv1.Job) error {
 		if err != nil {
 			return err
 		}
-		if err := x.writeMessage("commit/"+commit+".json", cliv1.ExportedFileKind_EXPORTED_FILE_KIND_COMMIT_RESULTS, commit, resp); err != nil {
+		if err := x.writeMessage("commit/"+commit+".json", cliv1.ExportContent_EXPORT_CONTENT_COMMIT_RESULTS, commit, resp); err != nil {
 			return err
 		}
-		if err := x.writeText("commit/"+commit+".txt", cliv1.ExportedFileKind_EXPORTED_FILE_KIND_COMMIT_RESULTS_TEXT, commit, renderShow(resp, commit)); err != nil {
+		if err := x.writeText("commit/"+commit+".txt", cliv1.ExportContent_EXPORT_CONTENT_COMMIT_RESULTS_TEXT, commit, renderShow(resp, commit)); err != nil {
 			return err
 		}
 	}
@@ -284,24 +284,24 @@ func (x *exporter) taskWide(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := x.writeMessage("result.json", cliv1.ExportedFileKind_EXPORTED_FILE_KIND_CURRENT_RESULT, "", current); err != nil {
+	if err := x.writeMessage("result.json", cliv1.ExportContent_EXPORT_CONTENT_CURRENT_RESULT, "", current); err != nil {
 		return err
 	}
 	bounds, err := x.cl.ListBounds(ctx, &cliv1.ListBoundsRequest{Context: x.callCtx})
 	if err != nil {
 		return err
 	}
-	if err := x.writeMessage("bounds.json", cliv1.ExportedFileKind_EXPORTED_FILE_KIND_BOUNDS, "", bounds); err != nil {
+	if err := x.writeMessage("bounds.json", cliv1.ExportContent_EXPORT_CONTENT_BOUNDS, "", bounds); err != nil {
 		return err
 	}
 	workstreams, err := x.cl.ListWorkstreams(ctx, &cliv1.ListWorkstreamsRequest{Context: x.callCtx})
 	if err != nil {
 		return err
 	}
-	return x.writeMessage("workstreams.json", cliv1.ExportedFileKind_EXPORTED_FILE_KIND_WORKSTREAMS, "", workstreams)
+	return x.writeMessage("workstreams.json", cliv1.ExportContent_EXPORT_CONTENT_WORKSTREAMS, "", workstreams)
 }
 
-func (x *exporter) writeMessage(name string, kind cliv1.ExportedFileKind, subject string, m proto.Message) error {
+func (x *exporter) writeMessage(name string, kind cliv1.ExportContent, subject string, m proto.Message) error {
 	raw, err := exportJSON(m)
 	if err != nil {
 		return err
@@ -309,15 +309,15 @@ func (x *exporter) writeMessage(name string, kind cliv1.ExportedFileKind, subjec
 	if err := x.write(name, raw); err != nil {
 		return err
 	}
-	x.files = append(x.files, &cliv1.ExportedFile{Path: name, Kind: kind, Subject: subject})
+	x.entries = append(x.entries, &cliv1.ExportEntry{Name: name, Content: kind, Subject: subject})
 	return nil
 }
 
-func (x *exporter) writeText(name string, kind cliv1.ExportedFileKind, subject, text string) error {
+func (x *exporter) writeText(name string, kind cliv1.ExportContent, subject, text string) error {
 	if err := x.write(name, []byte(text)); err != nil {
 		return err
 	}
-	x.files = append(x.files, &cliv1.ExportedFile{Path: name, Kind: kind, Subject: subject})
+	x.entries = append(x.entries, &cliv1.ExportEntry{Name: name, Content: kind, Subject: subject})
 	return nil
 }
 
@@ -427,24 +427,24 @@ func (h *headTail) bytes() []byte {
 
 // exportCounts is what an export wrote, counted, for its one line of text.
 func exportCounts(index *cliv1.ExportIndex) string {
-	count := map[cliv1.ExportedFileKind]uint64{}
+	count := map[cliv1.ExportContent]uint64{}
 	var cut uint64
-	for _, f := range index.GetFiles() {
-		count[f.GetKind()]++
+	for _, f := range index.GetEntries() {
+		count[f.GetContent()]++
 		if f.GetOmittedBytes() > 0 {
 			cut++
 		}
 	}
 	parts := []string{
-		counted(count[cliv1.ExportedFileKind_EXPORTED_FILE_KIND_PLAN_VIEW], "plan"),
-		counted(count[cliv1.ExportedFileKind_EXPORTED_FILE_KIND_JOB_LOG], "job"),
-		counted(count[cliv1.ExportedFileKind_EXPORTED_FILE_KIND_COMMIT_RESULTS], "measured commit"),
+		counted(count[cliv1.ExportContent_EXPORT_CONTENT_PLAN_VIEW], "plan"),
+		counted(count[cliv1.ExportContent_EXPORT_CONTENT_JOB_LOG], "job"),
+		counted(count[cliv1.ExportContent_EXPORT_CONTENT_COMMIT_RESULTS], "measured commit"),
 	}
 	if cut > 0 {
 		parts = append(parts, counted(cut, "log")+" cut to --max-log-bytes")
 	}
 	if index.GetOutputs() {
-		parts = append(parts, counted(count[cliv1.ExportedFileKind_EXPORTED_FILE_KIND_JOB_OUTPUTS], "job")+"'s outputs")
+		parts = append(parts, counted(count[cliv1.ExportContent_EXPORT_CONTENT_JOB_OUTPUTS], "job")+"'s outputs")
 	}
 	return strings.Join(parts, ", ")
 }
