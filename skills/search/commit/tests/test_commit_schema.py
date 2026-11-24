@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 if TYPE_CHECKING:
@@ -134,6 +134,24 @@ def test_a_plan_trailer_must_equal_the_branch_number(
     assert rules(body + f"\nPlan: {10:03d}\n", branch=branch) == set()
     assert "plan-mismatch" in rules(body + f"\nPlan: {10 + offset}\n", branch=branch)
     assert "plan-missing" not in rules(body)  # off a plan branch the trailer is optional
+
+
+@pytest.mark.regression
+@given(st.integers(0, 999), st.lists(st.integers(0, 999), max_size=4), st.integers(0, 4))
+@example(own=44, merged=[38, 42], position=0)
+def test_a_merge_may_name_every_plan_it_brings_in_beside_the_branchs_own(
+    own: int, merged: list[int], position: int
+) -> None:
+    branch = f"vibesys-work/demo/plan-{own:03d}"
+    others = [n for n in merged if n != own]
+    named = [*others[:position], own, *others[position:]]
+    lines = [f"Plan: {n}" for n in named]
+    text = "feat(integrate): merge the parts\n\nChecks: pass\n" + "\n".join(lines) + "\n"
+    assert rules(text, branch=branch) == set()
+    without_own = "\n".join(line for line in text.splitlines() if line != f"Plan: {own}")
+    if others:
+        assert rules(without_own, branch=branch) == {"plan-mismatch"}
+    assert rules(text + "Plan: x\n", branch=branch) == {"plan-value"}
 
 
 @pytest.mark.parametrize(
@@ -318,16 +336,22 @@ class Repo:
         git(root, "add", "base")
         git(root, "commit", "-q", "-m", "base commit")
         self.base = self.head()
+        self.commits = 0
 
     def head(self) -> str:
         return git(self.root, "rev-parse", "HEAD").strip()
 
     def commit(self, message: str, *, verify: bool = True) -> str:
-        path = self.root / f"f{len(list(self.root.iterdir()))}"
+        self.commits += 1  # a file per commit, so branches never conflict when merged
+        path = self.root / f"f{self.commits}"
         path.write_text(message)
         git(self.root, "add", path.name)
         args = ["commit", "-q", "-F", "-"] + ([] if verify else ["--no-verify"])
         git(self.root, *args, stdin=message)
+        return self.head()
+
+    def merge(self, branch: str, message: str) -> str:
+        git(self.root, "merge", "-q", "--no-ff", "-m", message, branch)
         return self.head()
 
     def range(self, spec: str, *extra: str) -> tuple[int, str, str]:
@@ -389,6 +413,41 @@ def test_check_range_reads_the_plan_from_the_branch_named_in_the_range(
     git(r.root, "switch", "-q", "-c", PLAN_BRANCH)
     r.commit(GOOD)
     assert "plan-missing" in r.range(f"{r.base}..{PLAN_BRANCH}")[2]
+
+
+def planned(subject: str, *plans: int) -> str:
+    return f"feat: {subject}\n\nChecks: pass\n" + "".join(f"Plan: {n}\n" for n in plans)
+
+
+@pytest.mark.regression
+def test_check_range_accepts_an_integration_merge_of_other_plan_branches(
+    repo_of_commits: Repo,
+) -> None:
+    r = repo_of_commits
+    for number in (38, 42):
+        git(r.root, "switch", "-q", "-c", f"vibesys-work/demo/plan-{number:03d}", r.base)
+        r.commit(planned(f"add part {number}", number))
+    integration = "vibesys-work/demo/plan-044"
+    git(r.root, "switch", "-q", "-c", integration, r.base)
+    r.merge("vibesys-work/demo/plan-038", planned("merge plan 38", 44, 38))
+    r.merge("vibesys-work/demo/plan-042", planned("merge plan 42", 44, 42))
+    assert r.range(f"{r.base}..{integration}") == (0, "ok\n", "")
+
+
+@pytest.mark.regression
+def test_check_range_skips_the_plan_rule_for_commits_merged_in_from_the_result_branch(
+    repo_of_commits: Repo,
+) -> None:
+    r = repo_of_commits
+    git(r.root, "switch", "-q", "-c", "vibesys/demo")
+    r.commit(planned("land plan 36", 36))
+    git(r.root, "switch", "-q", "-c", PLAN_BRANCH, r.base)
+    own = r.commit(planned("start plan 4", 9))
+    r.merge("vibesys/demo", planned("take the new result head", 4))
+    code, _, err = r.range(f"{r.base}..{PLAN_BRANCH}")
+    assert code == 1
+    # Only the branch's own commit is held to its plan number, not the one merged in.
+    assert [line.split(": ")[:2] for line in err.splitlines()] == [[own[:12], "plan-mismatch"]]
 
 
 def test_check_range_needs_a_real_nonempty_range(repo_of_commits: Repo) -> None:
