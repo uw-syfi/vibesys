@@ -230,7 +230,10 @@ breaks the rule fails the check until it is removed.
 ## Commands
 
 Flags come after the command name. Every command takes `--json`, and these context flags, which
-default to the environment variables shown:
+default to the environment variables shown. `--json`, the context flags and `--alloc` may also come
+before the command: `vibesys-cli --task kv jobs` is `vibesys-cli jobs --task kv`. Any other flag
+before the command is refused, naming it, and so is a flag given both before and after it. A flag
+takes one dash or two (`-timeout` and `--timeout` are the same); errors and `-h` spell it with two.
 
 | Flag | Environment | Meaning |
 | --- | --- | --- |
