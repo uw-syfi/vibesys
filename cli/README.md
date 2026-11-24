@@ -609,6 +609,21 @@ j8	queued	0123456789ab	check
 
 A job of another task is named with its task, and with `--json` the reasons are in `waits`.
 
+`jobs` also marks a queued or running measure whose commit has diverged from the task's result
+branch head, which happens when a promotion moves the head after the measure was submitted:
+
+```text
+j9	running	fedcba987654	measure (5 samples)
+	  superseded: does not contain result head 0123456789ab, so promote refuses it
+```
+
+The daemon decides it when it lists the jobs, with the ancestry `promote` asks (the commit neither
+contains the head nor is contained in it), and with `--json` names each such job and the head in
+`superseded`. A measure of the head, of a descendant of it or of an ancestor of it is not marked,
+nor is a job that ended, and a commit the repository lacks or a branch the daemon cannot read marks
+nothing. Nothing is cancelled: the caller cancels the job, or measures the candidate rebuilt on the
+head.
+
 Recovery is the daemon's start, with no separate path:
 
 - The daemon lists the stores (the per-user index names them) and the supervisors left in the
