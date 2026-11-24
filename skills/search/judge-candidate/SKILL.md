@@ -1,6 +1,6 @@
 ---
 name: judge-candidate
-description: "Use when a vibesys optimize brief asks you to independently review a candidate commit that claims a gain, before the lead treats it as a win. Read-only: compares the diff with its parent against the claim, checks that the change is on the measured path, looks for gaming of the check or benchmark, and returns pass, fail or unmeasured with reasons."
+description: "Use when a vibesys optimize brief asks you to independently review a candidate commit that claims a gain, before the lead treats it as a win. Read-only: compares the diff with its parent against the claim, checks that the change is on the measured path, looks for gaming of the check or benchmark, and returns pass, fail, unmeasured, or a code-review pass pending a better verdict, with reasons."
 ---
 
 # Judge a candidate
@@ -32,16 +32,21 @@ candidate's whole diff from its parent, not one commit: the candidate may sit on
 2. **Active?** Is the change on the path the benchmark runs? A change that the benchmark never
    reaches cannot explain a gain.
 3. **Honest?** Does it special-case the benchmark's inputs, cache on its seed, skip or weaken a
-   check, stub work, or touch `.vibesys/`, the checker or the benchmark?
+   check, stub work, reject or shed requests selectively (admission bias: turning away the long or
+   costly inputs where the metric counts only served requests), or touch `.vibesys/`, the checker
+   or the benchmark?
 4. **Real?** Is the gain beyond noise? Run `vibesys-cli compare <candidate> --against <parent>
    --json` yourself and read the verdict and the sample counts; worker text is not measurement
    evidence. Fail a claim about speed only when a saved result shows it is not there. If the
    candidate or its parent has no comparable result, return `unmeasured` and ask the lead to
-   schedule the measurement. In a multi-objective task, read every objective's verdict
-   (`comparison.objectives`): a claimed tradeoff is supported when the objectives the claim says
-   improve are `better`, the ones it concedes stay within the bound it states, and no other
-   objective is `worse`; name each objective in your reasons. Never run a long measurement in the judge. A correctness-only pass is
-   `unmeasured`, never an unconditional `pass`, except for a bootstrap candidate, which your brief
+   schedule the measurement. When the candidate's own measure is still queued or running and you
+   answered yes to Correct, Active and Honest, return `code review: pass, pending a better
+   verdict` for that exact SHA instead: it is not a pass, but it spares a second judge round.
+   In a multi-objective task, read every objective's verdict (`comparison.objectives`): a
+   claimed tradeoff is supported when the objectives the claim says improve are `better`, the
+   ones it concedes stay within the bound it states, and no other objective is `worse`; name each
+   objective in your reasons. Never run a long measurement in the judge. A correctness-only pass
+   is `unmeasured` or the pending verdict above, never an unconditional `pass`, except for a bootstrap candidate, which your brief
    names: it claims no speed, so correctness and honesty decide, and it needs no comparison.
 
 Source reading decides correctness and benchmark integrity. Only a recorded measurement decides a
@@ -52,6 +57,9 @@ the verdict. Do not start benchmarks of your own.
 
 ## Return
 
-`pass`, `fail` or `unmeasured`, and the reasons, each tied to a file and line or a recorded
-number. Deliver it through the harness's handoff tool (`post_handoff` in a run that has it) as
-your last act; a verdict written as prose reaches nobody. Never end a turn without it.
+`pass`, `fail`, `unmeasured` or `code review: pass, pending a better verdict` (with the
+candidate's SHA and its measure job id), and the reasons, each tied to a file and line or a
+recorded number. Keep `unmeasured` for a review you could not finish. Where the handoff tool's
+verdict has no pending value, send `unmeasured` and start the reasons with `code review: pass,
+pending a better verdict`. Deliver it through the harness's handoff tool (`post_handoff` in a run
+that has it) as your last act; a verdict written as prose reaches nobody. Never end a turn without it.

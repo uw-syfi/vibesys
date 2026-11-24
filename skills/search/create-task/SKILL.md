@@ -63,6 +63,11 @@ the CLI refuses an unknown key.
   exit (task-format.md).
 - The benchmark runs the same workload every time, warms up before it times, and writes one JSON
   object with the metric to the path it is given.
+- When the metric counts only the requests that are served and the server may reject some
+  (goodput and the like), a candidate can score higher by turning away the costly inputs. The
+  benchmark then reports the input-size distribution of served and of rejected requests, and fails
+  a sample whose rejections skew toward larger inputs than the served ones (state the test and its
+  threshold in `OBJECTIVE.md`).
 - Add `/.vibesys-state/` to the repository's `.gitignore`: the CLI keeps its store there, and a
   candidate commit must never carry it.
 - `OBJECTIVE.md` states the goal, the scope, the correctness bar and the rules from step 1, in

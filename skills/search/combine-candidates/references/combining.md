@@ -14,7 +14,8 @@ says the part wins.
 ## What to check after applying
 
 - The build passes and the project's fast tests pass.
-- Where two parts interact (the brief's "watch for"), exercise that path.
+- Where two parts interact (the brief's "watch for", and every cross-part assumption you listed
+  before merging), exercise that path. Files that did not conflict can still disagree on meaning.
 - Run the task's correctness check through `vibesys-cli submit check` (`vibesys:measure`); a
   combination that fails it is not a candidate.
 

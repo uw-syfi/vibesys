@@ -19,7 +19,9 @@ set; export it as the absolute path of the vibesys-cli to use`.
    results, the agent list, git heads.
    Anything you cannot confirm from them is not reported as fact.
 2. Find the last report's time. Report only what happened since, and name that window.
-3. Write in this order:
+3. If nothing changed since the last report (no promotion, finding, decision or new failure),
+   write one or two lines, what is running and when it should finish, then the self-check, and
+   stop here. Otherwise write in this order:
    1. **Headline:** the current best result and how it moved, in a sentence a newcomer follows.
    2. **Changed:** each promotion or finding, in plain words, code name in parentheses.
    3. **In flight:** each running item, what it waits on, and when it should finish.
@@ -42,6 +44,6 @@ set; export it as the absolute path of the vibesys-cli to use`.
 - State caveats that change trust: shared hosts, few samples, unrun tests, checks not made.
 - An interim notice from an agent is not a result. Report a result only when it is final.
 - A failure is reported with its cause and what happens next, in the same place as a win.
-- If nothing changed, say so in one line and why; do not pad.
+- If nothing changed, do not repeat the last report: one or two lines and the self-check (step 3).
 - Idle capacity is reported with its reason.
 - Name work by what it does ("faster decode matrix multiplies"), never by an identifier.

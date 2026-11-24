@@ -81,6 +81,7 @@ optimizing agent might, by accident or on purpose. Write at least three, each on
 | Skipped work | return early on large inputs, process a sample of the input |
 | Benchmark gaming | detect the benchmark's input or seed and return a stored answer |
 | Broken guarantee | drop a lock, reorder writes, lose durability the scope requires |
+| Selective rejection | on a served-only metric, reject every request above a size the benchmark sends |
 
 ```
 git switch -c vibesys-task/<task>-mutant-1 <base>
@@ -89,8 +90,9 @@ git commit -am "test: mutant 1, <what it breaks>"
 vibesys-cli submit check HEAD --wait --json
 ```
 
-Each must exit 1 with a failed check. A mutant that passes is a hole: strengthen the checker,
-commit the task again, and rerun every recipe from the base, since the task's version changed.
+Each must exit 1 with a failed check; the selective-rejection mutant is the benchmark's to catch,
+so its `submit measure <mutant> --no-plan` must fail instead. A mutant that passes is a hole:
+strengthen the checker, commit the task again, and rerun every recipe from the base, since the task's version changed.
 For a multi-objective task, add a mutant that trades one objective for another (faster, but a
 worse second objective): `compare` must answer `tradeoff`, not `better`.
 Delete the mutant branches when done (`git branch -D`). Their jobs stay in the store, harmless.

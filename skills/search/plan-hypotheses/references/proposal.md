@@ -12,7 +12,8 @@ Mechanism: <what in the code costs time today, with file:line>
 Expected gain: <metric change as a range, with the arithmetic: share of time touched x fraction
   removed, capped by the headroom of that part>. Say "unattributed" if the share is not measured.
 Gain bound: <the most it could gain as a share of the headline, the number you set with
-  `--gain-bound`, and the headroom or ceiling it comes from>
+  `--gain-bound`, and the measured peak or profile number it is derived from, with its job id or
+  plan comment>
 Prediction (only with a simulator a domain skill offers): <the simulated value of the change,
   the head's simulated and measured values, and the provenance, in the block the domain skill
   gives. A what-if that scales a cost is a bound, not a prediction>
@@ -27,6 +28,6 @@ Bold (only for a high-risk, high-reward idea): upside if it works, rough chance 
   feasibility check that comes first, the kill criterion, and the full cost if it passes.
 ```
 
-Typical weak spots: a gain larger than the headroom, a time share taken from a guess, a
-configured load used in place of the observed one, and two plans that edit the same function
-without saying which goes first.
+Typical weak spots: a gain larger than the headroom, a bound that cites no measured number, a
+time share taken from a guess, a configured load used in place of the observed one, and two plans
+that edit the same function without saying which goes first.
