@@ -229,6 +229,21 @@ the signal to escalate. The run ends only when:
 In each case give the final report as `vibesys:report-progress` says,
 with the cycles run, the budget spent, and the newest phase map's gaps.
 
+**Work until the budget is spent.** There is no later run to leave work for: this run is the
+only one that will act on what it learns.
+
+- Keep slots full to the end. Hold back only what the last integration, its measure and the
+  report need, not the length of a whole plan cycle. When a full cycle no longer fits, fund
+  smaller work that does fit: a single-phase change, a combine of accepted parts, or another
+  sample on a close verdict.
+- A plan that might not finish is still worth funding if a partial result could land in time.
+  Never idle while slots are empty and budget is left.
+- Any target you name in a map, a profile or a report (fuse phases, cut barriers, rebalance a
+  phase, spread work over idle units) is a target for now. Fund it while budget is left. Never
+  write it down as advice for a next run.
+- The final report's open items are only work that was started and cut by the budget, with how
+  far it got. Do not list ideas you had time to try and did not.
+
 ## Failure patterns
 
 - **Dividing too early.** Phase workers polish phases of a design that should change. The design
