@@ -83,7 +83,7 @@ func TestTheCLIReadsExactlyTheNamesTheContextMessagesDeclare(t *testing.T) {
 		{"submit", "check"}, {"submit", "measure"}, {"submit", "command"}, {"wait"}, {"cancel"}, {"note"}, {"jobs"}, {"logs"},
 		{"show"}, {"compare"}, {"promote"}, {"result"}, {"plan", "create"}, {"plan", "list"}, {"plan", "view"},
 		{"plan", "edit"}, {"plan", "comment"}, {"plan", "close"}, {"daemon", "status"}, {"daemon", "stop"},
-		{"daemon", "restart"}, {"daemon", "forget"},
+		{"daemon", "restart"}, {"daemon", "forget"}, {"export"},
 	} {
 		if code := run(append(slices.Clone(args), "-h"), d); code != exitOK {
 			t.Fatalf("%v -h exited %d: %s", args, code, stderr.String())

@@ -89,6 +89,7 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"plan":       planCommand,
 	"bound":      boundCommand,
 	"workstream": workstreamCommand,
+	"export":     exportCommand,
 	"alloc":      allocCommand,
 	"placement":  placementCommand,
 	"task":       taskCommand,
@@ -135,6 +136,9 @@ commands:
                                                  state the best an objective can reach; a revision is
                                                  a new entry, and nothing is replaced
   bound list [--objective <name>]                every declared bound, oldest first, the current one marked
+  export <dir> [--max-log-bytes n] [--outputs]  write the task's plans, jobs, logs, results, bounds and
+                                                 workstreams into a directory, with an index.json; with
+                                                 --run only that run's jobs and plans
   task card <task> [--revision rev | --working-tree | --folder dir]
                                                  print what a client shows of a task: domain,
                                                  hardware, model, objectives and heading
