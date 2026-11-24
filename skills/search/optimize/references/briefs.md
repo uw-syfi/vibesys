@@ -69,12 +69,18 @@ Evidence: <simulator-led only: the plan kind's acceptance ladder, rung by rung; 
   measure and no full check; else omit>
 Device jobs: <simulator-led only: each device job you may submit, with the note it carries,
   "Question: <...>. Predicts: <...>."; any other device job is cancelled; else omit>
+Phase contract: <megakernel divide-and-conquer only: the phase's row of the phase map, verbatim: inputs and
+  outputs with their layouts, its resource budget, the sync it starts on and ends with; a change
+  that needs to break it is handed back as a boundary proposal; else omit>
+Phase evidence: <megakernel divide-and-conquer only: the ladder (check, budget, window), the phase map file,
+  and the parent's timeline jobs; you submit no measure; else omit>
 Hand back: claim, commit SHA, job ids and the compare output, what you learned, the next step
   you propose.
 ```
 
 On a simulator-led run ([simulator-led.md](simulator-led.md)), the ladders and the device-job
-rule are in [acceptance-ladder.md](acceptance-ladder.md). A simulator plan's worktree is a
+rule are in [acceptance-ladder.md](acceptance-ladder.md). On a megakernel divide-and-conquer run, the
+phase contract and the ladder are in [megakernel-divide-and-conquer.md](megakernel-divide-and-conquer.md#conquer). A simulator plan's worktree is a
 worktree of the simulator's checkout, not of the task's repository.
 
 ## Judge
@@ -124,8 +130,11 @@ Checks: at most <1 + F * (ceil(log2 N) + 2)>, for F parts at fault      Parallel
 Measure: one, of the top of the chain that passes its check, linked to plan <I> and each part.
   Every check and every repeat of one takes the same --gpus <G>.
 On a failed check: bisect, name the part at fault and whether it fails alone, finish without it.
+Glue checks: <megakernel divide-and-conquer only: the launch totals of the merged build against the phase
+  map's; one timeline of the top of the chain, each phase's window beside its part's; the
+  composition loss; else omit>
 Hand back: the chain, the candidate and the parts it holds, every check with its result and job
-  id, the measure job id and compare output against the head.
+  id, the measure job id and compare output against the head, and the glue checks' results.
 ```
 
 ## Profile

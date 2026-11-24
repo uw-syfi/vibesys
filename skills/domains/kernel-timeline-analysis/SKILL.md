@@ -30,6 +30,20 @@ Read the timeline per phase over all blocks, not as one average:
 - A change can move cost from one phase to another. Compare every phase, before
   and after, not only the one you changed.
 
+To say how much each phase costs the launch, take its critical-path window. The
+k-th occurrence of a phase on every block forms one occurrence. Order the
+occurrences by their latest end over all blocks. An occurrence's window is its
+latest end minus the latest end of anything before it (the timeline's start
+for the first), and never below zero. Sum the windows per phase. The windows of
+all phases then sum to the span, so a phase's window is the time the launch
+would save if that phase took none. A phase whose window is much smaller than
+its own duration runs in the shadow of another phase, and speeding it up alone
+gains little.
+
+Compare windows only between timelines with the same probes, and repeat each
+side at least three times. The spread between repeats of one build is the
+smallest change a window comparison can show.
+
 Probes perturb what they measure: each adds a timer read and a store, and a
 dense set of probes can shift where a memory burst lands. Use the timeline to
 choose the next experiment, and the task's unprofiled benchmark, timed against

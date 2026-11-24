@@ -50,6 +50,12 @@ evidence and not yet measured. Its steps replace Work steps 1, 4 and 5, and are 
 3. On a failed check, bisect over the prefixes with checks only, `ceil(log2 N)` of them for N
    parts, or several prefixes a round where the pool allows and the brief says so; say whether the part named fails alone or only beside another; then finish without it
    from the longest prefix that passed, within the brief's check budget.
+4. When the brief has a `Glue checks:` line (a megakernel divide-and-conquer run, where each part changed one
+   phase of one launch), run them on the top of the chain before the measure: the launch totals
+   from the compiler's resource report against the brief's, and one timeline of the chain's top
+   with each phase's window beside the window its part showed. Report the composition loss: the
+   sum of the parts' window cuts minus the cut the merged timeline shows. A shortfall is evidence
+   for the lead, not a reason to drop a part on your own.
 
 ## Never
 
