@@ -316,9 +316,15 @@ type TaskManifestV02 struct {
 	// of each sample starting it. Optional: a manifest without it starts nothing between commands.
 	// Only a task of one image has it: a task with [candidate] starts its candidate's server for
 	// each command.
-	Service       *TaskServiceV02 `protobuf:"bytes,19,opt,name=service,proto3" json:"service,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Service *TaskServiceV02 `protobuf:"bytes,19,opt,name=service,proto3" json:"service,omitempty"`
+	// The time limit of a command job of the task (vibesys-cli submit command) that gives no
+	// --timeout: for a task whose profiles or microbenchmarks run for hours. Zero leaves it to the
+	// daemon's default, 30 minutes. Beside the candidate's server, the server's startup time is added,
+	// as it is to --timeout. A command submitted with --env host on a machine without a GPU pool does
+	// not read its task, and has the daemon's default.
+	CommandTimeoutSeconds uint32 `protobuf:"varint,20,opt,name=command_timeout_seconds,json=commandTimeoutSeconds,proto3" json:"command_timeout_seconds,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *TaskManifestV02) Reset() {
@@ -482,6 +488,13 @@ func (x *TaskManifestV02) GetService() *TaskServiceV02 {
 		return x.Service
 	}
 	return nil
+}
+
+func (x *TaskManifestV02) GetCommandTimeoutSeconds() uint32 {
+	if x != nil {
+		return x.CommandTimeoutSeconds
+	}
+	return 0
 }
 
 // TaskCatalogueV02 is the definition of the `[catalogue]` table, held in TaskManifestV02.catalogue as data: the facts a client words a task by. A key it has no
@@ -1730,7 +1743,7 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\n" +
 	"TaskSchema\x12\x14\n" +
 	"\x05major\x18\x01 \x01(\rR\x05major\x12\x14\n" +
-	"\x05minor\x18\x02 \x01(\rR\x05minor\"\x91\t\n" +
+	"\x05minor\x18\x02 \x01(\rR\x05minor\"\xd8\t\n" +
 	"\x0fTaskManifestV02\x12+\n" +
 	"\aversion\x18\x01 \x01(\tB\x11\xbaH\n" +
 	"r\b2\x06^0\\.2$\xd0\xf3\x18\x02R\aversion\x12(\n" +
@@ -1754,7 +1767,8 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\n" +
 	"comparison\x18\x12 \x03(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\n" +
 	"comparison\x12>\n" +
-	"\aservice\x18\x13 \x01(\v2\x1e.vibesys.cli.v1.TaskServiceV02B\x04\xd0\xf3\x18\x02R\aservice:\x06\xca\xf3\x18\x02\x10\x02\"\xd0\x04\n" +
+	"\aservice\x18\x13 \x01(\v2\x1e.vibesys.cli.v1.TaskServiceV02B\x04\xd0\xf3\x18\x02R\aservice\x12E\n" +
+	"\x17command_timeout_seconds\x18\x14 \x01(\rB\r\xbaH\x06*\x04\x18\x80\xf5$\xd0\xf3\x18\x02R\x15commandTimeoutSeconds:\x06\xca\xf3\x18\x02\x10\x02\"\xd0\x04\n" +
 	"\x10TaskCatalogueV02\x12B\n" +
 	"\x06domain\x18\x01 \x01(\x0e2\x1a.vibesys.cli.v1.TaskDomainB\x0e\xbaH\a\x82\x01\x04\x10\x01 \x00\xd0\xf3\x18\x02R\x06domain\x12G\n" +
 	"\bhardware\x18\x02 \x01(\v2\x1f.vibesys.cli.v1.TaskHardwareV02B\n" +

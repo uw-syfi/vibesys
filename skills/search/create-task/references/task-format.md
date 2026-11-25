@@ -52,7 +52,9 @@ metric = "requests_per_sec"       # the top-level field of that JSON file
 
 - `version = "0.1"` is the format on this page; `version = 1` is refused (write `"0.1"`). A
   `version = "0.2"` task (a candidate server image and a task image, or a task of one image with a
-  `[service]` kept for the job, below) runs only under vibesys-cli.
+  `[service]` kept for the job, below) runs only under vibesys-cli. A 0.2 task whose command jobs
+  (profiles, microbenchmarks) routinely run past 30 minutes sets their default limit with a
+  top-level `command_timeout_seconds` (at most a week); a job's `--timeout` still wins.
 - Commands are argv lists, run from the checkout's root. The only placeholder is
   `${PROJECT_ROOT}`, the checkout's root.
 - The benchmark is called with the `json_argument` flag and a path appended; it must write one

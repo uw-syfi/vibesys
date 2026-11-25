@@ -55,7 +55,13 @@ func Settle(job core.JobID, from core.JobState, o Outcome, at time.Time) Settlem
 func settleAttempt(t core.Transition, a core.Attempt, o Outcome) Settlement {
 	switch a := a.(type) {
 	case core.Ended:
-		return settleRan(t, a.Exec, o)
+		s := settleRan(t, a.Exec, o)
+		if a.Exec.Kind == core.ExecTimedOut {
+			// A command job's limit is its --timeout, else its task's default, else the daemon's,
+			// so the line says how to give it longer. A check or a measure has its task's limits.
+			s.Log = "vibesys-cli: the command ran past its time limit and was ended; to give it longer, submit it again with --timeout, such as --timeout 3h, or set command_timeout_seconds in the task's vibesys.input.toml"
+		}
+		return s
 	case core.NotStarted:
 		return notStarted(t, a.Failure)
 	case core.Unobserved:

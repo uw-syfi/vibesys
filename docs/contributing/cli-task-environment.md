@@ -102,7 +102,9 @@ unknown key by name. Its keys are every key of 0.1, with the same meaning,
 except `[evaluator]` and a command's `entrypoint` and `args`, which it refuses
 by name, plus an optional `[candidate]`:
 
-- `version`, `backends`, `metric`;
+- `version`, `backends`, `metric`, and `command_timeout_seconds`, which 0.1
+  does not have: the time limit of the task's command jobs (`submit command`)
+  that give no `--timeout`, at most a week, 30 minutes when unset;
 - `[agent]` `domain` and `interface`;
 - `[build]`, `[accuracy]` (or `[check]`) and `[benchmark]` (or `[measure]`),
   each with `command` and `timeout_seconds`; the benchmark also
