@@ -18,7 +18,9 @@ head = C0 -> C1 (head + P1) -> C2 (head + P1 + P2) -> ... -> CN (all parts)
 1. For each part in order: `git diff <built-on> <accepted SHA> | git apply --3way`, resolve any
    conflict markers as [combining.md](combining.md) says (shared files keep every part's change),
    run the project's fast tests, and make a full commit (`vibesys:commit`) such as
-   `feat(integrate): apply plan 12, fused rmsnorm` with `Checks: pass` and `Plan: <I>`.
+   `feat(integrate): apply plan 12, fused rmsnorm` with `Checks: pass` and `Plan: <I>`. If you
+   merge a part's branch instead, the merge is that prefix's commit: give it `Plan: <I>` plus a
+   `Plan:` line for the part, as `vibesys:commit` says, and never commit it around the hook.
 2. When the fast tests fail at `Ck`, the combination broke there, and that cost no device job:
    fix the resolution if the conflict was yours to resolve; otherwise leave `Pk` out, go on with
    the next part on `C(k-1)`, and hand back `Pk` as not applied, with the failing test.
