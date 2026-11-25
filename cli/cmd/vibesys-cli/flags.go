@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -46,9 +47,19 @@ type common struct {
 // returned to the caller, which prints them once.
 func newFlags(name string, d deps) (*flag.FlagSet, *common) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(d.stderr)
-	if d.jsonErrors {
-		fs.SetOutput(io.Discard) // parseFailed says it as a Failure.
+	// The flag package writes an error to its output and then asks for the usage. The output holds
+	// the error until then, so that the usage says it in the CLI's spelling (twoDashes) before the
+	// flags; under --json, parseFailed says it as a Failure instead.
+	said := &strings.Builder{}
+	fs.SetOutput(said)
+	fs.Usage = func() {
+		message := said.String()
+		said.Reset()
+		if d.jsonErrors {
+			return
+		}
+		_, _ = io.WriteString(d.stderr, twoDashes(message))
+		printUsage(d.stderr, fs)
 	}
 	c := &common{}
 	fs.BoolVar(&c.json, "json", false, "print the result as JSON")
@@ -63,6 +74,31 @@ func newFlags(name string, d deps) (*flag.FlagSet, *common) {
 	fs.StringVar(&c.placement, "placement", operator.GetPlacement(), "submit: the one placement of the operator config a docker job may run on (default: any that gives what the task needs, chosen when it starts)")
 	fs.StringVar(&c.alloc, "alloc", "", "submit: run the job in the standing allocation of the run with this name, such as a7, which refuses the job unless it fits; or \"any\", which uses a running allocation it fits and otherwise queues it as a job with no allocation is queued")
 	return fs, c
+}
+
+// A flag parses with one dash or two (-timeout, --timeout), but the flag package spells it with one
+// in its errors and its list of flags, while this CLI's usage, its errors and its README spell it
+// with two. twoDashes rewrites what the flag package says into the CLI's spelling, so a caller who
+// copies a flag from an error or from -h types what the rest of the CLI shows.
+var oneDash = regexp.MustCompile(`(^|\s)-([A-Za-z])`)
+
+func twoDashes(text string) string { return oneDash.ReplaceAllString(text, "$1--$2") }
+
+// printUsage writes a command's flags, each spelled as twoDashes spells it.
+func printUsage(w io.Writer, fs *flag.FlagSet) {
+	var defaults strings.Builder
+	out := fs.Output()
+	fs.SetOutput(&defaults)
+	fs.PrintDefaults()
+	fs.SetOutput(out)
+	_, _ = fmt.Fprintf(w, "Usage of %s:\n", fs.Name())
+	// Only the flag's own name starts a line; its help text is left as it is written.
+	for _, line := range strings.SplitAfter(defaults.String(), "\n") {
+		if strings.HasPrefix(line, "  -") {
+			line = "  --" + strings.TrimPrefix(line, "  -")
+		}
+		_, _ = io.WriteString(w, line)
+	}
 }
 
 // parse reads flags and positional arguments in any order: wait j1 j2 --any is as good as
@@ -80,6 +116,69 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 		positional = append(positional, rest[0])
 		args = rest[1:]
 	}
+}
+
+// commandFirst reads the context flags written before the command, which newFlags gives every
+// command, and moves them after it, so that `vibesys-cli --task kv jobs` is `vibesys-cli jobs --task
+// kv`. They go after the command's own words and flags and before a lone "--", where every command
+// reads its flags, since a command may read a word first (submit's kind, plan's verb). A flag given
+// both before and after the command is refused, so neither place silently wins, and so is any other
+// flag before the command, which only the command can read.
+func commandFirst(args []string, d deps) ([]string, error) {
+	context, _ := newFlags("context", d)
+	var moved, names []string
+	i := 0
+	for i < len(args) && args[i] != "--" && args[i] != "-" && strings.HasPrefix(args[i], "-") {
+		name, _, hasValue := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(args[i], "-"), "-"), "=")
+		f := context.Lookup(name)
+		if f == nil {
+			return nil, usagef("%s comes before the command, where only the context flags (%s) may; put flags after the subcommand: vibesys-cli <cmd> --task ...", args[i], contextNames(context))
+		}
+		moved, names = append(moved, args[i]), append(names, name)
+		i++
+		if boolean, ok := f.Value.(interface{ IsBoolFlag() bool }); !hasValue && (!ok || !boolean.IsBoolFlag()) {
+			if i == len(args) {
+				return nil, usagef("--%s: give it a value, then the command", name)
+			}
+			moved = append(moved, args[i])
+			i++
+		}
+	}
+	if len(moved) == 0 {
+		return args, nil
+	}
+	if i == len(args) || args[i] == "--" {
+		return nil, usagef("name a command after %s", strings.Join(moved, " "))
+	}
+	rest, after, found := splitDashes(args[i:])
+	for _, name := range names {
+		if slices.ContainsFunc(rest, func(a string) bool { return namesFlag(a, name) }) {
+			return nil, usagef("--%s is given before the command and after it; give it once, after the command", name)
+		}
+	}
+	out := slices.Concat(rest, moved)
+	if found {
+		out = slices.Concat(out, []string{"--"}, after)
+	}
+	return out, nil
+}
+
+// namesFlag says whether a command-line word sets the flag of that name, in any spelling the flag
+// package reads: -name, --name, -name=v or --name=v.
+func namesFlag(word, name string) bool {
+	for _, dashes := range []string{"-", "--"} {
+		if word == dashes+name || strings.HasPrefix(word, dashes+name+"=") {
+			return true
+		}
+	}
+	return false
+}
+
+// contextNames lists the context flags, as a caller types them.
+func contextNames(context *flag.FlagSet) string {
+	var names []string
+	context.VisitAll(func(f *flag.Flag) { names = append(names, "--"+f.Name) })
+	return strings.Join(names, ", ")
 }
 
 // splitDashes splits the arguments at the first lone "--".
@@ -191,13 +290,12 @@ func wantsJSON(args []string) bool {
 func parseFailed(d deps, fs *flag.FlagSet, err error) int {
 	switch {
 	case isHelp(err) && d.jsonErrors:
-		fs.SetOutput(d.stderr)
-		fs.Usage()
+		printUsage(d.stderr, fs)
 		return exitOK
 	case isHelp(err):
 		return exitOK
 	case d.jsonErrors:
-		return fail(d, true, usagef("%v", err))
+		return fail(d, true, usagef("%s", twoDashes(err.Error())))
 	}
 	return exitInvalidInput
 }
