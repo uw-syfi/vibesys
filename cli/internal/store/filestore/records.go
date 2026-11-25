@@ -475,10 +475,16 @@ func verdictFromMessage(field string, v *cliv1.Verdict) (core.Verdict, error) {
 	if err != nil {
 		return core.Verdict{}, err
 	}
+	source, err := wire.ToSigmaSource(field+".sigma_source", v.GetSigmaSource())
+	if err != nil {
+		return core.Verdict{}, err
+	}
 	return core.Verdict{
 		Kind: kind, Reason: reason, CandidateSamples: v.GetCandidateSamples(), BaseSamples: v.GetBaseSamples(),
 		CandidateMean: v.GetCandidateMean(), BaseMean: v.GetBaseMean(), Ratio: v.GetRatio(), Noise: v.GetNoise(),
 		RelativeNoise: v.GetRelativeNoise(), MinGain: v.GetMinGain(), DecidedBy: bound,
+		Critical: v.GetCritical(), Threshold: v.GetThreshold(), SigmaSource: source,
+		ObservedSpread: v.GetObservedSpread(), SamplesToDecide: v.GetSamplesToDecide(),
 	}, nil
 }
 

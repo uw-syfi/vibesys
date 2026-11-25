@@ -28,6 +28,11 @@ var verdictBounds = map[core.VerdictBound]cliv1.VerdictBound{
 	core.BoundMinGain: cliv1.VerdictBound_VERDICT_BOUND_MIN_GAIN,
 }
 
+var sigmaSources = map[core.SigmaSource]cliv1.SigmaSource{
+	core.SigmaDeclaredFloor:  cliv1.SigmaSource_SIGMA_SOURCE_DECLARED_FLOOR,
+	core.SigmaObservedSpread: cliv1.SigmaSource_SIGMA_SOURCE_OBSERVED_SPREAD,
+}
+
 var inconclusiveReasons = map[core.InconclusiveReason]cliv1.InconclusiveReason{
 	core.ReasonTooFewSamples:       cliv1.InconclusiveReason_INCONCLUSIVE_REASON_TOO_FEW_SAMPLES,
 	core.ReasonConstantSamples:     cliv1.InconclusiveReason_INCONCLUSIVE_REASON_CONSTANT_SAMPLES,
@@ -237,6 +242,11 @@ func Verdict(v core.Verdict) *cliv1.Verdict {
 		RelativeNoise:    v.RelativeNoise,
 		MinGain:          v.MinGain,
 		DecidedBy:        verdictBounds[v.DecidedBy],
+		Critical:         v.Critical,
+		Threshold:        v.Threshold,
+		SigmaSource:      sigmaSources[v.SigmaSource],
+		ObservedSpread:   v.ObservedSpread,
+		SamplesToDecide:  v.SamplesToDecide,
 	}
 }
 

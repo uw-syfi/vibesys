@@ -37,13 +37,18 @@ func TestAMinimumGainOnlyHoldsBackABetterVerdict(t *testing.T) {
 
 		want := without
 		want.MinGain = in.MinGain
-		if without.Kind == core.Better && !(gainOf(in.Direction, without.Ratio) > in.MinGain) {
-			want.Kind, want.DecidedBy = core.WithinNoise, core.BoundMinGain
+		gain := gainOf(in.Direction, without.Ratio)
+		if without.Kind == core.Better && !(gain > in.MinGain) {
+			want.Kind, want.DecidedBy, want.Threshold = core.WithinNoise, core.BoundMinGain, in.MinGain
+		}
+		if want.Kind == core.WithinNoise && !(gain > in.MinGain) {
+			// No sample count moves the minimum gain, so no count decides a gain below it.
+			want.SamplesToDecide = 0
 		}
 		got := with
 		if want.Kind == core.Better && got.DecidedBy == core.BoundMinGain {
 			// Either bar may be the higher one; TestTheHigherBarDecidesABetterVerdict says which.
-			got.DecidedBy = core.BoundNoise
+			got.DecidedBy, got.Threshold = core.BoundNoise, got.Critical*got.Noise
 		}
 		if got != want {
 			t.Fatalf("%+v: %+v with a minimum gain, want %+v (without it: %+v)", in, with, want, without)

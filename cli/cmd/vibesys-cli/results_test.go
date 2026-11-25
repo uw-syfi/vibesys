@@ -226,6 +226,40 @@ func TestCompareRoundsTextAndKeepsJSONExact(t *testing.T) {
 	}
 }
 
+// A verdict within noise says the bar it missed, that the declared floor and not the runs set it,
+// and how many samples a side would decide the gain: the case of two samples a side, a gain of
+// about 6.8% and a provisional floor of 5%. --json carries the same numbers unrounded.
+func TestCompareSaysTheBarAVerdictWithinNoiseMissed(t *testing.T) {
+	c := newResultsCLI(t)
+	floor := core.Objectives{RelativeNoise: 0.05}
+	storetest.SeedMeasurement(t, c.store, storetest.Measurement{Commit: rev(0), Samples: []float64{26.51, 26.57}, At: c.clk.Now(), Objectives: floor})
+	storetest.SeedMeasurement(t, c.store, storetest.Measurement{Commit: rev(1), Samples: []float64{28.39, 28.27}, At: c.clk.Now(), Objectives: floor})
+
+	text := c.run(withTask("compare", "c1")...)
+	mustExit(t, text, exitOK, "compare")
+	for _, want := range []string{
+		"within_noise\t",
+		"; need gain > 10.67% (2 × noise 5.337%, sigma from declared relative_noise 0.05; observed spread 0.2401%)",
+		"; at this gain about 6 vs 6 samples would decide",
+	} {
+		if !strings.Contains(text.stdout, want) {
+			t.Fatalf("text %q lacks %q", text.stdout, want)
+		}
+	}
+
+	r := c.run(withTask("compare", "c1", "--json")...)
+	mustExit(t, r, exitOK, "compare --json")
+	var resp cliv1.CompareResponse
+	if err := protojson.Unmarshal([]byte(r.stdout), &resp); err != nil {
+		t.Fatal(err)
+	}
+	v := resp.GetComparison().GetVerdict()
+	if v.GetThreshold() != v.GetCritical()*v.GetNoise() || v.GetCritical() != 2 ||
+		v.GetSigmaSource() != cliv1.SigmaSource_SIGMA_SOURCE_DECLARED_FLOOR || v.GetSamplesToDecide() != 6 || v.GetObservedSpread() == 0 {
+		t.Fatalf("JSON verdict %+v does not carry its bar", v)
+	}
+}
+
 // A comparison that compared nothing, because the sides were measured under another task version
 // or for another metric, says so in text instead of printing zeros that read as a measured zero.
 // Every other verdict keeps its numbers. For any samples, the numbers appear exactly when the two

@@ -38,6 +38,7 @@ var unfuzzedDecoders = map[string]string{
 	"ToVerdictKind":        "an enum translator, held total over every contract value by TestEveryRecordEnumValueIsTranslatedOrRefused",
 	"ToInconclusiveReason": "an enum translator, held total over every contract value by TestEveryRecordEnumValueIsTranslatedOrRefused",
 	"ToVerdictBound":       "an enum translator, held total over every contract value by TestEveryRecordEnumValueIsTranslatedOrRefused",
+	"ToSigmaSource":        "an enum translator, held total over every contract value by TestEveryRecordEnumValueIsTranslatedOrRefused",
 	"ToPromoteRefusalKind": "an enum translator, held total over every contract value by TestEveryRecordEnumValueIsTranslatedOrRefused",
 	"ToDirection":          "an enum translator, held total over every contract value by TestEveryRecordEnumValueIsTranslatedOrRefused",
 	"ToCommand":            "an enum translator, held total over every contract value by TestEveryRecordEnumValueIsTranslatedOrRefused",

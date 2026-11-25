@@ -95,17 +95,31 @@ func Compare(in CompareInput) (Verdict, error) {
 	ratio := c / b
 	m, n := len(candidate), len(base)
 
+	spread := pooledSpread(candidate, c, base, b)
 	var noise, critical, degrees float64
+	var barAt func(k int) float64 // the noise bar at k samples a side, with the same means and sigma
+	lowest := 1                   // the fewest samples a side that can give a verdict
+	source := SigmaObservedSpread
 	known := true
 	if in.RelativeNoise > 0 {
-		sigma := math.Max(pooledSpread(candidate, c, base, b), in.RelativeNoise)
-		noise = math.Abs(ratio) * sigma * math.Sqrt(1/float64(m)+1/float64(n))
+		sigma := spread
+		if in.RelativeNoise >= spread {
+			sigma, source = in.RelativeNoise, SigmaDeclaredFloor
+		}
+		noise = floorNoise(ratio, sigma, m, n)
 		critical = declaredNoises
+		barAt = func(k int) float64 { return declaredNoises * floorNoise(ratio, sigma, k, k) }
 	} else {
-		noise, degrees = welch(candidate, c, base, b)
+		varC, varB := variance(candidate, c), variance(base, b)
+		noise, degrees = welch(varC, m, varB, n)
 		noise *= math.Abs(ratio)
 		critical = studentCritical(degrees)
 		known = min(m, n) >= MinSamplesWithoutFloor && noise > 0
+		lowest = MinSamplesWithoutFloor
+		barAt = func(k int) float64 {
+			relative, degrees := welch(varC, k, varB, k)
+			return studentCritical(degrees) * (relative * math.Abs(ratio))
+		}
 	}
 	if !finite(ratio) || !finite(noise) || math.IsNaN(degrees) {
 		return Verdict{}, failf(FailureInvalidInput, "the samples are too extreme to compare: the ratio or its noise overflows")
@@ -120,6 +134,11 @@ func Compare(in CompareInput) (Verdict, error) {
 		Noise:            noise,
 		RelativeNoise:    in.RelativeNoise,
 		MinGain:          in.MinGain,
+		SigmaSource:      source,
+		// Under a floor an overflowing spread overflows the noise, which is refused above. Without
+		// one, Welch's test divides each side's squares before adding them, so their sum alone can
+		// overflow where the verdict does not: the record then says the largest spread it can hold.
+		ObservedSpread: min(spread, math.MaxFloat64),
 	}
 	gain := ratio - 1
 	if in.Direction == Minimize {
@@ -142,7 +161,44 @@ func Compare(in CompareInput) (Verdict, error) {
 	default:
 		verdict.Kind, verdict.DecidedBy = WithinNoise, BoundNoise
 	}
+	if verdict.Kind != Inconclusive {
+		verdict.Critical, verdict.Threshold = critical, critical*noise
+		if verdict.DecidedBy == BoundMinGain {
+			verdict.Threshold = in.MinGain
+		}
+	}
+	if verdict.Kind == WithinNoise && gain > in.MinGain && gain > 0 {
+		verdict.SamplesToDecide = samplesToDecide(gain, lowest, barAt)
+	}
 	return verdict, nil
+}
+
+// samplesToDecide is the fewest samples a side, from lowest, at which gain clears the noise bar
+// barAt gives for that count, and zero when no count that fits in a uint32 does. The caller has
+// checked the minimum gain, which no sample count moves.
+func samplesToDecide(gain float64, lowest int, barAt func(k int) float64) uint32 {
+	clears := func(k int) bool { return gain > barAt(k) }
+	// The bar falls as k grows, since both the noise and the critical number do, so the smallest
+	// k that clears it is found by halving the range.
+	lo, hi := lowest, math.MaxUint32
+	if !clears(hi) {
+		return 0
+	}
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if clears(mid) {
+			hi = mid
+		} else {
+			lo = mid + 1
+		}
+	}
+	return uint32(lo)
+}
+
+// floorNoise is the noise of the ratio under a declared floor: one standard error of the ratio of
+// two means of m and n runs that each vary by sigma.
+func floorNoise(ratio, sigma float64, m, n int) float64 {
+	return math.Abs(ratio) * sigma * math.Sqrt(1/float64(m)+1/float64(n))
 }
 
 func validateCompare(in CompareInput) error {
@@ -183,12 +239,12 @@ func pooledSpread(candidate []float64, c float64, base []float64, b float64) flo
 }
 
 // welch returns the relative standard error of the ratio of two means and its
-// Welch-Satterthwaite degrees of freedom. Each side contributes its own relative variance over its
-// count; a side with one run, identical runs or a zero mean contributes none. No error means no
-// degrees.
-func welch(candidate []float64, c float64, base []float64, b float64) (relativeError, degrees float64) {
-	partC := variance(candidate, c) / float64(len(candidate))
-	partB := variance(base, b) / float64(len(base))
+// Welch-Satterthwaite degrees of freedom, from each side's relative variance and count. Each side
+// contributes its variance over its count; a side with one run, identical runs or a zero mean has
+// no variance and contributes none. No error means no degrees.
+func welch(varC float64, m int, varB float64, n int) (relativeError, degrees float64) {
+	partC := varC / float64(m)
+	partB := varB / float64(n)
 	total := partC + partB
 	if total == 0 {
 		return 0, 0
@@ -197,7 +253,7 @@ func welch(candidate []float64, c float64, base []float64, b float64) (relativeE
 	for _, part := range []struct {
 		value float64
 		free  int
-	}{{partC, len(candidate) - 1}, {partB, len(base) - 1}} {
+	}{{partC, m - 1}, {partB, n - 1}} {
 		if part.value > 0 {
 			spread += part.value * part.value / float64(part.free)
 		}
