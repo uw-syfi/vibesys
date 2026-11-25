@@ -1,0 +1,74 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// ExportContent is what one entry of an export holds. Each JSON kind is a response of the
+// daemon's service in protobuf's canonical JSON with the original field names, as `--json` prints
+// it, indented; each text kind is what the command prints without `--json`.
+enum ExportContent {
+  EXPORT_CONTENT_UNSPECIFIED = 0;
+  // README.md: what the directory holds, for a person.
+  EXPORT_CONTENT_README = 1;
+  // plans.txt: one line per plan, as `plan list` prints it.
+  EXPORT_CONTENT_PLAN_LIST_TEXT = 2;
+  // A ViewPlanResponse: the plan with its comments and transitions, and its linked jobs.
+  EXPORT_CONTENT_PLAN_VIEW = 3;
+  // The same plan as `plan view` prints it.
+  EXPORT_CONTENT_PLAN_VIEW_TEXT = 4;
+  // A ListJobsResponse: every exported job, with its notes and linked plans.
+  EXPORT_CONTENT_JOB_LIST = 5;
+  // The same jobs as `jobs` prints them.
+  EXPORT_CONTENT_JOB_LIST_TEXT = 6;
+  // A job's output, as `logs` prints it, or its head and tail (ExportEntry.omitted_bytes).
+  EXPORT_CONTENT_JOB_LOG = 7;
+  // A directory of the files a command job kept, as `outputs --to` copies them.
+  EXPORT_CONTENT_JOB_OUTPUTS = 8;
+  // A ShowResponse: every result saved for a commit.
+  EXPORT_CONTENT_COMMIT_RESULTS = 9;
+  // The same results as `show` prints them.
+  EXPORT_CONTENT_COMMIT_RESULTS_TEXT = 10;
+  // A CurrentResultResponse: the result branch's head and its number, or why there is none.
+  EXPORT_CONTENT_CURRENT_RESULT = 11;
+  // A ListBoundsResponse: every declared bound of the task.
+  EXPORT_CONTENT_BOUNDS = 12;
+  // A ListWorkstreamsResponse: every workstream of the task.
+  EXPORT_CONTENT_WORKSTREAMS = 13;
+}
+
+// ExportEntry is one entry an export wrote: a file, or for a job's kept outputs a directory of them.
+message ExportEntry {
+  // Where the entry is in the export, relative to it and slash-separated, such as plan/0001.json:
+  // what a reader of the index opens.
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  ExportContent content = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // What the entry is about: a plan's number, a job's id or a full commit. Empty for a file about
+  // the whole task.
+  string subject = 3;
+  // For a job log: how many bytes the job's output held.
+  uint64 log_bytes = 4;
+  // For a job log: how many bytes from the middle of the output the file leaves out, in place of
+  // which it holds one marker line. 0 when the file holds the whole output.
+  uint64 omitted_bytes = 5;
+}
+
+// ExportIndex is index.json of a directory `vibesys-cli export` wrote: a snapshot of a task's plans,
+// jobs, logs, results, bounds and workstreams, read through the same calls the commands make. The
+// same state exports to the same bytes, so re-exporting into a directory kept in git changes only
+// what changed. It records no time of its own for that reason.
+message ExportIndex {
+  string task = 1 [(buf.validate.field).string.min_len = 1];
+  // The run whose jobs and plans were exported; empty when every run's were.
+  string run_id = 2 [(buf.validate.field).string.max_bytes = 256];
+  // The most bytes of a job's output a log file keeps, its head and its tail; 0 keeps all of it.
+  uint64 max_log_bytes = 3;
+  // Whether the files command jobs kept were copied (`--outputs`).
+  bool outputs = 4;
+  // Every entry the export wrote but the index itself, ordered by name.
+  repeated ExportEntry entries = 5;
+}

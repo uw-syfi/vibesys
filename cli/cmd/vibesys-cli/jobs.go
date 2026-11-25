@@ -190,18 +190,25 @@ func jobsCommand(ctx context.Context, d deps, args []string) int {
 		printJSON(d, resp)
 		return exitOK
 	}
+	fmt.Fprint(d.stdout, renderJobs(resp, callCtx.GetTask()))
+	return exitOK
+}
+
+// renderJobs is a list of jobs as text: each job's line, with why it waits when it is queued.
+func renderJobs(resp *cliv1.ListJobsResponse, task string) string {
 	waits := map[string]*cliv1.WaitReason{}
 	for _, w := range resp.GetWaits() {
 		waits[w.GetJobId()] = w.GetReason()
 	}
+	var b strings.Builder
 	for _, j := range resp.GetJobs() {
-		line := describe(j)
+		b.WriteString(describe(j))
 		if w, ok := waits[j.GetId()]; ok {
-			line += "\n\t  waiting: " + describeWait(w, callCtx.GetTask())
+			b.WriteString("\n\t  waiting: " + describeWait(w, task))
 		}
-		fmt.Fprintln(d.stdout, line)
+		b.WriteString("\n")
 	}
-	return exitOK
+	return b.String()
 }
 
 // jobKindNames maps what a user writes to job kinds. It is read from the contract's enum, so a

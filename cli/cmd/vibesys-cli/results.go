@@ -56,30 +56,37 @@ func showCommand(ctx context.Context, d deps, args []string) int {
 			printJSON(d, resp)
 			return exitOK
 		}
-		if len(resp.GetResults()) == 0 {
-			fmt.Fprintf(d.stdout, "no results for %s\n", shortCommit(commit))
-		}
-		uses := map[string]*cliv1.JobGpus{}
-		for _, u := range resp.GetJobGpus() {
-			uses[u.GetJobId()] = u
-		}
-		// A commit's measurements are printed pooled, one line per kind, as compare counts them:
-		// a measure job that topped up an earlier one is part of the same measurement.
-		for _, r := range resp.GetResults() {
-			if r.GetCheck() != nil {
-				fmt.Fprintln(d.stdout, describeResult(r, uses[r.GetJobId()]))
-			}
-		}
-		placed, gpus := map[string]string{}, map[string]string{}
-		for _, r := range resp.GetResults() {
-			placed[r.GetJobId()] = placementOf(r.GetEnvironment())
-			gpus[r.GetJobId()] = describeResultGPUs(r, uses[r.GetJobId()])
-		}
-		for _, m := range resp.GetMeasurements() {
-			fmt.Fprintln(d.stdout, describeMeasurement(m, placed, gpus))
-		}
+		fmt.Fprint(d.stdout, renderShow(resp, commit))
 		return exitOK
 	})
+}
+
+// renderShow is the results saved for a commit as text: each check, then each pooled measurement.
+func renderShow(resp *cliv1.ShowResponse, commit string) string {
+	var b strings.Builder
+	if len(resp.GetResults()) == 0 {
+		fmt.Fprintf(&b, "no results for %s\n", shortCommit(commit))
+	}
+	uses := map[string]*cliv1.JobGpus{}
+	for _, u := range resp.GetJobGpus() {
+		uses[u.GetJobId()] = u
+	}
+	// A commit's measurements are printed pooled, one line per kind, as compare counts them:
+	// a measure job that topped up an earlier one is part of the same measurement.
+	for _, r := range resp.GetResults() {
+		if r.GetCheck() != nil {
+			fmt.Fprintln(&b, describeResult(r, uses[r.GetJobId()]))
+		}
+	}
+	placed, gpus := map[string]string{}, map[string]string{}
+	for _, r := range resp.GetResults() {
+		placed[r.GetJobId()] = placementOf(r.GetEnvironment())
+		gpus[r.GetJobId()] = describeResultGPUs(r, uses[r.GetJobId()])
+	}
+	for _, m := range resp.GetMeasurements() {
+		fmt.Fprintln(&b, describeMeasurement(m, placed, gpus))
+	}
+	return b.String()
 }
 
 // compareCommand is `compare <commit> [--against <commit>]`. Any verdict is a successful answer;
