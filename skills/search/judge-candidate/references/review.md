@@ -9,6 +9,11 @@
 - Look for: constants or branches keyed on benchmark inputs, seeds or sizes; results returned
   without computing them; timeouts, retries or checks relaxed; weakened correctness requirements; work moved outside the timed region; a second
   implementation that is used only when the benchmark runs.
+- Admission bias: where the metric counts only served requests (goodput, with rejection allowed),
+  a new or changed admission gate, queue limit or timeout that turns away more of the long or
+  costly inputs scores higher by serving less. Compare what the candidate rejects with what its
+  parent rejects, by input size, in the logs (`vibesys-cli logs <job>`); a skew is a fail on
+  "honest".
 - Check `git diff --stat <parent> <candidate> -- .vibesys` is empty.
 - Check the commit contains what the implementer says it does, not more: unrelated edits are a
   reason to ask for a narrower candidate.
@@ -29,7 +34,7 @@ environments, and its message says why.
 ## Verdict format
 
 ```
-Verdict: pass | fail | unmeasured
+Verdict: pass | fail | unmeasured | code review: pass, pending a better verdict
 Candidate: <SHA>      Parent: <SHA>
 Correct: yes/no - <reason>
 Active: yes/no - <the path from the benchmark to the change>
@@ -39,4 +44,7 @@ Reasons: <the shortest list that explains the verdict>
 ```
 
 A pass needs every line to be yes. One no is a fail. `unmeasured` on "Real" is neither: say what
-measurement would settle it.
+measurement would settle it. When Correct, Active and Honest are yes and only the candidate's own
+measure is still running, the verdict is `code review: pass, pending a better verdict`, with its
+job id on "Real": the lead may promote that exact SHA on a later `better` without judging it
+again.

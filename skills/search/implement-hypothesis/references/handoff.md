@@ -9,7 +9,8 @@ Plan: <n>      Outcome: candidate | no candidate
 Claim: <the claim as you tested it; say if you narrowed it>
 Commit: <full SHA>    Branch: <branch>    Parent: <full SHA>
 Checks: <commands you ran and their result>
-Measurement: <job ids, and the compare output for the commit with the base value>
+Measurement: <job ids, and the compare output for the commit with the base value; for a wait the
+  brief let you hand back, each unfinished job id and what to do on each outcome>
 Prediction: <when you return `ready for measurement`: the gain you expect as a share of the
   headline, and the cheap evidence it rests on (tests, a microbenchmark, a self-test)>
 Learned: <what the result says about the hypothesis, in one or two sentences>

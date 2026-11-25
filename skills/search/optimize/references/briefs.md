@@ -6,10 +6,17 @@ background. Do not create agent definition files or add a second automatic workt
 already created the checkout. Where things live: `vibesys:state`. Workers and judges never write
 plans; they submit jobs linked to the plan and hand back evidence.
 
+**Every brief names the CLI by its absolute path.** A subagent's shell may not inherit
+`VIBESYS_CLI`, and without it every vibesys skill stops. The common header, which every brief
+but a planner's starts with, and the Plan template both carry a `CLI:` line: fill in the path
+`vibesys:setup` selected, never `vibesys-cli` or `$VIBESYS_CLI`.
+
 ## Common header (worker, judge, combine, profile)
 
 ```
 Goal: <what you want and why, in two or three sentences>
+CLI: export VIBESYS_CLI=<absolute path of vibesys-cli> before anything else, and run every
+  vibesys-cli call as "$VIBESYS_CLI".
 Worktree: <absolute path>      Branch: <branch or detached>      Base commit: <full SHA>
 First run: cd <worktree> && git rev-parse --show-toplevel && git branch --show-current
 Confirm both match before you change anything (an empty branch name means detached HEAD).
@@ -63,7 +70,8 @@ Specialize to: <what the task fixes, from OBJECTIVE.md: model, hardware, workloa
 First step: <the smallest change to the claim that you can finish, commit and measure in this
   turn>. Do it and measure it before anything larger.
 Parent: <base commit, or the candidate commit you build on and its measured value>
-Measure: <whether you submit the measure yourself, or return `ready for measurement`>
+Measure: <you submit the measure and wait for it; you submit it and hand the wait back to me; or
+  you return `ready for measurement`>
 Safeguards: <on backend trainium, the neuron-safeguards checklist, copied whole; else omit>
 Evidence: <simulator-led only: the plan kind's acceptance ladder, rung by rung; you submit no
   measure and no full check; else omit>
@@ -151,6 +159,8 @@ skills, chosen as for the common header, because they carry how to bound and pla
 
 ```
 Task: <task>      Nudge: <optional, one short phrase, or none>
+CLI: export VIBESYS_CLI=<absolute path of vibesys-cli> before anything else, and run every
+  vibesys-cli call as "$VIBESYS_CLI".
 CLI context: <as above, with --agent planner>
 Load vibesys:plan-hypotheses, vibesys:state and <domain skills>. Create only your own plan.
 ```

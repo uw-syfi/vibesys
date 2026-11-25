@@ -54,6 +54,9 @@ and what to report are in [gpus.md](references/gpus.md).
 Useful flags: `--note "<text>"` says why you ran it (notes are for readers; they change no result), and
 `--service` with `--probe` runs the command against a service the CLI starts and stops (not
 beside a candidate's server, which the CLI already starts).
+A command job is killed, and fails, at its `--timeout`, which defaults to the daemon's limit of 30
+minutes. For anything that may run longer, such as a device profile, set `--timeout` to the job's
+expected length plus a margin (`--timeout 2h`).
 `--no-cache` and `--recheck` force fresh work; only a reason to doubt a saved result justifies
 them. Use the task's own commands through `check` and `measure`; do not rebuild them by hand.
 
@@ -71,7 +74,10 @@ together and the numbers stay clean: a measure job runs alone on its machine (it
 placement alone, or, where each job gets a whole node of its own, its node), while checks and
 command jobs may share a placement up to its `max_jobs`. Do not start a benchmark, a profiler
 or a server in your own shell. Unit tests and in-process microbenchmarks that finish in seconds
-are checks, not load: run them in your worktree.
+are checks, not load: run them in your worktree, but not while `vibesys-cli jobs --state running`
+shows a measure on a placement on this machine. A local `docker run` takes `--rm --init --user
+"$(id -u):$(id -g)"` and a time limit inside the container, never only an outer `timeout`, which
+leaves the container running.
 
 ## Wait
 

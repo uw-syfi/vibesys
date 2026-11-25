@@ -133,7 +133,11 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
 5. Keep slots busy; when you leave one idle, state the reason in your next report.
 6. After every profile or promotion that moves the bottleneck, re-triage the parked and rejected
    plans: reopen any whose reason no longer holds (time, size, an old profile, a gain that was
-   too small before). A plan is never closed for good by a verdict on an older base.
+   too small before). A plan is never closed for good by a verdict on an older base. Read the
+   open and parked plans' gain bounds against the latest profile too: when it contradicts one
+   (the part the plan targets now takes less of the time than its bound assumes), re-bound it
+   with `plan edit <n> --gain-bound <share>` and a comment citing the profile, or close it. A
+   bound nothing checked keeps [Finish](#finish) from ever holding.
 
 ## Simulator-led mode
 
@@ -157,7 +161,8 @@ only on integrations. It replaces Loop steps 1 to 4; everything else here holds.
   fails the check because the code is missing is not a broken task: [from-scratch.md](references/from-scratch.md).
 - Plans may fix bugs, add tests or microbenchmarks, reorganize code, or otherwise change code to make it more robust over time; an optimization must never sacrifice correctness.
 - The result branch moves only through `vibesys-cli promote <sha>`, and only for a candidate whose
-  judge verdict is `pass`. Never move it with git (`branch -f`, `update-ref`, `reset`, `push`),
+  judge verdict is `pass`, or `code review: pass, pending a better verdict` followed by a `better`
+  (below). Never move it with git (`branch -f`, `update-ref`, `reset`, `push`),
   never check it out or create it again after it exists, and never touch the user's checkout:
   `promote` brings a checkout of the result branch that the user made along with it, or refuses
   with a `conflict` that names the path when that checkout has local changes. Report such a
@@ -177,7 +182,12 @@ only on integrations. It replaces Loop steps 1 to 4; everything else here holds.
   from the result branch head or from a frontier member, and name which in the brief; a later
   candidate built on a member is promoted when it is `better` than the head and is otherwise
   offered to the frontier. Report every member's numbers from `frontier list`.
-- A judge verdict `unmeasured` is not a pass: re-judge after the measurement.
+- A judge verdict `unmeasured` is not a pass: re-judge after the measurement. A judge that
+  reviewed the code while the candidate's measure still ran answers `code review: pass, pending a
+  better verdict` for one SHA. When that measure lands and `vibesys-cli compare <sha> --against
+  <parent>` says `better`, promote that same SHA without a second judge; a new commit on the
+  candidate, or any other verdict, needs a judge again. Write the pending verdict and the
+  `compare` output on the plan.
 - A number reported to the user is the `value` the CLI printed in `vibesys-cli result --json`
   (`current.result.measure.value`), never one you computed from samples. If `result` exits 1, there
   is none: for `NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED`, submit `vibesys-cli submit measure <head SHA> --no-plan` and report after
@@ -214,7 +224,8 @@ It has run its course when either holds:
 
 1. **Bounded gains.** Every plan still open or parked states a bound on its possible gain (the
    planners must, per [plan-hypotheses](../plan-hypotheses/SKILL.md)), and each bound is below
-   10% of the current headline. `vibesys-cli plan check-gain --under 10%` answers it: `yes`
+   10% of the current headline, and no bound is one the latest profile contradicts (re-bound or
+   close those, Loop step 6). `vibesys-cli plan check-gain --under 10%` answers it: `yes`
    when so, and otherwise `no` with the plans that state no bound or a higher one. A plan that
    states none is not under: ask its planner for one, or close it. A new idea whose bound is
    that low is a parked plan, not a reason to go on. A bold plan whose bound is higher keeps the
@@ -246,7 +257,8 @@ for decode (plan 4)". Lead with what changed. Keep ids and SHAs out of the main 
 in parentheses. Every periodic report ends with this self-check, answered honestly, with job ids
 and commit SHAs allowed here:
 
-1. Each promotion since the last report has a judge pass, and `vibesys-cli promote` printed it.
+1. Each promotion since the last report has a judge pass, or a code-review pass on that exact SHA
+   and a later `better`, and `vibesys-cli promote` printed it.
 2. The headline number is the `value` from `vibesys-cli result`.
 3. No plan is marked `chosen` without a live agent, or, for an accepted plan, an integration that
    holds it or is due.
