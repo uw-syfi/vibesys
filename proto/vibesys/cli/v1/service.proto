@@ -597,6 +597,9 @@ message ListJobsResponse {
   // Why each listed queued job that has not started waits. A queued job that is about to start has
   // none.
   repeated JobWait waits = 2;
+  // Each listed queued or running measure whose commit has diverged from the result branch head,
+  // in the order of the jobs. Empty when the task has no result branch the daemon can read.
+  repeated SupersededJob superseded = 3;
 }
 
 message ReadLogsRequest {

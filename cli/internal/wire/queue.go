@@ -69,3 +69,15 @@ func JobWaits(jobs []core.Job, waits map[core.JobID]core.JobWait) []*cliv1.JobWa
 	}
 	return out
 }
+
+// SupersededJobs returns the contract's messages for the jobs flagged as superseded, each with the
+// result branch head it was compared with, in the order of the jobs.
+func SupersededJobs(jobs []core.Job, superseded map[core.JobID]core.Commit) []*cliv1.SupersededJob {
+	var out []*cliv1.SupersededJob
+	for _, j := range jobs {
+		if head, ok := superseded[j.ID]; ok {
+			out = append(out, &cliv1.SupersededJob{JobId: string(j.ID), ResultHead: string(head)})
+		}
+	}
+	return out
+}

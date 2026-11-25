@@ -330,7 +330,11 @@ func (s *Server) ListJobs(ctx context.Context, req *cliv1.ListJobsRequest) (*cli
 			queued = append(queued, j.ID)
 		}
 	}
-	return &cliv1.ListJobsResponse{Jobs: wire.Jobs(jobs), Waits: wire.JobWaits(jobs, s.app.Waits(call.Scope, queued))}, nil
+	return &cliv1.ListJobsResponse{
+		Jobs:       wire.Jobs(jobs),
+		Waits:      wire.JobWaits(jobs, s.app.Waits(call.Scope, queued)),
+		Superseded: wire.SupersededJobs(jobs, s.app.Superseded(ctx, call.Scope, jobs)),
+	}, nil
 }
 
 // ReadLogs implements cliv1.DaemonServiceServer.

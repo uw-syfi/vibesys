@@ -101,3 +101,9 @@ func describeLeaseHolder(h *cliv1.LeaseHolder) string {
 	}
 	return who
 }
+
+// describeSuperseded is why a queued or running measure cannot lead to a promotion: its commit
+// does not contain the result branch head, which promote requires.
+func describeSuperseded(head string) string {
+	return fmt.Sprintf("superseded: does not contain result head %s, so promote refuses it", shortCommit(head))
+}

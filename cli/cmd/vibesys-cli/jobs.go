@@ -194,17 +194,25 @@ func jobsCommand(ctx context.Context, d deps, args []string) int {
 	return exitOK
 }
 
-// renderJobs is a list of jobs as text: each job's line, with why it waits when it is queued.
+// renderJobs is a list of jobs as text: each job's line, with why it waits when it is queued and
+// a note when it is a measure that does not contain the result head.
 func renderJobs(resp *cliv1.ListJobsResponse, task string) string {
 	waits := map[string]*cliv1.WaitReason{}
 	for _, w := range resp.GetWaits() {
 		waits[w.GetJobId()] = w.GetReason()
 	}
 	var b strings.Builder
+	superseded := map[string]string{}
+	for _, s := range resp.GetSuperseded() {
+		superseded[s.GetJobId()] = s.GetResultHead()
+	}
 	for _, j := range resp.GetJobs() {
 		b.WriteString(describe(j))
 		if w, ok := waits[j.GetId()]; ok {
 			b.WriteString("\n\t  waiting: " + describeWait(w, task))
+		}
+		if head, ok := superseded[j.GetId()]; ok {
+			b.WriteString("\n\t  " + describeSuperseded(head))
 		}
 		b.WriteString("\n")
 	}

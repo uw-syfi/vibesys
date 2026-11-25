@@ -38,6 +38,11 @@ and `vibesys-cli placement capacity <placement>`. Match each reason to an action
 | `behind <job>, which waits for ...` | An earlier job has the turn | Wait. A waiting job keeps its turn. |
 | A measure needs the placement alone | It starts when the running jobs finish, then nothing else starts beside it | Wait. Do not queue more checks or commands behind it than you need. |
 | A wait ends with a reason (exit 4) | The job can never run | Fix the request (a count larger than any pool, a placement that lacks a resource). Report the refusal as printed. |
+| `superseded: does not contain result head <sha>` | A promotion moved the head after this measure was submitted, and its commit does not contain the new head, so `promote` refuses it whatever it measures | The lead decides: cancel it (`vibesys-cli cancel <job> --reason "superseded by <sha>"`), or dispatch a combine of the candidate onto the head and measure that. Keep it only when its number is still wanted as evidence. |
+
+The `superseded` line appears under a queued or running measure only (with `--json`, in
+`superseded`, each with its `result_head`); a measure of the head, of a commit built on it, or of a
+commit the head already holds is never marked, and the CLI never cancels a job on its own.
 
 If most of the pool is free while jobs queue, look for an oversized request (every job asking for
 all GPUs). A long queue is not a reason to stop working: keep implementing and committing the next
