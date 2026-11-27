@@ -1,0 +1,26 @@
+[project]
+name = "llama32-mlx-shared-prefix"
+version = "0.1.0"
+description = "Offline MLX shared-prefix HTTP serving experiment"
+requires-python = ">=3.12"
+dependencies = [
+  "httpx==0.28.1",
+  "mlx==0.32.2; sys_platform == 'darwin'",
+  "mlx-lm==0.31.3",
+  "pydantic==2.13.5",
+  "transformers==5.17.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "hypothesis>=6"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
+testpaths = [".vibesys/tasks/shared-prefix/tests"]
+
+# Keep this runnable example independent of the enclosing repository workspace.
+[tool.uv.workspace]
+members = []
