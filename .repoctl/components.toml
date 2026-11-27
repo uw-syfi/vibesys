@@ -99,6 +99,7 @@ selected_roots = [
   "examples/data-structures/unordered-map/.vibesys/tasks/swmr",
   "examples/database/differential-dataflow/.vibesys/tasks/default",
   "examples/database/kv-store/.vibesys/tasks/default",
+  "examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/.vibesys/tasks/load-ramp",
 ]
 selected_jobs = ["dockerfiles"]
 

@@ -4,6 +4,7 @@
 
 One worker thread owns the model and serves requests FIFO, one at a time.
 GET /health is 503 until the weights are loaded and a warmup forward succeeded.
+POST /v1/score teacher-forces a token continuation and returns per-position logprobs.
 """
 
 import argparse
@@ -205,6 +206,73 @@ async def stream_reply(request, out, prompt, rid, name, include_usage) -> web.St
         return resp
 
 
+def parse_score_request(body: dict, max_seq_len: int) -> tuple[list[int], int, int]:
+    """Validate a `/v1/score` body into (prompt token ids, continuation_start, top_k).
+
+    Positions [continuation_start, len(prompt)) are scored, so at least one token of left
+    context and one token to score are required."""
+    prompt = body.get("prompt")
+    if not isinstance(prompt, list) or not all(
+        isinstance(t, int) and not isinstance(t, bool) and t >= 0 for t in prompt
+    ):
+        raise ValueError("prompt must be an array of non-negative integer token ids")
+    if len(prompt) > max_seq_len:
+        raise ValueError(f"prompt has {len(prompt)} tokens, max_seq_len is {max_seq_len}")
+    start = body.get("continuation_start")
+    if not isinstance(start, int) or isinstance(start, bool) or not 0 < start < len(prompt):
+        raise ValueError(f"continuation_start must satisfy 0 < continuation_start < {len(prompt)}")
+    top_k = body.get("top_k", 5)
+    if not isinstance(top_k, int) or isinstance(top_k, bool) or top_k < 1:
+        raise ValueError("top_k must be a positive integer")
+    return prompt, start, top_k
+
+
+def score_rows(logits: torch.Tensor, scored: list[int], top_k: int) -> list[dict]:
+    """One row per scored token: its logprob and the top_k next-token logprobs."""
+    logprobs = torch.log_softmax(logits.float(), dim=-1)
+    top_vals, top_ids = logprobs.topk(min(top_k, logprobs.shape[-1]), dim=-1)
+    return [
+        {
+            "token_id": token,
+            "logprob": logprobs[j, token].item(),
+            "top_logprobs": [
+                {"token_id": t, "logprob": v}
+                for t, v in zip(top_ids[j].tolist(), top_vals[j].tolist(), strict=True)
+            ],
+        }
+        for j, token in enumerate(scored)
+    ]
+
+
+async def score(request: web.Request) -> web.Response:
+    engine: Engine = request.app["engine"]
+    if not engine.ready:
+        return web.json_response({"error": "model not ready"}, status=503)
+    body = await request.json()
+    try:
+        prompt, start, top_k = parse_score_request(body, engine.args.max_seq_len)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    loop = asyncio.get_running_loop()
+    done: asyncio.Future = loop.create_future()
+
+    def job() -> None:
+        try:
+            rows = score_rows(engine.model.score(prompt, start), prompt[start:], top_k)
+            loop.call_soon_threadsafe(done.set_result, rows)
+        except Exception as e:
+            loop.call_soon_threadsafe(done.set_exception, e)
+
+    engine.submit(job)
+    try:
+        rows = await done
+    except Exception as e:
+        return web.json_response({"error": repr(e)}, status=500)
+    return web.json_response(
+        {"object": "token_scores", "continuation_start": start, "scores": rows}
+    )
+
+
 async def health(request: web.Request) -> web.Response:
     engine: Engine = request.app["engine"]
     if engine.ready:
@@ -226,6 +294,7 @@ def make_app(args: argparse.Namespace) -> web.Application:
             web.get("/health", health),
             web.get("/v1/models", models),
             web.post("/v1/chat/completions", chat),
+            web.post("/v1/score", score),
         ]
     )
     return app

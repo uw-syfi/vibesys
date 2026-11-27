@@ -1,0 +1,24 @@
+# The optimization campaign's objectives, scored together on a Pareto frontier. Each `name` is a
+# required metric that benchmark/run.py declares in its result protocol `hello` record
+# (`build_metric_specs`).
+
+# Throughput: the best window throughput among the ramp's levels (C16, then C96) that are valid
+# and within the latency guardrails, or, when no level is within them, the best valid level's
+# (`resolve_peak_goodput`). For an engine that serves C96 within the guardrails, this is its
+# goodput at C96, the campaign's headline number.
+[[objective]]
+name = "peak_goodput_tok_s"
+direction = "max"
+unit = "tok/s"
+
+# Latency: the 95th percentile time to first token over turn 2 and later, at the reference
+# concurrency C16 (C_REF).
+[[objective]]
+name = "p95_ttft_turn2plus_ms_at_ref"
+direction = "min"
+unit = "ms"
+
+# The campaign saw about 6% between repeated runs of one build on one node, and about 10% between
+# nodes; the floor is the same-node spread, since a comparison pairs runs on the same placement.
+[pareto]
+relative_noise = 0.06
