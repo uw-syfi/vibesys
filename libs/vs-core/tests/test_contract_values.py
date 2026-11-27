@@ -1,7 +1,7 @@
 """Typed contract values: digest scheme, descendant manifest and retained selections."""
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -143,10 +143,17 @@ def evidence_row(
 @given(
     kind=st.sampled_from(list(core.EvidenceKind)),
     status=st.sampled_from([core.ObservationStatus.SUCCEEDED, core.ObservationStatus.FAILED]),
-    flaws=st.sets(st.sampled_from(["self-report", "no-receipt", "other-candidate", "twin"])),
+    flaws=st.sets(st.sampled_from(["self-report", "no-receipt", "other-candidate"])),
+    with_twin=st.booleans(),
 )
-def test_accuracy_proof_is_the_unique_trusted_accepted_successful_correctness_record(
-    kind: core.EvidenceKind, status: core.ObservationStatus, flaws: set[str]
+@example(  # a second successful run leaves the first record as the proof
+    kind=core.EvidenceKind.CORRECTNESS,
+    status=core.ObservationStatus.SUCCEEDED,
+    flaws=set(),
+    with_twin=True,
+)
+def test_accuracy_proof_is_the_first_trusted_accepted_successful_correctness_record(
+    *, kind: core.EvidenceKind, status: core.ObservationStatus, flaws: set[str], with_twin: bool
 ) -> None:
     baseline = core.initial_state().run.facts.baseline
     updates: dict[str, object] = {"kind": kind, "status": status}
@@ -157,7 +164,7 @@ def test_accuracy_proof_is_the_unique_trusted_accepted_successful_correctness_re
     row = evidence_row("e", receipt="no-receipt" not in flaws, updates=updates)
     twin = evidence_row("e", request="r2", receipt="no-receipt" not in flaws, updates=updates)
     rows = (row, twin)
-    state = core.EvaluationState(evidence=rows if "twin" in flaws else rows[:1])
+    state = core.EvaluationState(evidence=rows if with_twin else rows[:1])
     qualifies = (
         kind == core.EvidenceKind.CORRECTNESS and status == core.ObservationStatus.SUCCEEDED
     ) and not flaws
@@ -190,6 +197,18 @@ def test_a_framework_measurement_is_trusted_whoever_requested_it(
         ),
         max_size=5,
     )
+)
+@example(  # a revision that passed once and failed once has no proof, in either order
+    rows=[
+        ("official", core.EvidenceKind.CORRECTNESS, core.ObservationStatus.SUCCEEDED, True),
+        ("official", core.EvidenceKind.CORRECTNESS, core.ObservationStatus.FAILED, True),
+    ]
+)
+@example(
+    rows=[
+        ("official", core.EvidenceKind.CORRECTNESS, core.ObservationStatus.FAILED, True),
+        ("official", core.EvidenceKind.CORRECTNESS, core.ObservationStatus.SUCCEEDED, True),
+    ]
 )
 def test_every_run_of_a_revision_counts_toward_its_accuracy_proof(
     rows: list[tuple[str, core.EvidenceKind, core.ObservationStatus, bool]],
