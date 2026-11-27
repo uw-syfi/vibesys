@@ -16,7 +16,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Annotated, ClassVar, Literal
 
-from pydantic import Field
+from pydantic import Field, SerializerFunctionWrapHandler, model_serializer
 
 from vibesys.orchestration.multi.search._roles import IMPLEMENTER, JUDGE, PROFILER, ROUTER
 from vibesys.serial_search.api import PlanCorrection, PlanPrompt
@@ -32,6 +32,10 @@ class PromptTemplate(StrEnum):
     JUDGE = "judge"
 
 
+_GIVEN_ONLY = frozenset({"base_revision", "base_round", "base_value"})
+"""Router prompt fields written only when given: later additions to a recorded shape."""
+
+
 class PreRoundPrompt(RolePromptContext):
     """The routing decision before a new hypothesis: is fresh profile evidence wanted?"""
 
@@ -39,11 +43,32 @@ class PreRoundPrompt(RolePromptContext):
 
     template: Literal[PromptTemplate.PRE_ROUND] = PromptTemplate.PRE_ROUND
     round_number: int = Field(gt=0)
+    # These three fields were added after runs had recorded router prompts, which hold them
+    # absent, as null, or set. Each is written only when the prompt was given it, so every
+    # recorded prompt re-encodes to the document that was saved: recovery proves each recorded
+    # request against the digest of that document (`_written_as_given`).
+    base_revision: RevisionRef | None = None
+    """The round's base: the best revision so far, the input while none beat it.
+
+    None only in prompts saved before routers were shown the base; every new round sets it.
+    """
+    base_round: int | None = None
+    """The round whose idea made ``base_revision``; None when it is the input."""
+    base_value: float | None = None
+    """The headline the trusted gates measured of ``base_revision``; None when they have not."""
     has_history: bool
     regression_kind: str | None = None
     regression_round: int | None = None
     exhaustion_feedback: str | None = None
     exhaustion_round: int | None = None
+
+    @model_serializer(mode="wrap")
+    def _written_as_given(self, write: SerializerFunctionWrapHandler) -> dict[str, object]:
+        """The prompt as written, without a later-added field the prompt was not given."""
+        written = write(self)
+        for name in _GIVEN_ONLY - self.model_fields_set:
+            written.pop(name, None)
+        return written
 
 
 class ProfilerPrompt(RolePromptContext):
