@@ -4,7 +4,7 @@
  */
 import {create} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
-import {type Agent, AgentStatus, CommandSchema} from '@vibesys/orchestrator-proto';
+import {type Agent, AgentStatus, CommandSchema, UsageSchema} from '@vibesys/orchestrator-proto';
 import {
   applyChange,
   type CommandProgress,
@@ -150,6 +150,52 @@ describe('the agents screen', () => {
       );
     }
     screen.unmount();
+  });
+
+  it("writes every agent's cost at the run's own precision, once one of them is no longer small", () => {
+    const rows = spawnTree(state, scenario.runId, {nowMs: scenario.endMs, host: 'host-a'}).rows.filter(
+      row => row.kind === 'agent',
+    );
+    const priced = rows.filter(row => row.costUsd !== null && row.costUsd > 0);
+    const [big, small] = priced;
+    if (big === undefined || small === undefined || big.agentId === small.agentId) {
+      throw new Error('the run has two differently priced agents');
+    }
+    const agent = state.agents[big.agentId];
+    if (agent === undefined) throw new Error('the big agent is in state');
+    const bumped: OrchestratorState = {
+      ...state,
+      agents: {
+        ...state.agents,
+        [big.agentId]: {...agent, usage: create(UsageSchema, {...agent.usage, costUsd: 1234})},
+      },
+    };
+    const figureOf = (screen: ReturnType<typeof mount>, label: string) =>
+      options(screen.container)
+        .find(option => option.getAttribute('aria-label')?.startsWith(label))
+        ?.querySelector('.vs-gantt-figure')?.textContent;
+    const before = view();
+    // At the run's original, small total, both agents read in cents.
+    expect(figureOf(before, agentLabel(big.name))).toMatch(/\$\d+\.\d{2}/);
+    expect(figureOf(before, agentLabel(small.name))).toMatch(/\$\d+\.\d{2}/);
+    before.unmount();
+    const after = mount(
+      <AgentsScreen
+        state={bumped}
+        runId={scenario.runId}
+        host="host-a"
+        nowMs={scenario.endMs}
+        trail={[]}
+        reading={null}
+        open={() => undefined}
+      />,
+    );
+    // Once the run's total is no longer small, the whole column drops to whole dollars: the
+    // bumped agent groups its thousands, and the untouched small one loses its cents too, so no
+    // figure in the column reads more exact than the one beside it.
+    expect(figureOf(after, agentLabel(big.name))).toBe('$1,234');
+    expect(figureOf(after, agentLabel(small.name))).not.toMatch(/\./);
+    after.unmount();
   });
 });
 

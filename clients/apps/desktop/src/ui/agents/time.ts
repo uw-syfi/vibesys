@@ -1,4 +1,5 @@
 /** Spans and costs as the agent screens write them. Moments are in `display-time.ts`. */
+import {formatUsd as formatDollars, precisionOf, type Precision} from '../cost/words.js';
 
 /** `14s`, `3m 05s`, `2h 10m`: how long something took, in figures that line up. */
 export function formatSpan(ms: number): string {
@@ -9,5 +10,13 @@ export function formatSpan(ms: number): string {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
 
-/** `$1.12`, or an empty string when the host reported no cost. */
-export const formatUsd = (usd: number | null): string => (usd === null ? '' : `$${usd.toFixed(2)}`);
+/**
+ * `$1.12`, `$1,234` once the figure is not small, or an empty string when the host reported no
+ * cost. `precision` lines this figure up with the others of its screen (the Cost feature's own
+ * rule); a caller with none of its own passes `precisionOf` this value, the same house rule
+ * applied to a single figure.
+ */
+export function formatUsd(usd: number | null, precision?: Precision): string {
+  if (usd === null) return '';
+  return formatDollars(usd, precision ?? precisionOf(usd));
+}

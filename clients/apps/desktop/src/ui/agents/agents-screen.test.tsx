@@ -160,4 +160,9 @@ describe('moments and spans', () => {
     expect(formatUsd(0)).toBe('$0.00');
     expect(formatUsd(null)).toBe('');
   });
+
+  it('groups a large cost in thousands and drops its cents, the same house rule as the Cost screen', () => {
+    expect(formatUsd(1234)).toBe('$1,234');
+    expect(formatUsd(1234, 2)).toBe('$1,234.00');
+  });
 });
