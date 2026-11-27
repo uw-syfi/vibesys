@@ -345,6 +345,14 @@ def test_a_plan_that_breaks_no_rule_is_accepted_whole_in_order() -> None:
     ]
 
 
+def test_a_hypothesis_continued_max_continuation_rounds_times_is_terminal() -> None:
+    plan = portfolio(implement_entry("a", continue_hypothesis=True))
+    used = FINISHED_A.model_copy(update={"continuation_rounds": 2})
+    assert codes(check(plan, Record(hypotheses=[used]))) == [ViolationCode.HYPOTHESIS_TERMINAL]
+    left = FINISHED_A.model_copy(update={"continuation_rounds": 1})
+    assert check(plan, Record(hypotheses=[left])).valid
+
+
 def test_a_run_that_ranks_evaluations_takes_the_replys_order_of_known_and_planned_ids() -> None:
     plan = portfolio(implement_entry("n"), order=("n", "a"))
     result = check(plan, Record(hypotheses=[FINISHED_A], ranks=True))
