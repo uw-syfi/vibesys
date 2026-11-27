@@ -289,6 +289,7 @@ extend-exclude = [
     "examples/microservices/repositories/hotel",
     "examples/microservices/repositories/socialnet",
     "examples/microservices/repositories/train-ticket",
+    "examples/model-serving/repositories/news-signal",
     "examples/model-serving/repositories/sglang",
     "examples/model-serving/repositories/vllm",
     "examples/model-serving/repositories/vllm-omni",
