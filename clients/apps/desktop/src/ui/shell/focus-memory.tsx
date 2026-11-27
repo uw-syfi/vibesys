@@ -54,6 +54,7 @@ function arrive(page: HTMLElement, opener: string | undefined): void {
 /** The moves that open a page of a run, which the person comes back from. */
 const opensFromAControl = (action: NavigationAction): boolean =>
   action.type === 'open-run' ||
+  action.type === 'open-new-run' ||
   action.type === 'show' ||
   action.type === 'pick-agent' ||
   action.type === 'open-add-machine';
