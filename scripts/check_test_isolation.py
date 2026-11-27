@@ -172,6 +172,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+# lint-waiver: LW-389005 [E402]; Path-invoked runs (including clients_quality) need the repo root on sys.path before this import.
+from scripts.repo_files import tracked_files  # noqa: E402
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
@@ -1653,15 +1660,19 @@ def scan_typescript_source(source: str, relative: str) -> Scan:
 
 
 def _scanned_files(repo_root: Path, roots: Iterable[str]) -> list[Path]:
+    tracked = tracked_files(repo_root, suffixes=(".py", ".test.ts"))
     files: set[Path] = set()
     for pattern in roots:
         for directory in repo_root.glob(pattern):
             if not directory.is_dir():
                 continue
-            candidates = (*directory.rglob("*.py"), *directory.rglob("*.test.ts"))
-            for path in candidates:
+            prefix = directory.relative_to(repo_root).as_posix().rstrip("/")
+            for path in tracked:
                 relative = path.relative_to(repo_root)
-                if not SKIPPED_DIR_NAMES.intersection(relative.parts):
+                if SKIPPED_DIR_NAMES.intersection(relative.parts):
+                    continue
+                as_posix = relative.as_posix()
+                if as_posix == prefix or as_posix.startswith(f"{prefix}/"):
                     files.add(path)
     return sorted(files)
 
