@@ -1,6 +1,7 @@
 /** The words of a run's setup: labels, status words, figures. Nothing here explains; it names. */
 import {RunStatus, SetupCheckId, type TaskCard} from '@vibesys/orchestrator-proto';
 import type {Baseline, CheckState} from '../../../state/index.js';
+import {formatUsd, precisionOf} from '../../cost/words.js';
 import {span} from '../../duration.js';
 import {formatFigure} from '../../figures.js';
 import {runWord, type Word} from '../words.js';
@@ -59,8 +60,8 @@ export function objectiveWords(card: TaskCard): string {
     .join(', ');
 }
 
-/** Setup spend, in dollars. */
-export const spendWords = (usd: number): string => `$${usd.toFixed(2)}`;
+/** Setup spend, in dollars, at its own precision (the Cost screen's house rule: cents while small). */
+export const spendWords = (usd: number): string => formatUsd(usd, precisionOf(usd));
 
 /** Setup time, in the words every screen shares. */
 export const timeWords = (seconds: number): string => span(seconds * 1000);
