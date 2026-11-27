@@ -57,4 +57,5 @@ claude plugin install <plugin>@vibesys
 ```
 
 or, for Codex, `codex plugin marketplace add uw-syfi/vibesys` then
-`codex plugin add <plugin>@vibesys`, and then to start you again.
+`codex plugin add <plugin>@vibesys`, or, for opencode, to copy the plugin's skill folders into
+the directory the other skills came from, and then to start you again.
