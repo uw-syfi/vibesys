@@ -32,6 +32,9 @@ Arguments: `<task>` and `--fanout N`, the most subagents running at once (defaul
 workers, profilers, combiners and judges all count; a judge takes a slot too. A repository with no
 `.vibesys/tasks/<task>/` needs one first: `vibesys:create-task`. `--simulator-led`, or an operator
 steering note that asks for it, selects [simulator-led mode](#simulator-led-mode).
+`--megakernel-divide-and-conquer`, or a steering note that asks for it, selects
+[megakernel divide-and-conquer mode](#megakernel-divide-and-conquer-mode); in that mode
+`--budget time <duration>` or `--budget cycles <n>` bounds the run (none: until the user stops it).
 
 Needs a harness that can run background tasks and subagents, on POSIX (Linux or macOS), with git
 and `vibesys-cli`. Where things live and how to resume: `vibesys:state`. Commands for measuring:
@@ -147,6 +150,20 @@ versioned design target and roadmap, accepts each plan on its kind's ladder
 ([acceptance-ladder.md](references/acceptance-ladder.md)), and spends a full check and measure
 only on integrations. It replaces Loop steps 1 to 4; everything else here holds.
 
+## Megakernel divide-and-conquer mode
+
+For megakernel tasks only (one kernel launch that runs a model step as phases sharing its
+resources, with a timeline that times each phase), the work is divided at the phase boundaries
+once a design is settled: [megakernel-divide-and-conquer.md](references/megakernel-divide-and-conquer.md). The default loop
+bootstraps a working design. Then a profiler maps its phases into a versioned phase map, one
+worker per phase works in parallel under a contract (the phase's inputs, outputs, sync and
+resource budget), and a combiner glues the accepted phases into one integration that is measured
+once. One cross-phase plan stays in flight beside them. Then the new head is mapped again, and
+the cycle repeats until the budget is spent or the user stops the run: a cycle that finds nothing
+escalates (boundaries, cross-phase redesign, a finer bar, a finer map) instead of finishing. It
+replaces Loop steps 1 to 4 after bootstrap, and [Finish](#finish) with its own end of the run;
+everything else here holds.
+
 ## Rules
 
 - You never write code or edit a file of the repository: not candidate code, not a first draft or
@@ -217,6 +234,9 @@ only on integrations. It replaces Loop steps 1 to 4; everything else here holds.
 - To pause, bring every plan up to date (status and a last comment); to resume, read the state.
 
 ## Finish
+
+In megakernel divide-and-conquer mode this section does not apply: the run ends when its budget
+is spent or the user stops it, as that mode's reference says. Otherwise:
 
 Finish when the work has run its course, or when the user stops it. Check the course each time a
 candidate is promoted, refused or rejected, and before you dispatch another round of planners.

@@ -55,6 +55,9 @@ All worktrees of the repository share one store per task, so any agent sees the 
   `<parent>/<name>.roadmap/<task>/`, beside the worktrees directory. Each version is written
   once and never edited, and the directory outlives the run. The optimize skill's simulator-led
   reference has the format.
+- Phase map (megakernel divide-and-conquer mode only): the lead's numbered phase map versions in
+  `<parent>/<name>.phases/<task>/`, beside the worktrees directory, one per head the run divides.
+  They are kept like the roadmap. The optimize skill's megakernel divide-and-conquer reference has the format.
 - Scratch: disposable machine output (profiles, raw logs). Any directory the lead names in the
   briefs; nothing depends on it.
 

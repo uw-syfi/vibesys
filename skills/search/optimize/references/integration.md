@@ -45,7 +45,8 @@ Also integrate whatever is accepted before the final report. A single accepted p
 prediction clears the bar may be measured on its own instead, as any candidate is, when no other
 plan is waiting to join it. In simulator-led mode ([simulator-led.md](simulator-led.md)), it
 still gets an integration plan, with one part: the integration is the only step that runs a full
-check and a measure.
+check and a measure. In megakernel divide-and-conquer mode ([megakernel-divide-and-conquer.md](megakernel-divide-and-conquer.md#glue)), an
+accepted split plan never makes an integration alone: it waits for the first phase part.
 
 ## The composed prediction
 

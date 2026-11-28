@@ -107,7 +107,8 @@ short section in the harness file.
   ([skill metadata](../docs/contributing/skill-metadata.md)).
 - `search/`: the optimization loop for the plugin alone. VibeSys runs never install it,
   because they read only `domains/`. Invoke `/vibesys:optimize <task> [--fanout N]` to start or resume the task's one long-running
-  optimization: planners store hypotheses as plans, workers try them, every commit is
+  optimization (for megakernel tasks, add `--megakernel-divide-and-conquer`; see
+  [Writing Megakernels](../docs/megakernel-divide-and-conquer.md)): planners store hypotheses as plans, workers try them, every commit is
   measured and judged, all through `vibesys-cli`. Its state is described by the `state` skill, and every commit follows the
   `commit` skill's enforced message schema. `setup` finds, installs, upgrades and
   version-checks `vibesys-cli`; the oldest version the skills support is in its

@@ -9,6 +9,7 @@ const sidebars: SidebarsConfig = {
   docsSidebar: [
     'running-vibesys',
     'cli-flags',
+    'megakernel-divide-and-conquer',
     {
       type: 'category',
       label: 'Contributing',

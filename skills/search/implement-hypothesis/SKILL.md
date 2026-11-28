@@ -50,6 +50,14 @@ in order instead of measuring: stop at the first rung that fails and hand back i
 only the device jobs the brief lists, each with its `--note "Question: <...>. Predicts: <...>."`.
 The lead cancels any other device job, and its result counts for nothing.
 
+When your brief has `Phase contract:` and `Phase evidence:` lines (a megakernel divide-and-conquer run), you
+own one phase of a program whose phases share one launch. Change only the code your `Scope:`
+names. Keep the contract: the phase computes exactly what it hands on, in the same layouts, between
+the same syncs, within its resource budget. A gain that needs more than that is a boundary
+proposal: describe it in your handoff and do not make it. Climb the ladder of `Phase evidence:` in
+order instead of measuring, and stop at the first rung that fails. The window rung compares every
+phase's window, not only yours: a cut that reappears in another phase is no gain.
+
 GPUs: stay inside the task's GPU budget. When your change touches how the server launches,
 places or shards work, or claims a throughput gain, check per-device use under load and report how
 many budgeted devices were busy ([GPUs](../measure/references/gpus.md)). Your own check and
