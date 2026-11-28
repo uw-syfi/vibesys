@@ -1,9 +1,9 @@
 /**
  * Generated from examples/registry.toml by scripts/generate_desktop_examples.py. Do not edit.
- * source-sha256: b8f596570d5a358a3850460521c599915e859dda12e50084ae0bc59dcd98a156
+ * source-sha256: 069f0e006b6521c314ccd90eb6944522fae5dd2a1af329bcf1ef328fc9d8ec17
  */
 
-export type RegisteredExampleCategory = "data-structures" | "database" | "microservices" | "model-serving";
+export type RegisteredExampleCategory = "data-structures" | "database" | "kernels" | "microservices" | "model-serving";
 
 export interface RegisteredExample {
   readonly id: string;
@@ -21,6 +21,7 @@ export const REGISTERED_EXAMPLES = [
   {id: "data-structures/unordered-map", category: "data-structures", needsClone: false},
   {id: "database/differential-dataflow", category: "database", needsClone: false},
   {id: "database/kv-store", category: "database", needsClone: false},
+  {id: "kernels/megakernels", category: "kernels", needsClone: false},
   {id: "microservices/repositories/deathstarbench", category: "microservices", needsClone: true},
   {id: "microservices/repositories/hotel", category: "microservices", needsClone: true},
   {id: "microservices/repositories/socialnet", category: "microservices", needsClone: true},
