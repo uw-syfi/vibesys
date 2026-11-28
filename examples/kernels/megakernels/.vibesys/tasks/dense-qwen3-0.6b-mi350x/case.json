@@ -1,0 +1,29 @@
+{
+  "id": "dense-step-qwen3-06b-b1-s128",
+  "family": "dense_step",
+  "model": "Qwen/Qwen3-0.6B",
+  "phase": "decode",
+  "params": {
+    "batch": 1,
+    "context": 128,
+    "layers": 28,
+    "hidden": 1024,
+    "q_heads": 16,
+    "kv_heads": 8,
+    "head_dim": 128,
+    "intermediate": 3072,
+    "vocab": 151936
+  },
+  "category": "dense_llm",
+  "suite": "p0",
+  "backend": "cuda",
+  "gpus": 1,
+  "tp": 1,
+  "ep": 1,
+  "max_gpu_launches": 1,
+  "atol": 0.002,
+  "rtol": 0.002,
+  "bf16_rtol": 0.008,
+  "noise_factor": 2.0,
+  "ready": true
+}

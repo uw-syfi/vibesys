@@ -1,0 +1,7 @@
+# Kernel step time from the trusted evaluator; lower is better.
+[[objective]]
+name = "kernel_latency_ms"
+direction = "min"
+
+[pareto]
+relative_noise = 0.01

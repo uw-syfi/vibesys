@@ -1,0 +1,25 @@
+version = "0.1"
+backends = ["rocm"]
+
+[agent]
+domain = "kernel-writing"
+
+[accuracy]
+command = ["python", "${PROJECT_ROOT}/.vibesys/shared/evaluate.py", "accuracy", "--task", "moe-qwen3-30b-a3b-mi350x", "--stability-processes", "2"]
+timeout_seconds = 1800
+
+[benchmark]
+command = ["python", "${PROJECT_ROOT}/.vibesys/shared/evaluate.py", "benchmark", "--task", "moe-qwen3-30b-a3b-mi350x", "--stability-processes", "2"]
+timeout_seconds = 2400
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "kernel_latency_ms"
+
+[catalogue]
+domain = "kernel-writing"
+
+[catalogue.hardware]
+accelerator = "AMD MI350X"
+count = 1
+vendor = "amd"
