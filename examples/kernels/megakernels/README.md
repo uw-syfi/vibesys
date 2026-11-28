@@ -14,7 +14,8 @@ vibesys example new kernels/megakernels ~/work/megakernels
 cd ~/work/megakernels && claude
 ```
 
-and, in Claude Code with the `vibesys` and `vibesys-kernels-cuda` plugins installed:
+and, in Claude Code with the `vibesys` plugin and the kernels plugin for the GPU
+(`vibesys-kernels-cuda` or `vibesys-kernels-rocm`) installed:
 
 ```text
 /vibesys:optimize dense-qwen3-0.6b-b300 --megakernel-divide-and-conquer --budget time 285m --fanout 3
@@ -22,15 +23,15 @@ and, in Claude Code with the `vibesys` and `vibesys-kernels-cuda` plugins instal
 
 ## Tasks
 
-| Workload | Model | Step | NVIDIA B300 task |
-| --- | --- | --- | --- |
-| Dense LLM | [Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) | decode, 128-token KV cache | `dense-qwen3-0.6b-b300` |
-| MoE LLM | [Qwen3-30B-A3B](https://huggingface.co/Qwen/Qwen3-30B-A3B) | decode, 128-token KV cache | `moe-qwen3-30b-a3b-b300` |
-| W8 LLM | [Gemma 3 4B](https://huggingface.co/google/gemma-3-4b-it), 8-bit weights | decode, 128-token KV cache | `w8-gemma3-4b-b300` |
-| W4 LLM | [Gemma 3 4B](https://huggingface.co/google/gemma-3-4b-it), 4-bit weights | decode, 128-token KV cache | `w4-gemma3-4b-b300` |
-| Text-to-speech | [CSM-1B](https://huggingface.co/sesame/csm-1b) | one audio frame: a backbone decode step, then the depth decoder over 32 codebooks | `tts-csm-1b-b300` |
-| Vision-language-action | [pi0.5](https://huggingface.co/lerobot/pi05_base) | one action chunk: the action expert's flow-matching steps over a cached prefix | `vla-pi05-b300` |
-| World model | [Waypoint-1.5-1B](https://huggingface.co/Overworld/Waypoint-1.5-1B) | one latent frame: four denoising passes and a cache pass | `world-waypoint1.5-1b-b300` |
+| Workload | Model | Step | NVIDIA B300 task | AMD MI350X task |
+| --- | --- | --- | --- | --- |
+| Dense LLM | [Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) | decode, 128-token KV cache | `dense-qwen3-0.6b-b300` | `dense-qwen3-0.6b-mi350x` |
+| MoE LLM | [Qwen3-30B-A3B](https://huggingface.co/Qwen/Qwen3-30B-A3B) | decode, 128-token KV cache | `moe-qwen3-30b-a3b-b300` | `moe-qwen3-30b-a3b-mi350x` |
+| W8 LLM | [Gemma 3 4B](https://huggingface.co/google/gemma-3-4b-it), 8-bit weights | decode, 128-token KV cache | `w8-gemma3-4b-b300` | `w8-gemma3-4b-mi350x` |
+| W4 LLM | [Gemma 3 4B](https://huggingface.co/google/gemma-3-4b-it), 4-bit weights | decode, 128-token KV cache | `w4-gemma3-4b-b300` | `w4-gemma3-4b-mi350x` |
+| Text-to-speech | [CSM-1B](https://huggingface.co/sesame/csm-1b) | one audio frame: a backbone decode step, then the depth decoder over 32 codebooks | `tts-csm-1b-b300` | `tts-csm-1b-mi350x` |
+| Vision-language-action | [pi0.5](https://huggingface.co/lerobot/pi05_base) | one action chunk: the action expert's flow-matching steps over a cached prefix | `vla-pi05-b300` | `vla-pi05-mi350x` |
+| World model | [Waypoint-1.5-1B](https://huggingface.co/Overworld/Waypoint-1.5-1B) | one latent frame: four denoising passes and a cache pass | `world-waypoint1.5-1b-b300` | `world-waypoint1.5-1b-mi350x` |
 
 Each task's `OBJECTIVE.md` states the interface, the outputs and the rules. The candidate for
 task `<workload>-<hw>` is `<hw>/<workload>/submission.py`, which starts as a stub. It exports
@@ -51,5 +52,7 @@ reading, so it can never win on speed.
 ## Requirements
 
 A machine with the task's GPU, its compiler toolchain, and PyTorch with a matching GPU build
-in the `python` on `PATH` (the B300 runs used CUDA 13.1 and PyTorch 2.13). Nothing is
-downloaded: the weights are random, with each model's real geometry.
+in the `python` on `PATH`. The B300 runs used CUDA 13.1 and PyTorch 2.13; the MI350X runs used
+ROCm 7.1 and PyTorch 2.10. As in those runs, the MI350X benchmark times the candidate in one
+more fresh process and scores the fast reading when the two disagree. Nothing is downloaded:
+the weights are random, with each model's real geometry.
