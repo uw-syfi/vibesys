@@ -49,6 +49,12 @@ first plan builds a phase timer before dividing the kernel.
    kernel launches so a candidate with more than one launch per step fails.
    Its benchmark should measure the latency of one full step.
 
+The workloads of the megakernel blog post are tasks of this kind, ready to copy:
+`vibesys example new kernels/megakernels ~/work/megakernels` gives a dense and an
+MoE LLM, two quantized LLMs, a text-to-speech model, a vision-language-action
+model and a world model, each with its check and benchmark
+([`examples/kernels/megakernels`](https://github.com/uw-syfi/vibesys/tree/main/examples/kernels/megakernels)).
+
 ## Start the run
 
 ```text

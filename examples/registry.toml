@@ -58,6 +58,9 @@ path = "examples/database/differential-dataflow"
 path = "examples/database/kv-store"
 
 [[example]]
+path = "examples/kernels/megakernels"
+
+[[example]]
 path = "examples/microservices/repositories/deathstarbench"
 external_repo = true
 

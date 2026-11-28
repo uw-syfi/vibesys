@@ -1,0 +1,31 @@
+{
+  "id": "moe-step-qwen3-30b-a3b-b1-s128",
+  "family": "moe_step",
+  "model": "Qwen/Qwen3-30B-A3B",
+  "phase": "decode",
+  "params": {
+    "batch": 1,
+    "context": 128,
+    "layers": 48,
+    "hidden": 2048,
+    "q_heads": 32,
+    "kv_heads": 4,
+    "head_dim": 128,
+    "experts": 128,
+    "topk": 8,
+    "intermediate": 768,
+    "vocab": 151936
+  },
+  "category": "routed_moe",
+  "suite": "p0",
+  "backend": "cuda",
+  "gpus": 1,
+  "tp": 1,
+  "ep": 1,
+  "max_gpu_launches": 1,
+  "atol": 0.003,
+  "rtol": 0.003,
+  "bf16_rtol": 0.008,
+  "noise_factor": 2.0,
+  "ready": true
+}
