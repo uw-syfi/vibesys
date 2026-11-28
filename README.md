@@ -57,6 +57,9 @@ Then ask your agent to create a task describing your optimization goal and corre
 /vibesys:optimize <task>
 ```
 
+To write a single-launch megakernel for a model step, add `--megakernel-divide-and-conquer` to
+`/vibesys:optimize`; see [Writing Megakernels](docs/megakernel-divide-and-conquer.md).
+
 See the [skills installation guide](skills/README.md#install) for Codex,
 `npx skills`, and domain plugins for databases, microservices, native command-line tools, and kernels.
 
