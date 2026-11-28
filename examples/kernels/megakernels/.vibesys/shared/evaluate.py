@@ -7,7 +7,7 @@ Task ``<workload>-<hw>`` grades the candidate ``<hw>/<workload>/submission.py`` 
 project root on the MegaBench case in ``.vibesys/tasks/<task>/case.json``.
 
 The check passes when the outputs match the PyTorch reference on fresh inputs and the step stays
-within its launch budget. The benchmark reports the step's device-event p50 as
+within its launch budget (on Trainium, one NKI kernel call per rank). The benchmark reports the step's device-event p50 as
 ``kernel_latency_ms``, and only for a candidate that passes both.
 """
 
@@ -24,6 +24,9 @@ os.environ["PYTHONPATH"] = str(HERE)
 sys.path.insert(0, str(HERE))
 
 DEVICE = "cuda:0"  # NVIDIA and ROCm builds of PyTorch both address the GPU as cuda
+# Trainium cases run on their NeuronCores whatever DEVICE says. Their eager TP baseline is slow
+# and the metric does not use it, so neither command times it.
+OPTIONS = {"graph_baseline": False, "neuron_baseline": False}
 
 
 def resolve(task: str) -> tuple[str, Path]:
@@ -67,6 +70,12 @@ def main() -> int:
         default=1,
         help="fresh processes that time the candidate again; 1 keeps the evaluate process's reading",
     )
+    parser.add_argument(
+        "--benchmark-trials",
+        type=int,
+        default=BENCHMARK_SETTINGS["trials"],
+        help="correctness trials before the benchmark times the step",
+    )
     args = parser.parse_args()
     os.environ["MEGABENCH_STABILITY_PROCESSES"] = str(args.stability_processes)
     case_id, submission = resolve(args.task)
@@ -75,13 +84,14 @@ def main() -> int:
         parser.error(f"missing submission: {submission}")
     if args.mode == "accuracy":
         result = evaluate_case(
-            case, submission, device=DEVICE, trials=3, warmup=1, reps=1, graph_baseline=False
+            case, submission, device=DEVICE, trials=3, warmup=1, reps=1, **OPTIONS
         )
         print(json.dumps(summary(case_id, result), default=str))
         return 0 if result.get("status") == "ok_provisional" else 1
     if args.output_json is None:
         parser.error("benchmark needs --output-json")
-    result = evaluate_case(case, submission, device=DEVICE, **BENCHMARK_SETTINGS)
+    settings = BENCHMARK_SETTINGS | OPTIONS | {"trials": args.benchmark_trials}
+    result = evaluate_case(case, submission, device=DEVICE, **settings)
     stabilize(result, case, case_id, submission, None)
     output = summary(case_id, result)
     latency = kernel_latency_ms(result)

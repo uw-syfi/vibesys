@@ -18,6 +18,10 @@ from .cases import Case
 
 DEFAULT_B200_BANDWIDTH_TB_S = 8.0
 DEFAULT_B200_BANDWIDTH_SOURCE = "https://www.nvidia.com/en-eu/data-center/dgx-b200/"
+# One Trainium2 chip (trn2.48xlarge: 46 TB/s over 16 chips). The trn2 TP4
+# cases use the whole chip, so their floor is the case's bytes at this rate.
+DEFAULT_TRN2_BANDWIDTH_TB_S = 2.9
+DEFAULT_TRN2_BANDWIDTH_SOURCE = "https://aws.amazon.com/ec2/instance-types/trn2/"
 BF16_BYTES = 2
 FP32_BYTES = 4
 INT64_BYTES = 8

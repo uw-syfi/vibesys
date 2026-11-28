@@ -409,19 +409,49 @@ CASES: tuple[Case, ...] = (
 )
 
 
-def select_cases(suite: str = "core", ids: list[str] | None = None) -> list[Case]:
+# Trainium2 (trn2.3xlarge): each P0 case on the whole chip, as four ranks on
+# its logical NeuronCores (LNC=2, 24 GiB each). Inputs are split as in
+# tasks/sharding.py and graded against the unchanged single-device reference.
+TRN2_TP4_NOTE = ("Whole Trainium2 chip as four TP ranks (one per logical NeuronCore); "
+                 "graded against the single-device reference.")
+# The P0 MoE case is included although its synthetic 48-layer stack is chaotic (the BF16
+# reference is about 100% off the FP32 oracle on logits at full depth), so its oracle band is
+# wide; the CUDA case is graded with the same gate.
+CASES += tuple(replace(case, id=f"{case.id}-trn2-tp4", backend="neuron", gpus=4, tp=4,
+                       note=TRN2_TP4_NOTE)
+               for case in CASES if case.suite == "p0" and case.ready)
+# The multimodal cases that run on one B200 in the CUDA campaign run on one logical
+# NeuronCore (24 GiB): one rank, unsharded inputs, the same single-device contract.
+TRN2_NC1_CASES = ("tts-frame-step-csm-1b-b1-s128", "vla-action-step-pi05-b1",
+                  "world-frame-step-waypoint15-1b-f128")
+TRN2_NC1_NOTE = ("One logical NeuronCore of a Trainium2 chip (LNC=2, 24 GiB), one rank; "
+                 "graded against the single-device reference.")
+CASES += tuple(replace(case, id=f"{case.id}-trn2-nc1", backend="neuron", gpus=1, tp=1,
+                       note=TRN2_NC1_NOTE)
+               for case in CASES if case.id in TRN2_NC1_CASES)
+
+# "cuda" covers NVIDIA and ROCm devices; "neuron" covers AWS Trainium.
+BACKENDS = ("cuda", "neuron")
+
+
+def select_cases(suite: str = "core", ids: list[str] | None = None,
+                 backend: str = "cuda") -> list[Case]:
+    """Cases by id, or a suite's cases for one backend."""
     by_id = {case.id: case for case in CASES}
     if ids:
         missing = sorted(set(ids) - by_id.keys())
         if missing:
             raise ValueError(f"unknown cases: {', '.join(missing)}")
         return [by_id[id] for id in ids]
+    if backend not in BACKENDS:
+        raise ValueError(f"unknown backend {backend}")
+    cases = [case for case in CASES if case.backend == backend]
     if suite == "all":
-        return list(CASES)
+        return cases
     if suite == "core":
-        return [case for case in CASES if case.ready]
+        return [case for case in cases if case.ready]
     if suite == "planned":
-        return [case for case in CASES if not case.ready]
+        return [case for case in cases if not case.ready]
     if suite in ("p0", "p1", "p2", "p3"):
-        return [case for case in CASES if case.suite == suite]
+        return [case for case in cases if case.suite == suite]
     raise ValueError(f"unknown suite {suite}")
