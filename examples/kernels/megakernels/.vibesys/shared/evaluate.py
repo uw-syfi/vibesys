@@ -23,15 +23,6 @@ PROJECT = HERE.parents[1]  # .vibesys/shared -> the project root
 os.environ["PYTHONPATH"] = str(HERE)
 sys.path.insert(0, str(HERE))
 
-from megabench.cases import select_cases  # noqa: E402
-from megabench.harness.runner import evaluate_case  # noqa: E402
-from megabench.integrations.vibesys_case_evaluator import (  # noqa: E402
-    BENCHMARK_SETTINGS,
-    METRIC,
-    kernel_latency_ms,
-    stabilize,
-)
-
 DEVICE = "cuda:0"  # NVIDIA and ROCm builds of PyTorch both address the GPU as cuda
 
 
@@ -56,6 +47,16 @@ def summary(case_id: str, result: dict) -> dict:
 
 
 def main() -> int:
+    # Imported here, after HERE is on sys.path.
+    from megabench.cases import select_cases
+    from megabench.harness.runner import evaluate_case
+    from megabench.integrations.vibesys_case_evaluator import (
+        BENCHMARK_SETTINGS,
+        METRIC,
+        kernel_latency_ms,
+        stabilize,
+    )
+
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=("accuracy", "benchmark"))
     parser.add_argument("--task", required=True)
