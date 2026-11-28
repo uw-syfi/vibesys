@@ -39,6 +39,14 @@ func ToVerdictBound(field string, b cliv1.VerdictBound) (core.VerdictBound, erro
 	return toEnum(field, verdictBounds, b)
 }
 
+// SigmaSource returns the contract's value for what set a verdict's noise.
+func SigmaSource(s core.SigmaSource) cliv1.SigmaSource { return sigmaSources[s] }
+
+// ToSigmaSource returns the domain source for the contract's value.
+func ToSigmaSource(field string, s cliv1.SigmaSource) (core.SigmaSource, error) {
+	return toEnum(field, sigmaSources, s)
+}
+
 // InconclusiveReason returns the contract's value for a reason.
 func InconclusiveReason(r core.InconclusiveReason) cliv1.InconclusiveReason {
 	return inconclusiveReasons[r]

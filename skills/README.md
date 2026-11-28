@@ -13,6 +13,7 @@ Pick the tool you run. Each reads the same skills.
 | Claude Code | `claude plugin marketplace add uw-syfi/vibesys`, then `claude plugin install <plugin>@vibesys` | `<plugin>:optimize` |
 | Codex | `codex plugin marketplace add uw-syfi/vibesys`, then `codex plugin add <plugin>@vibesys` | `<plugin>:optimize` |
 | Any agent, through [`npx skills`](https://github.com/vercel-labs/skills) | `npx skills add uw-syfi/vibesys/skills --skill '*' --agent <agent>` | `optimize` |
+| opencode | `npx skills` as above, or copy the skill folders side by side into `.opencode/skills/` (or `~/.config/opencode/skills/`) | `optimize` |
 
 Every plugin installs from the one source directory and differs only by the skills it lists:
 
@@ -68,13 +69,14 @@ skill's message checker also needs Python 3.10 or newer. Nothing needs the VibeS
 | --- | --- | --- |
 | Claude Code | supported | supported |
 | Codex | supported | harness mechanisms written from Codex's docs and source; **untested end to end** |
+| opencode | supported | `opencode.md`; smoke-tested end to end (planners, a worker, a judge and a promotion) on opencode 1.19.6 with background subagents, which need `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true` and a long-lived opencode process (`opencode serve` with `opencode run --attach`, or the TUI) |
 | VibeSys orchestrator (Claude Code or Codex agents, spawned through its tools) | supported | `vibesys-orchestrator.md`, selected when `VIBESYS_RUN` is set; **untested end to end** |
 | Other agents (`npx skills`) | supported | needs a harness file for that agent, as described below |
 
 ## Harness neutrality
 
 The search skills are harness-neutral. A harness is the program running the agent loop (Claude
-Code, Codex, ...), not the model. The skills describe abstract capabilities; a skill that
+Code, Codex, opencode, ...), not the model. The skills describe abstract capabilities; a skill that
 needs any carries `references/harness/<harness>.md`, and its `SKILL.md` points there in one
 sentence. Skills with no harness need have no such folder. The plugin packaging
 (`.claude-plugin/`) is Claude Code's delivery format, which Codex and `npx skills` also read, and

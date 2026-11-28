@@ -131,11 +131,18 @@ func (a *App) placeFlow(ctx context.Context, sub core.Submission) (core.Submissi
 //   - In the candidate's image, the command runs in the image built from the commit's [candidate]
 //     dockerfile; a task without [candidate] has none, and is refused.
 //
+// A command that gives no time limit has its task's command_timeout_seconds (task.CommandTimeout),
+// and the daemon's default when the task sets none or was not read.
+//
 // Except beside the candidate's server, the wrapper goes in front of the service when there is one
 // and of the command when not.
 func resolveCommand(c core.CommandSettings, t task.Task, defaultTimeout time.Duration) (core.CommandSettings, error) {
 	invalid := func(format string, args ...any) error {
 		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(format, args...)}
+	}
+	if c.Timeout == 0 {
+		// The task's default for its command jobs, when it has one; zero leaves it to the daemon's.
+		c.Timeout = t.CommandTimeout
 	}
 	cand := t.Candidate
 	c.Candidate = nil

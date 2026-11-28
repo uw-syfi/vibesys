@@ -93,8 +93,35 @@ func verdict(candidate, base *pb.Result) *pb.Verdict {
 		kind = pb.VerdictKind_VERDICT_KIND_BETTER
 	}
 	// The scenarios measure a clear win or loss under a task that declares no floor and no minimum
-	// gain, so, as the daemon says it, the noise test decides.
-	return &pb.Verdict{Kind: kind, CandidateSamples: 5, BaseSamples: 5, CandidateMean: c, BaseMean: b, Ratio: ratio, Noise: noise, DecidedBy: pb.VerdictBound_VERDICT_BOUND_NOISE}
+	// gain, so, as the daemon says it, the noise test decides, its noise rests on the spread the
+	// samples show, and Welch's degrees of freedom pick the Student-t critical number.
+	partC, partB := cv/(5*c*c), bv/(5*b*b)
+	degrees := (partC + partB) * (partC + partB) / (partC*partC/4 + partB*partB/4)
+	critical := studentT975[min(int(math.Floor(degrees+1e-9))-2, len(studentT975)-1)]
+	spread := math.Sqrt((relativeSquares(candidate.GetMeasure().Samples, c) + relativeSquares(base.GetMeasure().Samples, b)) / 8)
+	return &pb.Verdict{
+		Kind: kind, CandidateSamples: 5, BaseSamples: 5, CandidateMean: c, BaseMean: b, Ratio: ratio, Noise: noise,
+		DecidedBy: pb.VerdictBound_VERDICT_BOUND_NOISE, Critical: critical, Threshold: critical * noise,
+		SigmaSource: pb.SigmaSource_SIGMA_SOURCE_OBSERVED_SPREAD, ObservedSpread: spread,
+	}
+}
+
+// studentT975 is the two-sided 95% Student-t quantile from 2 to 30 degrees of freedom, the table
+// the daemon's verdict reads.
+var studentT975 = [...]float64{
+	4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228,
+	2.201, 2.179, 2.160, 2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086,
+	2.080, 2.074, 2.069, 2.064, 2.060, 2.056, 2.052, 2.048, 2.045, 2.042,
+}
+
+// relativeSquares is the sum of the squared relative deviations of samples from their mean.
+func relativeSquares(samples []float64, mean float64) float64 {
+	total := 0.0
+	for _, x := range samples {
+		d := (x - mean) / mean
+		total += d * d
+	}
+	return total
 }
 func (m *model) facts() []*pb.TaskFact {
 	head := &pb.Head{State: &pb.Head_None{None: &pb.NoCurrentResult{Reason: pb.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NO_HEAD}}}

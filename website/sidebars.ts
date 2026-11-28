@@ -26,6 +26,8 @@ const sidebars: SidebarsConfig = {
         'contributing/openevolve',
         'contributing/remote-slurm-execution',
         'contributing/cli-task-environment',
+        'contributing/task-version-adoption',
+        'contributing/host-work-ownership',
         'contributing/issue-authoring',
         'contributing/publishing',
       ],

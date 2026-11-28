@@ -234,6 +234,9 @@ func TestCompareDirectionsMirrorEachOther(t *testing.T) {
 		got := mustCompare(t, flipped)
 		want := verdict
 		want.Kind = mirror[verdict.Kind]
+		// Flipping turns a gain into a loss, and only a gain has a count of samples that would
+		// decide it; TestSamplesToDecideIsTheFewestThatClearTheBar holds that count.
+		got.SamplesToDecide, want.SamplesToDecide = 0, 0
 		if got != want {
 			t.Fatalf("%+v: flipping the direction gave %+v, want %+v", in, got, want)
 		}

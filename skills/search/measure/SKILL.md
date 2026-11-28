@@ -54,6 +54,9 @@ and what to report are in [gpus.md](references/gpus.md).
 Useful flags: `--note "<text>"` says why you ran it (notes are for readers; they change no result), and
 `--service` with `--probe` runs the command against a service the CLI starts and stops (not
 beside a candidate's server, which the CLI already starts).
+A command job is killed, and fails, at its `--timeout`, which defaults to the daemon's limit of 30
+minutes. For anything that may run longer, such as a device profile, set `--timeout` to the job's
+expected length plus a margin (`--timeout 2h`).
 `--no-cache` and `--recheck` force fresh work; only a reason to doubt a saved result justifies
 them. Use the task's own commands through `check` and `measure`; do not rebuild them by hand.
 
@@ -71,7 +74,10 @@ together and the numbers stay clean: a measure job runs alone on its machine (it
 placement alone, or, where each job gets a whole node of its own, its node), while checks and
 command jobs may share a placement up to its `max_jobs`. Do not start a benchmark, a profiler
 or a server in your own shell. Unit tests and in-process microbenchmarks that finish in seconds
-are checks, not load: run them in your worktree.
+are checks, not load: run them in your worktree, but not while `vibesys-cli jobs --state running`
+shows a measure on a placement on this machine. A local `docker run` takes `--rm --init --user
+"$(id -u):$(id -g)"` and a time limit inside the container, never only an outer `timeout`, which
+leaves the container running.
 
 ## Wait
 
@@ -114,6 +120,19 @@ A failed check or build saves nothing; put the failing output in the hand-back, 
   `min_gain` (the smallest gain the task counts as better) and `decided_by`. A `within_noise`
   decided by `VERDICT_BOUND_MIN_GAIN` is a gain the noise test passed that is below the task's
   `min_gain`; it is not a gain, so report it as within the task's bar, not as noise.
+- The verdict also says its bar. `threshold` is the gain the deciding bar stands at: `critical`
+  noises (2 under a declared `relative_noise`) times `noise`, or `min_gain` when `decided_by` names
+  it. `sigma_source` says what set the noise: `SIGMA_SOURCE_DECLARED_FLOOR` (the task's
+  `relative_noise`, at least the spread the runs showed) or `SIGMA_SOURCE_OBSERVED_SPREAD`;
+  `observed_spread` is that spread. For a `within_noise` gain that is positive and above `min_gain`,
+  `samples_to_decide` is how many samples a side would decide it with the same means and sigma
+  (zero: no count would). The text line says the same, e.g. `need gain > 10.67% (2 × noise 5.337%,
+  sigma from declared relative_noise 0.05; observed spread 0.2401%); at this gain about 6 vs 6
+  samples would decide`. Weigh that count against your brief's sample budget before topping up; it
+  is an estimate from the samples so far, not a promise of `better`.
+- A provisional `relative_noise` that is far above the observed spread across several base samples
+  should be raised with the user as a task recalibration (a task edit); agents must not edit it
+  themselves.
 - `vibesys-cli result --json` has the number to report for the result branch, in
   `current.result.measure.value`: the head's latest checked measurement, the one a promotion rests
   on included. It exits 1 when there is none (`none.reason` says why); for `NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED`,

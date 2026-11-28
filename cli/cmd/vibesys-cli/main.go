@@ -89,6 +89,7 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"plan":       planCommand,
 	"bound":      boundCommand,
 	"workstream": workstreamCommand,
+	"export":     exportCommand,
 	"alloc":      allocCommand,
 	"placement":  placementCommand,
 	"task":       taskCommand,
@@ -135,6 +136,9 @@ commands:
                                                  state the best an objective can reach; a revision is
                                                  a new entry, and nothing is replaced
   bound list [--objective <name>]                every declared bound, oldest first, the current one marked
+  export <dir> [--max-log-bytes n] [--outputs]  write the task's plans, jobs, logs, results, bounds and
+                                                 workstreams into a directory, with an index.json; with
+                                                 --run only that run's jobs and plans
   task card <task> [--revision rev | --working-tree | --folder dir]
                                                  print what a client shows of a task: domain,
                                                  hardware, model, objectives and heading
@@ -155,10 +159,11 @@ commands:
 
 Every job and daemon command takes --json, and --repo, --task, --run, --harness, --agent and
 --placement, which default to the environment variables VIBESYS_REPO, VIBESYS_TASK, VIBESYS_RUN,
-VIBESYS_HARNESS, VIBESYS_AGENT and VIBESYS_PLACEMENT. --placement is the one placement of the
-operator config a docker job a submit queues may run on, and other commands ignore it. Unset, a job
-may run on any that gives what the task needs, and the daemon chooses the least loaded when it
-starts.
+VIBESYS_HARNESS, VIBESYS_AGENT and VIBESYS_PLACEMENT. These context flags, with --alloc, may also
+come before the command (vibesys-cli --task kv jobs); every other flag comes after it. --placement
+is the one placement of the operator config a docker job a submit queues may run on, and other
+commands ignore it. Unset, a job may run on any that gives what the task needs, and the daemon
+chooses the least loaded when it starts.
 Exit codes: 0 yes, 1 the answer is no (a job did not succeed, a refusal), 2 invalid input or a
 thing that does not exist, 3 a wait timed out, 4 no answer (no daemon, an internal failure, or an
 answer this build cannot read). The README lists every failure kind and wait outcome.
@@ -182,6 +187,10 @@ func run(args []string, d deps) int {
 		return exitOK
 	}
 	d.jsonErrors = wantsJSON(args)
+	args, err := commandFirst(args, d)
+	if err != nil {
+		return fail(d, d.jsonErrors, err)
+	}
 	command, ok := lookup(args)
 	if !ok {
 		if d.jsonErrors {

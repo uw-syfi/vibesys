@@ -53,6 +53,12 @@ on that SHA. A check of a `wip` commit is not reused by the full commit on top o
 the same tree, and costs a second check. `Plan: NNN` is required on
 a `vibesys-work/<task>/plan-NNN` branch and must match the branch number.
 
+A merge commit on a plan branch, such as an integration merging other plans' branches, is a full
+commit like any other: keep the branch's own `Plan: NNN` and add one more `Plan:` line for each
+plan it brings in. Commit it with `git merge -m` or `git commit`, never around the hook with
+`git commit-tree`. The range check holds only the branch's own commits (its first-parent line) to
+the branch number; commits a merge brought in keep their own `Plan:`.
+
 Check before you finish: `python3 <this skill>/scripts/commit_schema.py check-range <base>..HEAD`.
 Each violation names the commit, the rule and the fix.
 

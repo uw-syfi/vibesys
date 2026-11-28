@@ -43,6 +43,20 @@ const (
 	BoundMinGain VerdictBound = "min_gain"
 )
 
+// SigmaSource is what set the relative variation of one run that a verdict's noise rests on.
+type SigmaSource string
+
+// The sources. The zero value is for a verdict that compared no numbers.
+const (
+	SigmaNone SigmaSource = ""
+	// SigmaDeclaredFloor is the task's declared relative noise, which was at least the observed
+	// spread.
+	SigmaDeclaredFloor SigmaSource = "declared_floor"
+	// SigmaObservedSpread is the spread the runs showed: above the declared relative noise, or the
+	// task declares none.
+	SigmaObservedSpread SigmaSource = "observed_spread"
+)
+
 // Verdict is a pure function of two sample sets, a metric's direction and the task's declared
 // noise floor and minimum gain: the same samples always give the same verdict. Compare in this
 // package decides it.
@@ -64,6 +78,19 @@ type Verdict struct {
 	MinGain float64
 	// DecidedBy is the bar that decided a conclusive verdict, BoundNone for an inconclusive one.
 	DecidedBy VerdictBound
+	// Critical is how many noises a gain had to exceed, zero for an inconclusive verdict.
+	Critical float64
+	// Threshold is the relative gain the bar named by DecidedBy stands at: Critical × Noise for
+	// BoundNoise, MinGain for BoundMinGain. Zero for an inconclusive verdict.
+	Threshold float64
+	// SigmaSource says whether the declared relative noise or the observed spread set the noise.
+	SigmaSource SigmaSource
+	// ObservedSpread is the pooled relative deviation of one run from its own side's mean.
+	ObservedSpread float64
+	// SamplesToDecide is, for a WithinNoise verdict with a positive gain, the fewest samples a side
+	// at which the same means and sigma would read Better; zero when no count would, and for any
+	// other verdict.
+	SamplesToDecide uint32
 }
 
 // Comparison is a verdict with what it compared.

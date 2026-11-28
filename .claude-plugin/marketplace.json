@@ -94,7 +94,7 @@
       "name": "vibesys-kernels-rocm",
       "source": "./skills",
       "description": "Domain skills for correct and fast ROCm kernels, with rocprof analysis, for use with the vibesys optimization loop.",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "strict": false,
       "skills": [
         "./domains/kernel-correctness",

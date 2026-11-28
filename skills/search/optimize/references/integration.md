@@ -64,6 +64,12 @@ A part that states no prediction leaves the integration with none; say so on the
 
 ## The brief, and what you write after
 
+Disjoint files are not enough. Two parts can merge without a conflict while one changes what the
+other's code means: one plan changed what counted as a codec call, which silently broke another
+plan's timing of those calls. Before you dispatch, read each part's diff for what it assumes about
+code another part changes (what a function returns, what a call or counter stands for, a unit, an
+order), and name each such pair in Watch for; the combiner checks each one after the merge.
+
 Dispatch a combiner with the Integrate template of [briefs.md](briefs.md): the parts in order,
 most proven first, so the longest prefix that passes holds the safest work. Budget one measure, the task's
 check size `G` for every check (`--gpus G` on a task with a device pool), and checks for each

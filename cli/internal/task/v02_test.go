@@ -178,6 +178,8 @@ func TestWhatSchema02RefusesIsNamed(t *testing.T) {
 		{"an unknown need", `needs = ["gpu"]`, `needs = ["fpga"]`, "environment.needs"},
 		{"a wrong type", `startup_timeout_seconds = 600`, `startup_timeout_seconds = "600"`, "startup_timeout_seconds"},
 		{"a result protocol other than 2", `result_protocol = 2`, `result_protocol = 1`, "result_protocol"},
+		{"a command timeout past a week", `metric = "tokens_per_second"`, "metric = \"tokens_per_second\"\ncommand_timeout_seconds = 604801", "command_timeout_seconds"},
+		{"a command timeout in a section", `timeout_seconds = 3600`, "timeout_seconds = 3600\ncommand_timeout_seconds = 3600", `"benchmark.command_timeout_seconds"`},
 		{"an unknown key of the retired profile", `timeout_seconds = 900`, "timeout_seconds = 900\nwrap = [\"x\"]", `"profile.wrap"`},
 	}
 	for _, c := range cases {
@@ -192,6 +194,22 @@ func TestWhatSchema02RefusesIsNamed(t *testing.T) {
 				t.Fatalf("got %+v, want it to name %q", f, c.says)
 			}
 		})
+	}
+}
+
+// command_timeout_seconds is the limit of the task's command jobs that set none, any number of
+// seconds up to a week; without it the task leaves the limit to the daemon.
+func TestSchema02ReadsTheCommandJobsTimeout(t *testing.T) {
+	without, err := task.Parse("t", []byte(v02Manifest), []byte(v02Objectives))
+	if err != nil || without.CommandTimeout != 0 {
+		t.Fatalf("without the key: %v, %v; want no timeout", without.CommandTimeout, err)
+	}
+	for _, seconds := range []uint32{1, 59, 3 * 3600, 604800, rand.Uint32N(604800) + 1} {
+		manifest := strings.Replace(v02Manifest, `metric = "tokens_per_second"`, fmt.Sprintf("metric = \"tokens_per_second\"\ncommand_timeout_seconds = %d", seconds), 1)
+		got, err := task.Parse("t", []byte(manifest), []byte(v02Objectives))
+		if err != nil || got.CommandTimeout != time.Duration(seconds)*time.Second {
+			t.Errorf("command_timeout_seconds = %d: %v, %v", seconds, got.CommandTimeout, err)
+		}
 	}
 }
 

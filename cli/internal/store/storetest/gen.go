@@ -241,6 +241,8 @@ func (g *gen) verdict() core.Verdict {
 		Reason:           []core.InconclusiveReason{core.ReasonTooFewSamples, core.ReasonConstantSamples, core.ReasonMetricMismatch, core.ReasonTaskVersionMismatch}[g.pick(4)],
 		CandidateSamples: 1 + g.r.Uint32(), BaseSamples: 1 + g.r.Uint32(), CandidateMean: g.float(), BaseMean: g.float(), Ratio: g.float(), Noise: g.float(),
 		RelativeNoise: g.float(), MinGain: g.float(), DecidedBy: []core.VerdictBound{core.BoundNoise, core.BoundMinGain}[g.pick(2)],
+		Critical: g.float(), Threshold: g.float(), SigmaSource: []core.SigmaSource{core.SigmaDeclaredFloor, core.SigmaObservedSpread}[g.pick(2)],
+		ObservedSpread: g.float(), SamplesToDecide: g.r.Uint32(),
 	}
 }
 

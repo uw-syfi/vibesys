@@ -437,3 +437,14 @@ message JobWait {
   string job_id = 1 [(buf.validate.field).string.min_len = 1];
   WaitReason reason = 2 [(buf.validate.field).required = true];
 }
+
+// SupersededJob is a queued or running measure whose commit has diverged from the task's result
+// branch head: the commit neither contains the head nor is contained in it. Promote refuses a
+// commit that does not contain the head, so the measure's numbers cannot lead to a promotion until
+// the candidate is rebased onto the head and measured again. The daemon derives it from the store
+// and the repository when it lists the jobs; no store keeps it.
+message SupersededJob {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  // The result branch head the job's commit was compared with.
+  string result_head = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}$"];
+}

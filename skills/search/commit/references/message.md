@@ -13,7 +13,7 @@ valid, 1 is violations (printed as `commit: rule: problem Fix: how`), 2 is unusa
 | `blank-after-subject` | One blank line between the first line and the rest. |
 | `body-line-length` | Body and trailer lines are at most 72 characters. Lines with a URL, indented code (4 spaces or a tab) and fenced code are exempt. |
 | `checks-missing`, `checks-value`, `checks-duplicate` | Exactly one `Checks:` trailer, `pass`, `fail` or `not-run`. |
-| `plan-missing`, `plan-mismatch`, `plan-value` | On `vibesys-work/<task>/plan-NNN`, one `Plan: NNN` that equals the branch number. Elsewhere `Plan:` is optional but must be one number. |
+| `plan-missing`, `plan-mismatch`, `plan-value` | On `vibesys-work/<task>/plan-NNN`, a `Plan: NNN` that equals the branch number. A merge adds one `Plan:` line per plan it brings in. Elsewhere `Plan:` is optional. Each `Plan:` is one number. In `check-range`, a commit off the head's first-parent line came in through a merge and is not held to the branch number. |
 | `encoding`, `message-empty` | UTF-8 without NUL bytes, and not empty. |
 
 Trailers follow `git interpret-trailers`: they are the last paragraph, after a blank line, and
@@ -46,6 +46,17 @@ Plan: 007
 
 ```
 wip(scheduler): try batching by prompt length
+```
+
+A merge on the integration branch `vibesys-work/<task>/plan-044`:
+
+```
+feat(integrate): merge plans 38 and 42
+
+Checks: pass
+Plan: 044
+Plan: 038
+Plan: 042
 ```
 
 Bad:

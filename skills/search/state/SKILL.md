@@ -123,3 +123,6 @@ When a plan closes, remove its worktree (`git worktree remove --force <path>`: b
 is not work); keep its branch, and never rewrite measured commits. Before the final report, run
 `git worktree list`: only the repository itself should be listed, and `git status` should show no
 untracked `*.worktrees` directory.
+
+To archive a run for the team, such as in a git repository, run `vibesys-cli export <dir>`; it is
+read-only, `--max-log-bytes n` keeps large logs small, and exporting again changes only what changed.

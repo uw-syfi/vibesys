@@ -22,6 +22,13 @@ Load `vibesys:commit`, `vibesys:measure` and the domain skills the brief names.
 
 ## Work
 
+Before you apply anything, read every part's diff and write down, for each part, what it assumes
+about code another part changes: what a function returns, what a call, counter or unit stands
+for, the order things happen in. A clean merge says nothing about meaning: one plan changed what
+counted as a codec call, which silently broke another plan's timing of those calls. After the
+merge, check each assumption in the merged code, by reading it and by a test that exercises it.
+This holds for an integration too.
+
 1. Apply each candidate's own change in the order given. Its own change is the diff from the
    commit it was built on to the candidate, not from the head:
    `git diff <built-on> <candidate> | git apply --3way`
@@ -35,6 +42,11 @@ Load `vibesys:commit`, `vibesys:measure` and the domain skills the brief names.
    with `vibesys:measure` (`vibesys-cli submit measure <sha> --plan <n>`, the plan
    your brief names) and compare it with the
    result branch head: `vibesys-cli compare <sha> --against <head SHA>`, and with each part.
+
+Never end your turn while a job you submitted is queued or running; a `wait` that times out (exit
+3) is waited on again. Only when the brief says to hand the wait back may you end with it
+unfinished, and then the hand-back names each such job id and what the lead does on each outcome
+(a passed or failed check, `better`, `within_noise` or `worse`).
 
 ## Integrate
 
@@ -65,5 +77,5 @@ a number without the work being done.
 ## Hand back
 
 The commit SHA; each part you applied and each part, or piece of one, you could not apply and
-why; the checks you ran with results; job ids and the `compare` output against the head and
-against the best part; for an integration, the chain and the bisection as integrating.md says. You do not decide whether the result is promoted: the lead does.
+why; each cross-part assumption you listed and how you checked it; the checks you ran with
+results; job ids and the `compare` output against the head and against the best part; for an integration, the chain and the bisection as integrating.md says. You do not decide whether the result is promoted: the lead does.

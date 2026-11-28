@@ -10,6 +10,7 @@ imports no VibeSys package. The schema is Conventional Commits with Git's usual 
 
     Checks: pass|fail|not-run
     Plan: NNN          (required on a vibesys-work/<task>/plan-NNN branch; must match NNN)
+    Plan: MMM          (optional, repeated: a merge also names each plan it brings in)
 
 Types: feat fix perf refactor test docs build chore revert, and ``wip``. A ``wip`` commit is a
 checkpoint: only its first line (``wip: <note>`` or ``wip(<scope>): <note>``) is checked, it needs
@@ -20,7 +21,9 @@ Subcommands:
 * ``check-message FILE [--branch B] [--require-pass]``: check one message file (the commit-msg
   hook calls this; Git's ``#`` comment lines are ignored).
 * ``check-range BASE..HEAD [--branch B] [--repo DIR]``: check every commit in the range. ``wip`` commits only
-  need a valid first line; the head must be a full commit with ``Checks: pass``.
+  need a valid first line; the head must be a full commit with ``Checks: pass``. A commit that
+  came in through a merge (off the head's first-parent line) was made on another branch, so the
+  branch's ``Plan`` rule does not apply to it.
 * ``install-hook --worktree PATH [--worktree PATH ...]``: add the commit-msg hook to those
   worktrees only, chaining to any hook the repository already has. The generated hooks live in
   the repository's Git directory.
@@ -42,7 +45,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Collection, Sequence
     from typing import TextIO
 
 __all__ = [
@@ -330,9 +333,14 @@ def _trailer_violations(
         )
     plans = [t.value for t in message.trailers if t.key == "Plan"]
     wanted = _PLAN_BRANCH.fullmatch(branch or "")
-    if len(plans) > 1 or any(not re.fullmatch(r"[0-9]+", p) for p in plans):
+    if any(not re.fullmatch(r"[0-9]+", p) for p in plans):
         found.append(
-            Violation(commit, "plan-value", "`Plan:` must be one number.", "write `Plan: NNN`.")
+            Violation(
+                commit,
+                "plan-value",
+                "each `Plan:` must be one number.",
+                "write `Plan: NNN`, one trailer per plan.",
+            )
         )
     elif wanted and not plans:
         found.append(
@@ -343,13 +351,14 @@ def _trailer_violations(
                 f"add `Plan: {wanted['number']}`; {where}",
             )
         )
-    elif wanted and int(plans[0]) != int(wanted["number"]):
+    elif wanted and all(int(p) != int(wanted["number"]) for p in plans):
         found.append(
             Violation(
                 commit,
                 "plan-mismatch",
-                f"`Plan: {plans[0]}` does not match branch `{branch}`.",
-                f"write `Plan: {wanted['number']}`.",
+                f"no `Plan:` trailer ({', '.join(plans)}) matches branch `{branch}`.",
+                f"write `Plan: {wanted['number']}`; a merge keeps a `Plan:` line for "
+                "each plan it brings in.",
             )
         )
     return found
@@ -360,7 +369,8 @@ def check_message(
 ) -> list[Violation]:
     """Every violation of ``text`` as a commit message; empty means valid. Never raises.
 
-    ``branch`` enables the ``Plan`` rule on ``vibesys-work/<task>/plan-NNN`` branches.
+    ``branch`` enables the ``Plan`` rule on ``vibesys-work/<task>/plan-NNN`` branches: one of the
+    ``Plan`` trailers must name the branch's plan, and the others name plans a merge brings in.
     ``require_pass`` is the candidate rule: a full commit whose ``Checks`` is ``pass``.
     """
     if "\x00" in text:
@@ -422,18 +432,25 @@ def check_message_bytes(
 
 
 def check_commits(
-    commits: Sequence[tuple[str, bytes]], *, branch: str | None = None
+    commits: Sequence[tuple[str, bytes]],
+    *,
+    branch: str | None = None,
+    inherited: Collection[str] = frozenset(),
 ) -> list[Violation]:
     """Check commits (oldest first, as ``(name, raw message)``); the last is the candidate head.
 
     Earlier commits need a valid message, and a ``wip`` one only a valid first line. The head
-    must be a full commit with ``Checks: pass``.
+    must be a full commit with ``Checks: pass``. The commits named in ``inherited`` were made on
+    other branches and came in through a merge, so ``branch``'s ``Plan`` rule skips them.
     """
     found: list[Violation] = []
     for index, (name, raw) in enumerate(commits):
         found.extend(
             check_message_bytes(
-                raw, commit=name, branch=branch, require_pass=index == len(commits) - 1
+                raw,
+                commit=name,
+                branch=None if name in inherited else branch,
+                require_pass=index == len(commits) - 1,
             )
         )
     return found
@@ -473,6 +490,7 @@ def _check_range(cwd: Path, spec: str, branch: str | None) -> list[Violation]:
     if not listed:
         raise InvalidInputError(f"the range {spec} holds no commits")
     shas = [line.split() for line in listed]
+    own = set(_text(cwd, "rev-list", "--first-parent", spec).split())
     if branch is None:
         branch = (
             head
@@ -485,7 +503,8 @@ def _check_range(cwd: Path, spec: str, branch: str | None) -> list[Violation]:
         if len(parts) == _ONE_PARENT_FIELDS
         or index == len(shas) - 1  # skip merges, but never the head
     ]
-    return check_commits(commits, branch=branch or None)
+    inherited = {parts[0][:12] for parts in shas if parts[0] not in own}
+    return check_commits(commits, branch=branch or None, inherited=inherited)
 
 
 # --- install-hook ------------------------------------------------------------------------------

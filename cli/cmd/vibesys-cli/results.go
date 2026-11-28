@@ -56,30 +56,37 @@ func showCommand(ctx context.Context, d deps, args []string) int {
 			printJSON(d, resp)
 			return exitOK
 		}
-		if len(resp.GetResults()) == 0 {
-			fmt.Fprintf(d.stdout, "no results for %s\n", shortCommit(commit))
-		}
-		uses := map[string]*cliv1.JobGpus{}
-		for _, u := range resp.GetJobGpus() {
-			uses[u.GetJobId()] = u
-		}
-		// A commit's measurements are printed pooled, one line per kind, as compare counts them:
-		// a measure job that topped up an earlier one is part of the same measurement.
-		for _, r := range resp.GetResults() {
-			if r.GetCheck() != nil {
-				fmt.Fprintln(d.stdout, describeResult(r, uses[r.GetJobId()]))
-			}
-		}
-		placed, gpus := map[string]string{}, map[string]string{}
-		for _, r := range resp.GetResults() {
-			placed[r.GetJobId()] = placementOf(r.GetEnvironment())
-			gpus[r.GetJobId()] = describeResultGPUs(r, uses[r.GetJobId()])
-		}
-		for _, m := range resp.GetMeasurements() {
-			fmt.Fprintln(d.stdout, describeMeasurement(m, placed, gpus))
-		}
+		fmt.Fprint(d.stdout, renderShow(resp, commit))
 		return exitOK
 	})
+}
+
+// renderShow is the results saved for a commit as text: each check, then each pooled measurement.
+func renderShow(resp *cliv1.ShowResponse, commit string) string {
+	var b strings.Builder
+	if len(resp.GetResults()) == 0 {
+		fmt.Fprintf(&b, "no results for %s\n", shortCommit(commit))
+	}
+	uses := map[string]*cliv1.JobGpus{}
+	for _, u := range resp.GetJobGpus() {
+		uses[u.GetJobId()] = u
+	}
+	// A commit's measurements are printed pooled, one line per kind, as compare counts them:
+	// a measure job that topped up an earlier one is part of the same measurement.
+	for _, r := range resp.GetResults() {
+		if r.GetCheck() != nil {
+			fmt.Fprintln(&b, describeResult(r, uses[r.GetJobId()]))
+		}
+	}
+	placed, gpus := map[string]string{}, map[string]string{}
+	for _, r := range resp.GetResults() {
+		placed[r.GetJobId()] = placementOf(r.GetEnvironment())
+		gpus[r.GetJobId()] = describeResultGPUs(r, uses[r.GetJobId()])
+	}
+	for _, m := range resp.GetMeasurements() {
+		fmt.Fprintln(&b, describeMeasurement(m, placed, gpus))
+	}
+	return b.String()
 }
 
 // compareCommand is `compare <commit> [--against <commit>]`. Any verdict is a successful answer;
@@ -308,11 +315,61 @@ func describeVerdict(v *cliv1.Verdict) string {
 	if v.GetDecidedBy() == cliv1.VerdictBound_VERDICT_BOUND_MIN_GAIN {
 		b.WriteString(", decided by min_gain")
 	}
+	if bar := describeBar(v); bar != "" {
+		b.WriteString("; " + bar)
+	}
 	if v.GetReason() != cliv1.InconclusiveReason_INCONCLUSIVE_REASON_UNSPECIFIED {
 		fmt.Fprintf(&b, " [%s]", lower("INCONCLUSIVE_REASON_", v.GetReason().String()))
 	}
 	return b.String()
 }
+
+// describeBar is the bar a conclusive verdict was weighed against and what set its noise, and, for
+// a gain within noise that more samples would decide, how many a side. It is empty for a verdict
+// with no bar: an inconclusive one, the overall verdict of several objectives, or one saved before
+// verdicts carried their bar.
+func describeBar(v *cliv1.Verdict) string {
+	if v.GetCritical() == 0 {
+		return ""
+	}
+	noiseBar := v.GetCritical() * v.GetNoise()
+	how := fmt.Sprintf("%s × noise %s%s", number(v.GetCritical()), percent(v.GetNoise()), sigmaText(v))
+	gainBar := fmt.Sprintf("%s (%s)", percent(noiseBar), how)
+	if v.GetMinGain() > noiseBar {
+		gainBar = fmt.Sprintf("min_gain %s (noise bar %s = %s)", percent(v.GetMinGain()), percent(noiseBar), how)
+	}
+	var out string
+	switch v.GetKind() {
+	case cliv1.VerdictKind_VERDICT_KIND_BETTER:
+		out = "cleared gain > " + gainBar
+	case cliv1.VerdictKind_VERDICT_KIND_WORSE:
+		out = fmt.Sprintf("gain below -%s (%s)", percent(noiseBar), how)
+	default:
+		out = "need gain > " + gainBar
+	}
+	if k := v.GetSamplesToDecide(); k != 0 {
+		out += fmt.Sprintf("; at this gain about %d vs %d samples would decide", k, k)
+	}
+	return out
+}
+
+// sigmaText says what set a verdict's noise, after a comma, and nothing for a verdict saved before
+// verdicts said it.
+func sigmaText(v *cliv1.Verdict) string {
+	spread := percent(v.GetObservedSpread())
+	switch {
+	case v.GetSigmaSource() == cliv1.SigmaSource_SIGMA_SOURCE_DECLARED_FLOOR:
+		return fmt.Sprintf(", sigma from declared relative_noise %s; observed spread %s", number(v.GetRelativeNoise()), spread)
+	case v.GetSigmaSource() != cliv1.SigmaSource_SIGMA_SOURCE_OBSERVED_SPREAD:
+		return ""
+	case v.GetRelativeNoise() != 0:
+		return fmt.Sprintf(", sigma from observed spread %s, above declared relative_noise %s", spread, number(v.GetRelativeNoise()))
+	}
+	return fmt.Sprintf(", sigma from each side's observed spread (Welch's t; pooled spread %s)", spread)
+}
+
+// percent is a share as a percentage, rounded as number rounds.
+func percent(share float64) string { return number(100*share) + "%" }
 
 // notComparable are the inconclusive reasons whose verdict holds no numbers, with what to say.
 var notComparable = map[cliv1.InconclusiveReason]string{

@@ -96,7 +96,11 @@ you stop), so a miss costs one worker pass. Fill the Bold fields in
    that are still open or parked, and a tool reads them, so state yours as a number and not only
    in prose: the most the idea could gain, as a share of the headline, from the arithmetic of
    step 2 (the headroom of the part divided by the headline, capped by the system's ceiling).
-   Round up, never down. Set it with `plan edit <n> --gain-bound 5%` (it replaces the old one;
+   Round up, never down. Cite in the body the measured peak or profile number the bound is
+   derived from, with its source (a job id, a saved result, a profile in a plan comment): the
+   lead checks the bound against the latest profile and re-bounds or closes a plan it
+   contradicts, and a bound with no such number cannot be checked.
+   Set it with `plan edit <n> --gain-bound 5%` (it replaces the old one;
    `--gain-bound-of headline` is the default and the only reference). "Unattributed" is not a
    number: bound the idea by the whole system's ceiling, or make its first step the measurement
    and say so. The headline is `vibesys-cli result` (before a first promotion, the base's value

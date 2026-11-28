@@ -190,18 +190,33 @@ func jobsCommand(ctx context.Context, d deps, args []string) int {
 		printJSON(d, resp)
 		return exitOK
 	}
+	fmt.Fprint(d.stdout, renderJobs(resp, callCtx.GetTask()))
+	return exitOK
+}
+
+// renderJobs is a list of jobs as text: each job's line, with why it waits when it is queued and
+// a note when it is a measure that does not contain the result head.
+func renderJobs(resp *cliv1.ListJobsResponse, task string) string {
 	waits := map[string]*cliv1.WaitReason{}
 	for _, w := range resp.GetWaits() {
 		waits[w.GetJobId()] = w.GetReason()
 	}
-	for _, j := range resp.GetJobs() {
-		line := describe(j)
-		if w, ok := waits[j.GetId()]; ok {
-			line += "\n\t  waiting: " + describeWait(w, callCtx.GetTask())
-		}
-		fmt.Fprintln(d.stdout, line)
+	var b strings.Builder
+	superseded := map[string]string{}
+	for _, s := range resp.GetSuperseded() {
+		superseded[s.GetJobId()] = s.GetResultHead()
 	}
-	return exitOK
+	for _, j := range resp.GetJobs() {
+		b.WriteString(describe(j))
+		if w, ok := waits[j.GetId()]; ok {
+			b.WriteString("\n\t  waiting: " + describeWait(w, task))
+		}
+		if head, ok := superseded[j.GetId()]; ok {
+			b.WriteString("\n\t  " + describeSuperseded(head))
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 // jobKindNames maps what a user writes to job kinds. It is read from the contract's enum, so a

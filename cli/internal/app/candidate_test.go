@@ -286,3 +286,38 @@ func TestATaskOfSchema02WithoutACandidateRunsItsCommandsInTheTaskImage(t *testin
 		}
 	}
 }
+
+// A command job that sets no limit has its task's command_timeout_seconds, with the candidate's
+// startup time added beside its server, as for a limit it sets; one that sets a limit keeps it.
+func TestACommandWithoutALimitHasItsTasksDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		candidate bool
+		set, want time.Duration
+	}{
+		{"one image, no limit", false, 0, 3 * time.Hour},
+		{"one image, a limit", false, 10 * time.Minute, 10 * time.Minute},
+		{"beside the server, no limit", true, 0, 3*time.Hour + time.Minute},
+		{"beside the server, a limit", true, 10 * time.Minute, 11 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newTwoImageRig(t)
+			tree := twoImageTask(passes, protocol2Scores)
+			path := task.TasksDir + "/task/" + task.ManifestName
+			manifest := strings.Replace(string(tree[path].Data), `metric = "ops"`, "metric = \"ops\"\ncommand_timeout_seconds = 10800", 1)
+			if !tc.candidate {
+				start, end := strings.Index(manifest, "[candidate]"), strings.Index(manifest, "[accuracy]")
+				manifest = manifest[:start] + manifest[end:]
+			}
+			tree[path] = task.File{Data: []byte(manifest)}
+			r.w.tasks.Put(string(call.Scope.Repository()), commit, tree)
+			job, _ := r.submit(t, core.CommandSettings{Image: core.ImageHarness, Argv: []string{"exit", "0"}, Timeout: tc.set}, false)
+			if job.State != core.JobSucceeded {
+				t.Fatalf("command = %s\n%s", describe(job), logOf(t, r.a, job.ID))
+			}
+			if got := job.Spec.Settings.(core.CommandSettings).Timeout; got != tc.want {
+				t.Fatalf("the job's limit is %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

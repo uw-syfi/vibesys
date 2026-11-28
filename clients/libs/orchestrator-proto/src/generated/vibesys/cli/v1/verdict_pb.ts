@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/verdict.proto.
  */
 export const file_vibesys_cli_v1_verdict: GenFile = /*@__PURE__*/
-  fileDesc("Chx2aWJlc3lzL2NsaS92MS92ZXJkaWN0LnByb3RvEg52aWJlc3lzLmNsaS52MSK+AgoHVmVyZGljdBIpCgRraW5kGAEgASgOMhsudmliZXN5cy5jbGkudjEuVmVyZGljdEtpbmQSMgoGcmVhc29uGAIgASgOMiIudmliZXN5cy5jbGkudjEuSW5jb25jbHVzaXZlUmVhc29uEhkKEWNhbmRpZGF0ZV9zYW1wbGVzGAMgASgNEhQKDGJhc2Vfc2FtcGxlcxgEIAEoDRIWCg5jYW5kaWRhdGVfbWVhbhgFIAEoARIRCgliYXNlX21lYW4YBiABKAESDQoFcmF0aW8YByABKAESDQoFbm9pc2UYCCABKAESFgoOcmVsYXRpdmVfbm9pc2UYCSABKAESEAoIbWluX2dhaW4YCiABKAESMAoKZGVjaWRlZF9ieRgLIAEoDjIcLnZpYmVzeXMuY2xpLnYxLlZlcmRpY3RCb3VuZCJkChBPYmplY3RpdmVWZXJkaWN0EiYKBm1ldHJpYxgBIAEoCzIWLnZpYmVzeXMuY2xpLnYxLk1ldHJpYxIoCgd2ZXJkaWN0GAIgASgLMhcudmliZXN5cy5jbGkudjEuVmVyZGljdCLKAQoKQ29tcGFyaXNvbhIOCgZjb21taXQYASABKAkSDwoHYWdhaW5zdBgCIAEoCRIoCgd2ZXJkaWN0GAMgASgLMhcudmliZXN5cy5jbGkudjEuVmVyZGljdBI7CgtlbnZpcm9ubWVudBgEIAEoCzImLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50RmluZ2VycHJpbnQSNAoKb2JqZWN0aXZlcxgFIAMoCzIgLnZpYmVzeXMuY2xpLnYxLk9iamVjdGl2ZVZlcmRpY3QqtQEKC1ZlcmRpY3RLaW5kEhwKGFZFUkRJQ1RfS0lORF9VTlNQRUNJRklFRBAAEhcKE1ZFUkRJQ1RfS0lORF9CRVRURVIQARIWChJWRVJESUNUX0tJTkRfV09SU0UQAhIdChlWRVJESUNUX0tJTkRfV0lUSElOX05PSVNFEAMSHQoZVkVSRElDVF9LSU5EX0lOQ09OQ0xVU0lWRRAEEhkKFVZFUkRJQ1RfS0lORF9UUkFERU9GRhAFKuQBChJJbmNvbmNsdXNpdmVSZWFzb24SIwofSU5DT05DTFVTSVZFX1JFQVNPTl9VTlNQRUNJRklFRBAAEicKI0lOQ09OQ0xVU0lWRV9SRUFTT05fVE9PX0ZFV19TQU1QTEVTEAESKAokSU5DT05DTFVTSVZFX1JFQVNPTl9DT05TVEFOVF9TQU1QTEVTEAISJwojSU5DT05DTFVTSVZFX1JFQVNPTl9NRVRSSUNfTUlTTUFUQ0gQAxItCilJTkNPTkNMVVNJVkVfUkVBU09OX1RBU0tfVkVSU0lPTl9NSVNNQVRDSBAEKmIKDFZlcmRpY3RCb3VuZBIdChlWRVJESUNUX0JPVU5EX1VOU1BFQ0lGSUVEEAASFwoTVkVSRElDVF9CT1VORF9OT0lTRRABEhoKFlZFUkRJQ1RfQk9VTkRfTUlOX0dBSU4QAkI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_vibesys_cli_v1_environment, file_vibesys_cli_v1_result]);
+  fileDesc("Chx2aWJlc3lzL2NsaS92MS92ZXJkaWN0LnByb3RvEg52aWJlc3lzLmNsaS52MSLKAwoHVmVyZGljdBIpCgRraW5kGAEgASgOMhsudmliZXN5cy5jbGkudjEuVmVyZGljdEtpbmQSMgoGcmVhc29uGAIgASgOMiIudmliZXN5cy5jbGkudjEuSW5jb25jbHVzaXZlUmVhc29uEhkKEWNhbmRpZGF0ZV9zYW1wbGVzGAMgASgNEhQKDGJhc2Vfc2FtcGxlcxgEIAEoDRIWCg5jYW5kaWRhdGVfbWVhbhgFIAEoARIRCgliYXNlX21lYW4YBiABKAESDQoFcmF0aW8YByABKAESDQoFbm9pc2UYCCABKAESFgoOcmVsYXRpdmVfbm9pc2UYCSABKAESEAoIbWluX2dhaW4YCiABKAESMAoKZGVjaWRlZF9ieRgLIAEoDjIcLnZpYmVzeXMuY2xpLnYxLlZlcmRpY3RCb3VuZBIQCghjcml0aWNhbBgMIAEoARIRCgl0aHJlc2hvbGQYDSABKAESMQoMc2lnbWFfc291cmNlGA4gASgOMhsudmliZXN5cy5jbGkudjEuU2lnbWFTb3VyY2USFwoPb2JzZXJ2ZWRfc3ByZWFkGA8gASgBEhkKEXNhbXBsZXNfdG9fZGVjaWRlGBAgASgNImQKEE9iamVjdGl2ZVZlcmRpY3QSJgoGbWV0cmljGAEgASgLMhYudmliZXN5cy5jbGkudjEuTWV0cmljEigKB3ZlcmRpY3QYAiABKAsyFy52aWJlc3lzLmNsaS52MS5WZXJkaWN0IsoBCgpDb21wYXJpc29uEg4KBmNvbW1pdBgBIAEoCRIPCgdhZ2FpbnN0GAIgASgJEigKB3ZlcmRpY3QYAyABKAsyFy52aWJlc3lzLmNsaS52MS5WZXJkaWN0EjsKC2Vudmlyb25tZW50GAQgASgLMiYudmliZXN5cy5jbGkudjEuRW52aXJvbm1lbnRGaW5nZXJwcmludBI0CgpvYmplY3RpdmVzGAUgAygLMiAudmliZXN5cy5jbGkudjEuT2JqZWN0aXZlVmVyZGljdCq1AQoLVmVyZGljdEtpbmQSHAoYVkVSRElDVF9LSU5EX1VOU1BFQ0lGSUVEEAASFwoTVkVSRElDVF9LSU5EX0JFVFRFUhABEhYKElZFUkRJQ1RfS0lORF9XT1JTRRACEh0KGVZFUkRJQ1RfS0lORF9XSVRISU5fTk9JU0UQAxIdChlWRVJESUNUX0tJTkRfSU5DT05DTFVTSVZFEAQSGQoVVkVSRElDVF9LSU5EX1RSQURFT0ZGEAUq5AEKEkluY29uY2x1c2l2ZVJlYXNvbhIjCh9JTkNPTkNMVVNJVkVfUkVBU09OX1VOU1BFQ0lGSUVEEAASJwojSU5DT05DTFVTSVZFX1JFQVNPTl9UT09fRkVXX1NBTVBMRVMQARIoCiRJTkNPTkNMVVNJVkVfUkVBU09OX0NPTlNUQU5UX1NBTVBMRVMQAhInCiNJTkNPTkNMVVNJVkVfUkVBU09OX01FVFJJQ19NSVNNQVRDSBADEi0KKUlOQ09OQ0xVU0lWRV9SRUFTT05fVEFTS19WRVJTSU9OX01JU01BVENIEAQqYgoMVmVyZGljdEJvdW5kEh0KGVZFUkRJQ1RfQk9VTkRfVU5TUEVDSUZJRUQQABIXChNWRVJESUNUX0JPVU5EX05PSVNFEAESGgoWVkVSRElDVF9CT1VORF9NSU5fR0FJThACKm4KC1NpZ21hU291cmNlEhwKGFNJR01BX1NPVVJDRV9VTlNQRUNJRklFRBAAEh8KG1NJR01BX1NPVVJDRV9ERUNMQVJFRF9GTE9PUhABEiAKHFNJR01BX1NPVVJDRV9PQlNFUlZFRF9TUFJFQUQQAkI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_vibesys_cli_v1_environment, file_vibesys_cli_v1_result]);
 
 /**
  * Verdict is a pure function of the two sample sets, the metric's direction and the task's declared
@@ -92,6 +92,49 @@ export type Verdict = Message<"vibesys.cli.v1.Verdict"> & {
    * @generated from field: vibesys.cli.v1.VerdictBound decided_by = 11;
    */
   decidedBy: VerdictBound;
+
+  /**
+   * How many noises a gain had to exceed: 2 under a declared relative_noise, else the Student-t
+   * quantile for the samples' degrees of freedom. Zero for an inconclusive verdict.
+   *
+   * @generated from field: double critical = 12;
+   */
+  critical: number;
+
+  /**
+   * The relative gain the bar that decided the verdict stands at: critical times noise when decided_by
+   * is NOISE, min_gain when it is MIN_GAIN. A better verdict's gain exceeded it, a worse one's fell
+   * below its negative, and a within-noise one's did neither (or, decided by MIN_GAIN, exceeded the
+   * noise bar but not it). Zero for an inconclusive verdict.
+   *
+   * @generated from field: double threshold = 13;
+   */
+  threshold: number;
+
+  /**
+   * What set the noise: the declared relative_noise or the observed spread.
+   *
+   * @generated from field: vibesys.cli.v1.SigmaSource sigma_source = 14;
+   */
+  sigmaSource: SigmaSource;
+
+  /**
+   * The pooled relative deviation of one run from its own side's mean, as the runs showed it: zero
+   * with two runs or fewer in all. It is the sigma when sigma_source is OBSERVED_SPREAD under a
+   * declared relative_noise; without one, Welch's test weighs each side's own spread instead.
+   *
+   * @generated from field: double observed_spread = 15;
+   */
+  observedSpread: number;
+
+  /**
+   * For a within-noise verdict whose gain is positive: the smallest number of samples a side at which
+   * the same means and the same sigma would clear the bar and read better. Zero when no count
+   * would (the gain does not exceed min_gain, or the count does not fit), and for any other verdict.
+   *
+   * @generated from field: uint32 samples_to_decide = 16;
+   */
+  samplesToDecide: number;
 };
 
 /**
@@ -305,4 +348,39 @@ export enum VerdictBound {
  */
 export const VerdictBoundSchema: GenEnum<VerdictBound> = /*@__PURE__*/
   enumDesc(file_vibesys_cli_v1_verdict, 2);
+
+/**
+ * SigmaSource is what set the relative variation of one run that a verdict's noise rests on.
+ *
+ * @generated from enum vibesys.cli.v1.SigmaSource
+ */
+export enum SigmaSource {
+  /**
+   * The verdict is inconclusive for want of comparable numbers, or was saved before verdicts named
+   * their sigma.
+   *
+   * @generated from enum value: SIGMA_SOURCE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The task's declared relative_noise: it was at least the spread the runs showed.
+   *
+   * @generated from enum value: SIGMA_SOURCE_DECLARED_FLOOR = 1;
+   */
+  DECLARED_FLOOR = 1,
+
+  /**
+   * The spread the runs showed: above the declared relative_noise, or the task declares none.
+   *
+   * @generated from enum value: SIGMA_SOURCE_OBSERVED_SPREAD = 2;
+   */
+  OBSERVED_SPREAD = 2,
+}
+
+/**
+ * Describes the enum vibesys.cli.v1.SigmaSource.
+ */
+export const SigmaSourceSchema: GenEnum<SigmaSource> = /*@__PURE__*/
+  enumDesc(file_vibesys_cli_v1_verdict, 3);
 

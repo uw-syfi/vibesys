@@ -74,6 +74,14 @@ commit of yours makes your own queued job's result useless, cancel that job and 
 commit, or, on a placement with a standing allocation, submit it into the allocation. Leave other
 agents' jobs alone ([reading the queue](../measure/references/jobs.md#reading-the-queue)).
 
+Keep the host quiet while a measure runs on it. Before any host-heavy local work (a build, a test
+suite, a container), run `vibesys-cli jobs --state running`: while a measure job runs on a
+placement on this machine, its samples share the CPUs with your shell, so only read and edit
+until it ends. Any local `docker run` takes `--rm --init --user "$(id -u):$(id -g)"` and a time
+limit inside the container (`docker run ... <image> timeout 20m <cmd>`), never only an outer
+`timeout docker run`: that kills the docker client and leaves the container running, and a
+container running as root leaves root-owned files in your worktree.
+
 ## Never
 
 - Edit anything under `.vibesys/`, the task's checker or its benchmark.
@@ -88,9 +96,12 @@ Every turn ends the same way, in this order, and no turn ends any other way:
 
 1. **Measure.** If your brief grants a budget and you have a candidate commit,
    `vibesys-cli submit measure <sha> --plan <n>`, wait for it, and run
-   `vibesys-cli compare <sha>` (`vibesys:measure`). A commit you did not measure is
-   `ready for measurement`, and your handoff says so. Prose about how fast it should be is not a
-   measurement.
+   `vibesys-cli compare <sha>` (`vibesys:measure`). A job you submitted is yours to wait for to
+   the end: a `wait` that times out (exit 3) is waited on again, never left behind. Only when the
+   brief says to hand the wait back do you end the turn with it unfinished; then the handoff names
+   each such job id and what the lead does on each outcome (`better`, `within_noise` or `worse`, a
+   failed job). A commit you did not measure is `ready for measurement`, and your handoff says
+   so. Prose about how fast it should be is not a measurement.
 2. **Hand back**, in the format of [handoff.md](references/handoff.md): claim, commit SHA, job ids,
    the verdict (the `compare` output), what you learned, and the step you would take next. If you
    made no candidate: the blocker and the narrower step.
@@ -100,5 +111,6 @@ Every turn ends the same way, in this order, and no turn ends any other way:
    there is no such tool, the handoff is your final message.
 
 Never end a turn with a prose summary in place of the handoff, with a measurement still to take,
+with a job you submitted still queued or running (unless the brief says to hand the wait back),
 or with the handoff written and not delivered. Before you stop, ask whether step 1 was done or
 excused in the handoff, and whether step 3 was done.

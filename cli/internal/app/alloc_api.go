@@ -284,8 +284,8 @@ func (a *App) jobBound(ctx context.Context, scope core.Scope, spec core.JobSpec)
 	switch s := spec.Settings.(type) {
 	case core.CommandSettings:
 		if s.Image == core.ImageHarness && spec.Environment != core.EnvironmentHost && s.Candidate == nil {
-			// Perhaps not yet through the daemon's flows: beside a candidate's server, the server's
-			// startup time is added to the command's limit.
+			// Perhaps not yet through the daemon's flows: a command that sets no limit has its
+			// task's, and beside a candidate's server, the server's startup time is added to it.
 			t, err := read()
 			if err != nil {
 				return 0, err
