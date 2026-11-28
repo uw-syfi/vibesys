@@ -77,6 +77,7 @@ export interface CatalogueItemGroup {
 const CATEGORY_DOMAIN: Readonly<Record<RegisteredExampleCategory, TaskDomain>> = {
   'data-structures': TaskDomain.DATA_STRUCTURES,
   database: TaskDomain.DATABASES,
+  kernels: TaskDomain.KERNEL_WRITING,
   microservices: TaskDomain.MICROSERVICES,
   'model-serving': TaskDomain.LLM_SERVING,
 };

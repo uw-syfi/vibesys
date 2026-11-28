@@ -285,6 +285,9 @@ extend-exclude = [
     "skills/domains",
     "third_party/serving-repos",
     "examples/model-serving/show-o2-1.5B-HQ/.vibesys/tasks/default/reference/Show-o",
+    # The vendored MegaBench evaluator, kept byte-identical to the harness the published
+    # megakernel runs were graded with.
+    "examples/kernels/megakernels/.vibesys/shared/megabench",
     "examples/microservices/repositories/deathstarbench",
     "examples/microservices/repositories/hotel",
     "examples/microservices/repositories/socialnet",
