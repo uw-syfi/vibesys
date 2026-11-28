@@ -1,0 +1,25 @@
+version = "0.1"
+backends = ["trainium"]
+
+[agent]
+domain = "kernel-writing"
+
+[accuracy]
+command = ["python", "${PROJECT_ROOT}/.vibesys/shared/evaluate.py", "accuracy", "--task", "w4-gemma3-4b-trn2"]
+timeout_seconds = 1800
+
+[benchmark]
+command = ["python", "${PROJECT_ROOT}/.vibesys/shared/evaluate.py", "benchmark", "--task", "w4-gemma3-4b-trn2"]
+timeout_seconds = 2400
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "kernel_latency_ms"
+
+[catalogue]
+domain = "kernel-writing"
+
+[catalogue.hardware]
+accelerator = "AWS Trainium2"
+count = 1
+vendor = "aws"

@@ -1,0 +1,31 @@
+{
+  "id": "quant-step-gemma3-4b-w4-b1-s128-trn2-tp4",
+  "family": "quant_step",
+  "model": "google/gemma-3-4b-it",
+  "phase": "decode",
+  "params": {
+    "batch": 1,
+    "context": 128,
+    "layers": 34,
+    "hidden": 2560,
+    "q_heads": 8,
+    "kv_heads": 4,
+    "head_dim": 256,
+    "intermediate": 10240,
+    "vocab": 262144,
+    "bits": 4,
+    "local_window": 1024
+  },
+  "category": "quantized_llm",
+  "suite": "p0",
+  "backend": "neuron",
+  "gpus": 4,
+  "tp": 4,
+  "ep": 1,
+  "max_gpu_launches": 1,
+  "atol": 0.003,
+  "rtol": 0.003,
+  "bf16_rtol": 0.008,
+  "noise_factor": 2.0,
+  "ready": true
+}

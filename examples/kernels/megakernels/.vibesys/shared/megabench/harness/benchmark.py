@@ -14,20 +14,24 @@ def _measure(fn: Callable, inputs: dict, device: str, warmup: int,
              reps: int) -> dict:
     import torch
 
-    cuda = torch.device(device).type == "cuda"
+    # Device events: CUDA (NVIDIA, ROCm) or torch-neuronx's neuron device. Neuron
+    # event times are reported under the same cuda_event_* keys.
+    kind = torch.device(device).type
+    cuda = kind in ("cuda", "neuron")
+    backend = getattr(torch, kind) if cuda else None
     for _ in range(warmup):
         fn(inputs)
         beat("warmup call")
     if cuda:
-        torch.cuda.synchronize(device)
+        backend.synchronize(device)
     beat("warmup done")
     host_ms: list[float] = []
     event_ms: list[float] = []
     for _ in range(reps):
         if cuda:
-            torch.cuda.synchronize(device)
-            start_event = torch.cuda.Event(enable_timing=True)
-            end_event = torch.cuda.Event(enable_timing=True)
+            backend.synchronize(device)
+            start_event = backend.Event(enable_timing=True)
+            end_event = backend.Event(enable_timing=True)
             start_event.record()
         start = time.perf_counter()
         fn(inputs)

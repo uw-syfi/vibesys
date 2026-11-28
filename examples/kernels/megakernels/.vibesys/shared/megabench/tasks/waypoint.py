@@ -203,6 +203,22 @@ def _attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tenso
     return out.reshape(heads, tokens, d).permute(1, 0, 2)
 
 
+def _fused_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    """``_attention`` through fused SDPA, still with FP32 scores and softmax.
+
+    Used only to build the input history cache (``build_cache``) on CPU, where the Trainium
+    grader builds inputs; CUDA keeps ``_attention``, so B200 fixtures are unchanged. It is
+    3.6x faster and equal to ``_attention`` up to rare one-ulp BF16 differences. The
+    reference and oracle keep ``_attention``.
+    """
+    tokens, heads, d = q.shape
+    group = heads // k.shape[1]
+    qh = q.float().permute(1, 0, 2)
+    kh = k.float().permute(1, 0, 2).repeat_interleave(group, 0)
+    vh = v.float().permute(1, 0, 2).repeat_interleave(group, 0)
+    return F.scaled_dot_product_attention(qh, kh, vh).to(q.dtype).permute(1, 0, 2)
+
+
 def _noise_embedding(w: dict, sigma: float, device) -> torch.Tensor:
     half = NOISE_FOURIER_DIM // 2
     freq = torch.logspace(0, -1, steps=half, base=NOISE_FOURIER_BASE,
@@ -227,7 +243,7 @@ def _patchify(case: Case, w: dict, latent: torch.Tensor) -> torch.Tensor:
 
 def _forward(case: Case, w: dict, latent: torch.Tensor, sigma: float, frame: int,
              ctrl: torch.Tensor, k_cache: torch.Tensor, v_cache: torch.Tensor,
-             *, kv_only: bool = False):
+             *, kv_only: bool = False, attention=_attention):
     """One DiT pass. Returns (velocity or None, k [L,T,Hkv,d], v [L,T,Hkv,d])."""
     p = case.params
     heads, kv_heads, d = p["q_heads"], p["kv_heads"], p["head_dim"]
@@ -257,7 +273,7 @@ def _forward(case: Case, w: dict, latent: torch.Tensor, sigma: float, frame: int
         visible = visible_slots(case, layer, frame)
         keys = torch.cat((k_cache[layer, visible].reshape(-1, kv_heads, d), k))
         values = torch.cat((v_cache[layer, visible].reshape(-1, kv_heads, d), v))
-        attn = _attention(q, keys, values).reshape(tokens, heads * d)
+        attn = attention(q, keys, values).reshape(tokens, heads * d)
         x = (attn @ w["wo"][layer].T) * g0 + x
         if layer in fusion:
             i = fusion[layer]
@@ -348,7 +364,8 @@ def build_cache(case: Case, weights: dict, gen: torch.Generator, device,
     for g in range(frames):
         latent = torch.randn(latent_shape, generator=gen, device=device).to(torch.bfloat16)
         ctrl = _control_embedding(weights | _random_controller(gen, case, device))
-        _, ks, vs = _forward(case, weights, latent, 0.0, g, ctrl, k_cache, v_cache, kv_only=True)
+        _, ks, vs = _forward(case, weights, latent, 0.0, g, ctrl, k_cache, v_cache, kv_only=True,
+                             attention=_fused_attention if latent.device.type == "cpu" else _attention)
         for layer in range(p["layers"]):
             slot = write_slot(case, layer, g)
             if slot is not None:
