@@ -19,7 +19,9 @@ which alone decides whether inputs are unchanged. On resume:
 
 Runs recorded before references (a bare image ID) are reused when the ID is
 still local, else rebuilt as they were built then (without ``BASE_IMAGE``)
-and refused unless the rebuild reproduces the recorded ID.
+and refused unless the rebuild reproduces the recorded ID. A recorded image
+that is neither (a ``--docker-image`` name) is reused while local and refused
+once it is gone: no build can reproduce a name.
 
 Either way the environment runs the image's immutable *ID*, resolved once
 at launch (:meth:`EditorImagePlan.resolve`), never the mutable tag: a later
@@ -37,6 +39,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from vs_agent.api.images import is_image_id
 from vs_runtime._run_environment import (
     DockerEnvironment,
     HostEnvironment,
@@ -123,6 +126,15 @@ class TaskImageError(ValueError):
             f"Docker daemon, and the task image inputs changed since the run started (now "
             f"{current}). The Dockerfile, its build context, or the backend's base image "
             f"differ from {dockerfile} as recorded; restore them, or start a new run."
+        )
+
+    @classmethod
+    def recorded_image_gone(cls, dockerfile: Path, recorded: str) -> TaskImageError:
+        """Describe a resumed run whose recorded image is a name that is no longer local."""
+        return cls(
+            f"cannot resume: the run was recorded with image {recorded}, which is no longer in "
+            f"the local Docker daemon, and the task now declares {dockerfile}, which cannot "
+            f"rebuild that image. Restore {recorded}, or start a new run."
         )
 
     @classmethod
@@ -216,7 +228,8 @@ def editor_image_plan(
 
     Raises :class:`TaskImageError` when the task Dockerfile cannot be honored:
     an environment with no agent container, an explicit image beside it, a
-    resumed run recorded without one, or changed inputs. ``ValueError`` names
+    resumed run recorded without one, changed inputs, or a recorded image name
+    that is no longer local. ``ValueError`` names
     an unknown environment. Nothing is ever silently ignored.
     """
     in_container = runs_agent_in_container(environment)
@@ -245,6 +258,8 @@ def editor_image_plan(
         )
     if changed:
         raise TaskImageError.inputs_changed(task_dockerfile, image, facts.reference)
+    if not facts.recorded_is_reference and not is_image_id(image):
+        raise TaskImageError.recorded_image_gone(task_dockerfile, image)
     notice = (
         f"[environment] the run's task image {image} is no longer in the local Docker daemon; "
         f"rebuilding it from {task_dockerfile}"
