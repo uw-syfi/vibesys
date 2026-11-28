@@ -640,6 +640,17 @@ describe('the Runs operator page', () => {
     screen.unmount();
   });
 
+  it('says exactly one older run in the singular', () => {
+    const cut: FleetHostInput = {
+      ...hostA,
+      data: {...hostA.data, cut: {truncated: true, runsLeftOut: 1}},
+    };
+    const {screen} = open([cut]);
+    expect(screen.text()).toContain('1 older run lacks managed details');
+    expect(screen.text()).not.toContain('1 older runs');
+    screen.unmount();
+  });
+
   it('shows an authoritative omitted match and says whether the bounded search was complete', () => {
     const cut: FleetHostInput = {
       ...hostA,

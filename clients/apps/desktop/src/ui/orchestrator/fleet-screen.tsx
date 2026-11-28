@@ -46,6 +46,7 @@ import {
 import {useDisplayClock} from '../display-clock.js';
 import type {DisplayClock} from '../display-time.js';
 import {hostStatusWord} from '../host-status-words.js';
+import {plural} from '../plain-words.js';
 import {FleetOverviewBar} from './fleet-overview.js';
 import {
   ago,
@@ -845,7 +846,11 @@ export function FleetScreen(props: FleetScreenProps): JSX.Element {
               />
               <HostFilter hosts={view.hosts} host={place.host} go={go} />
               {omitted === 0 ? null : searchedAll === null ? (
-                <Chip label={`${omitted} older runs lack managed details`} tone="warn" dot />
+                <Chip
+                  label={`${omitted} older ${plural(omitted, 'run', 'runs')} ${plural(omitted, 'lacks', 'lack')} managed details`}
+                  tone="warn"
+                  dot
+                />
               ) : (
                 <Chip
                   label={searchedAll.label}
